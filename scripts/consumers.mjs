@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -25,11 +32,16 @@ if (action === "link") {
       console.warn(`Skipping missing consumer: ${consumer}`);
       continue;
     }
-    console.log(`Linking ${consumer}`);
-    const result = spawnSync("pnpm", ["--dir", consumer, "link", commonRoot], {
-      stdio: "inherit",
-    });
-    if (result.status !== 0) process.exit(result.status ?? 1);
+    const packagePath = resolve(consumer, "node_modules/@openma/common");
+    mkdirSync(dirname(packagePath), { recursive: true });
+    if (existsSync(packagePath)) {
+      if (!lstatSync(packagePath).isSymbolicLink()) {
+        throw new Error(`Refusing to replace non-symlink package: ${packagePath}`);
+      }
+      unlinkSync(packagePath);
+    }
+    symlinkSync(commonRoot, packagePath, "dir");
+    console.log(`Linked ${consumer}`);
   }
 } else {
   const possibleLinks = [

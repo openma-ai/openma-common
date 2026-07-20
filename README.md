@@ -48,9 +48,10 @@ pnpm link:consumers
 ```
 
 The helper expects `openma-common`, `openma-desktop`, and `open-managed-agents`
-to be siblings. It changes consumer `node_modules` only; it does not replace
-the committed Git dependency. Run `pnpm unlink:consumers` to remove the local
-symlinks and restore every consumer from its lockfile using the local pnpm cache.
+to be siblings. It swaps only each consumer's `node_modules/@openma/common`
+symlink and never edits a manifest or lockfile. Run `pnpm unlink:consumers` to
+remove the local symlinks and restore every consumer from its lockfile using
+the local pnpm cache.
 
 ## Change lifecycle
 
