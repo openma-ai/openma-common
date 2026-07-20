@@ -1,3 +1,4 @@
+import { latestThoughtSegment, } from "./acp.js";
 function stringField(event, ...names) {
     for (const name of names) {
         const value = event[name];
@@ -258,5 +259,64 @@ export function projectConversationTurns(events, options = {}) {
         }
     }
     return turns.filter((turn) => turn.items.length > 0);
+}
+/** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
+ * The renderer can therefore consume one `TurnRender` whether events came
+ * from a local ACP child or OpenManaged's cloud/local runtime. */
+export function projectCanonicalChatTurns(events, options = {}) {
+    return projectConversationTurns(events, options).map((turn) => {
+        const render = {
+            thoughtText: "",
+            currentThoughtText: "",
+            assistantText: "",
+            tools: [],
+            plan: [],
+            notes: [],
+            timeline: [],
+        };
+        const userParts = [];
+        for (const item of turn.items) {
+            if (item.kind === "message") {
+                if (item.role === "user") {
+                    userParts.push(item.text);
+                    continue;
+                }
+                render.assistantText += item.text;
+                render.timeline.push({ kind: "assistant_text", text: item.text });
+                continue;
+            }
+            if (item.kind === "thinking") {
+                render.thoughtText += item.text;
+                render.timeline.push({ kind: "thought", messageId: item.id, text: item.text });
+                render.currentThoughtText = latestThoughtSegment(render.thoughtText);
+                continue;
+            }
+            if (item.kind === "notice") {
+                render.notes.push(item.message);
+                continue;
+            }
+            const tool = item.tool;
+            const status = tool.status === "running" ? "in_progress" : tool.status;
+            const entry = {
+                toolCallId: tool.id,
+                title: tool.name,
+                toolName: tool.name,
+                status,
+                rawInput: tool.input,
+                rawOutput: tool.output,
+            };
+            render.tools.push(entry);
+            render.timeline.push({ kind: "tool", toolCallId: tool.id });
+        }
+        if (turn.status !== "running")
+            render.currentThoughtText = "";
+        return {
+            id: turn.id,
+            status: turn.status,
+            userText: userParts.join("\n"),
+            render,
+            rawEvents: turn.rawEvents,
+        };
+    });
 }
 //# sourceMappingURL=managed.js.map

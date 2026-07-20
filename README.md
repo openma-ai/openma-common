@@ -11,6 +11,12 @@ to npm.
 - `@openma/common/brand/openma-logo-mark.svg` — canonical OpenMA vector mark.
 - `@openma/common/session-events/managed` — Managed Agents wire-event normalizer and turn projector.
 - `@openma/common/session-events/acp` — ACP event parser and chat-turn reducer.
+- `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
+
+`projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
+model used by Backchat. This is the migration seam for a shared Session GUI;
+the current OpenManaged Console can move to it without changing its API wire
+format.
 
 Adapters keep wire-protocol differences at the boundary. Consumers may add
 product-specific presentation after normalization, but should not fork the
@@ -23,7 +29,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.1.1"
+    "@openma/common": "github:openma-ai/openma-common#v0.2.0"
   }
 }
 ```

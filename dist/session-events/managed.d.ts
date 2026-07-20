@@ -1,3 +1,4 @@
+import { type TurnRender } from "./acp.js";
 export interface WireSessionEvent {
     type: string;
     [key: string]: unknown;
@@ -115,6 +116,13 @@ export interface ConversationTurn {
     items: ConversationItem[];
     rawEvents: WireSessionEvent[];
 }
+export interface CanonicalChatTurn {
+    id: string;
+    status: ConversationTurn["status"];
+    userText: string;
+    render: TurnRender;
+    rawEvents: WireSessionEvent[];
+}
 export declare function eventText(content: unknown): string;
 export declare function eventThreadId(event: WireSessionEvent): string;
 export declare function eventStableId(event: WireSessionEvent, fallback: string): string;
@@ -122,4 +130,10 @@ export declare function normalizeSessionEvent(event: WireSessionEvent): Normaliz
 export declare function projectConversationTurns(events: readonly WireSessionEvent[], options?: {
     threadId?: string;
 }): ConversationTurn[];
+/** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
+ * The renderer can therefore consume one `TurnRender` whether events came
+ * from a local ACP child or OpenManaged's cloud/local runtime. */
+export declare function projectCanonicalChatTurns(events: readonly WireSessionEvent[], options?: {
+    threadId?: string;
+}): CanonicalChatTurn[];
 //# sourceMappingURL=managed.d.ts.map

@@ -1,3 +1,9 @@
+import {
+  latestThoughtSegment,
+  type ToolEntry,
+  type TurnRender,
+} from "./acp.js";
+
 export interface WireSessionEvent {
   type: string;
   [key: string]: unknown;
@@ -58,6 +64,14 @@ export interface ConversationTurn {
   id: string;
   status: "running" | "completed" | "errored" | "terminated";
   items: ConversationItem[];
+  rawEvents: WireSessionEvent[];
+}
+
+export interface CanonicalChatTurn {
+  id: string;
+  status: ConversationTurn["status"];
+  userText: string;
+  render: TurnRender;
   rawEvents: WireSessionEvent[];
 }
 
@@ -325,4 +339,68 @@ export function projectConversationTurns(
   }
 
   return turns.filter((turn) => turn.items.length > 0);
+}
+
+/** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
+ * The renderer can therefore consume one `TurnRender` whether events came
+ * from a local ACP child or OpenManaged's cloud/local runtime. */
+export function projectCanonicalChatTurns(
+  events: readonly WireSessionEvent[],
+  options: { threadId?: string } = {},
+): CanonicalChatTurn[] {
+  return projectConversationTurns(events, options).map((turn) => {
+    const render: TurnRender = {
+      thoughtText: "",
+      currentThoughtText: "",
+      assistantText: "",
+      tools: [],
+      plan: [],
+      notes: [],
+      timeline: [],
+    };
+    const userParts: string[] = [];
+    for (const item of turn.items) {
+      if (item.kind === "message") {
+        if (item.role === "user") {
+          userParts.push(item.text);
+          continue;
+        }
+        render.assistantText += item.text;
+        render.timeline.push({ kind: "assistant_text", text: item.text });
+        continue;
+      }
+      if (item.kind === "thinking") {
+        render.thoughtText += item.text;
+        render.timeline.push({ kind: "thought", messageId: item.id, text: item.text });
+        render.currentThoughtText = latestThoughtSegment(render.thoughtText);
+        continue;
+      }
+      if (item.kind === "notice") {
+        render.notes.push(item.message);
+        continue;
+      }
+
+      const tool = item.tool;
+      const status: ToolEntry["status"] =
+        tool.status === "running" ? "in_progress" : tool.status;
+      const entry: ToolEntry = {
+        toolCallId: tool.id,
+        title: tool.name,
+        toolName: tool.name,
+        status,
+        rawInput: tool.input,
+        rawOutput: tool.output,
+      };
+      render.tools.push(entry);
+      render.timeline.push({ kind: "tool", toolCallId: tool.id });
+    }
+    if (turn.status !== "running") render.currentThoughtText = "";
+    return {
+      id: turn.id,
+      status: turn.status,
+      userText: userParts.join("\n"),
+      render,
+      rawEvents: turn.rawEvents,
+    };
+  });
 }
