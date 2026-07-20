@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,15 +19,38 @@ const consumers = [
   "open-managed-agents/packages/cli",
 ].map((path) => resolve(workspaceRoot, path));
 
-for (const consumer of consumers) {
-  if (!existsSync(resolve(consumer, "package.json"))) {
-    console.warn(`Skipping missing consumer: ${consumer}`);
-    continue;
+if (action === "link") {
+  for (const consumer of consumers) {
+    if (!existsSync(resolve(consumer, "package.json"))) {
+      console.warn(`Skipping missing consumer: ${consumer}`);
+      continue;
+    }
+    console.log(`Linking ${consumer}`);
+    const result = spawnSync("pnpm", ["--dir", consumer, "link", commonRoot], {
+      stdio: "inherit",
+    });
+    if (result.status !== 0) process.exit(result.status ?? 1);
   }
-  const args = action === "link"
-    ? ["--dir", consumer, "link", commonRoot]
-    : ["--dir", consumer, "unlink", "@openma/common"];
-  console.log(`${action === "link" ? "Linking" : "Unlinking"} ${consumer}`);
-  const result = spawnSync("pnpm", args, { stdio: "inherit" });
-  if (result.status !== 0) process.exit(result.status ?? 1);
+} else {
+  const possibleLinks = [
+    resolve(workspaceRoot, "openma-desktop/node_modules/@openma/common"),
+    resolve(workspaceRoot, "open-managed-agents/node_modules/@openma/common"),
+    ...consumers.slice(1).map((consumer) => resolve(consumer, "node_modules/@openma/common")),
+  ];
+  for (const path of possibleLinks) {
+    if (!existsSync(path) || !lstatSync(path).isSymbolicLink()) continue;
+    if (realpathSync(path) === commonRoot) unlinkSync(path);
+  }
+
+  for (const repository of [
+    resolve(workspaceRoot, "openma-desktop"),
+    resolve(workspaceRoot, "open-managed-agents"),
+  ]) {
+    if (!existsSync(resolve(repository, "package.json"))) continue;
+    console.log(`Restoring locked dependencies in ${repository}`);
+    const result = spawnSync("pnpm", ["--dir", repository, "install", "--offline"], {
+      stdio: "inherit",
+    });
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  }
 }

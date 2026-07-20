@@ -49,8 +49,8 @@ pnpm link:consumers
 
 The helper expects `openma-common`, `openma-desktop`, and `open-managed-agents`
 to be siblings. It changes consumer `node_modules` only; it does not replace
-the committed Git dependency. Run `pnpm unlink:consumers` to return every
-consumer to its locked version.
+the committed Git dependency. Run `pnpm unlink:consumers` to remove the local
+symlinks and restore every consumer from its lockfile using the local pnpm cache.
 
 ## Change lifecycle
 
