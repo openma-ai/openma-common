@@ -12,6 +12,8 @@ to npm.
 - `@openma/common/session-events/managed` — Managed Agents wire-event normalizer and turn projector.
 - `@openma/common/session-events/acp` — ACP event parser and chat-turn reducer.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
+- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
+- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
 model used by Backchat. This is the migration seam for a shared Session GUI;
@@ -29,7 +31,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.2.0"
+    "@openma/common": "github:openma-ai/openma-common#v0.3.0"
   }
 }
 ```
@@ -57,7 +59,8 @@ For more control, `pnpm dev` starts only the common watch build;
 `pnpm link:consumers` and `pnpm unlink:consumers` can be run independently.
 The helper expects `openma-common`, `openma-desktop`, and
 `open-managed-agents` to be siblings. It swaps only each consumer's
-`node_modules/@openma/common` symlink and never edits a manifest or lockfile.
+`node_modules/@openma/common` symlink (including the two ACP wrapper packages)
+and never edits a manifest or lockfile.
 
 ## Change lifecycle
 

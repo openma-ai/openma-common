@@ -23,6 +23,8 @@ const workspaceRoot = dirname(commonRoot);
 const statePath = resolve(commonRoot, ".consumer-links.json");
 const consumers = [
   "openma-desktop",
+  "openma-desktop/packages/acp",
+  "open-managed-agents/packages/acp-runtime",
   "open-managed-agents/apps/console",
   "open-managed-agents/apps/web",
   "open-managed-agents/apps/docs",
