@@ -43,13 +43,14 @@ pnpm install
 pnpm build
 pnpm dev
 
-# terminal 2: run this in each consumer package that imports common
-pnpm link /absolute/path/to/openma-common
+# terminal 2: links Desktop and all Managed Agents consumer packages
+pnpm link:consumers
 ```
 
-`pnpm link` changes `node_modules` only; it does not replace the committed Git
-dependency. Run `pnpm unlink @openma/common` in the consumer package to return
-to the locked version.
+The helper expects `openma-common`, `openma-desktop`, and `open-managed-agents`
+to be siblings. It changes consumer `node_modules` only; it does not replace
+the committed Git dependency. Run `pnpm unlink:consumers` to return every
+consumer to its locked version.
 
 ## Change lifecycle
 
