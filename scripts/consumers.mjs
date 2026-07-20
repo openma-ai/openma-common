@@ -1,11 +1,13 @@
-import { spawnSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readFileSync,
+  readlinkSync,
   realpathSync,
   symlinkSync,
   unlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,6 +20,7 @@ if (action !== "link" && action !== "unlink") {
 
 const commonRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const workspaceRoot = dirname(commonRoot);
+const statePath = resolve(commonRoot, ".consumer-links.json");
 const consumers = [
   "openma-desktop",
   "open-managed-agents/apps/console",
@@ -27,6 +30,10 @@ const consumers = [
 ].map((path) => resolve(workspaceRoot, path));
 
 if (action === "link") {
+  if (existsSync(statePath)) {
+    throw new Error("Consumers are already linked; run pnpm unlink:consumers first");
+  }
+  const originalLinks = {};
   for (const consumer of consumers) {
     if (!existsSync(resolve(consumer, "package.json"))) {
       console.warn(`Skipping missing consumer: ${consumer}`);
@@ -34,35 +41,32 @@ if (action === "link") {
     }
     const packagePath = resolve(consumer, "node_modules/@openma/common");
     mkdirSync(dirname(packagePath), { recursive: true });
+    if (!existsSync(packagePath) || !lstatSync(packagePath).isSymbolicLink()) {
+      throw new Error(`Install the locked dependency before linking: ${packagePath}`);
+    }
+    originalLinks[packagePath] = readlinkSync(packagePath);
+  }
+  for (const [packagePath] of Object.entries(originalLinks)) {
+    unlinkSync(packagePath);
+    symlinkSync(commonRoot, packagePath, "dir");
+    console.log(`Linked ${dirname(dirname(dirname(packagePath)))}`);
+  }
+  writeFileSync(statePath, `${JSON.stringify(originalLinks, null, 2)}\n`);
+} else {
+  if (!existsSync(statePath)) {
+    console.log("Consumers are not linked");
+    process.exit(0);
+  }
+  const originalLinks = JSON.parse(readFileSync(statePath, "utf8"));
+  for (const [packagePath, target] of Object.entries(originalLinks)) {
     if (existsSync(packagePath)) {
-      if (!lstatSync(packagePath).isSymbolicLink()) {
-        throw new Error(`Refusing to replace non-symlink package: ${packagePath}`);
+      if (!lstatSync(packagePath).isSymbolicLink() || realpathSync(packagePath) !== commonRoot) {
+        throw new Error(`Refusing to replace an unexpected package: ${packagePath}`);
       }
       unlinkSync(packagePath);
     }
-    symlinkSync(commonRoot, packagePath, "dir");
-    console.log(`Linked ${consumer}`);
+    symlinkSync(target, packagePath, "dir");
+    console.log(`Restored ${dirname(dirname(dirname(packagePath)))}`);
   }
-} else {
-  const possibleLinks = [
-    resolve(workspaceRoot, "openma-desktop/node_modules/@openma/common"),
-    resolve(workspaceRoot, "open-managed-agents/node_modules/@openma/common"),
-    ...consumers.slice(1).map((consumer) => resolve(consumer, "node_modules/@openma/common")),
-  ];
-  for (const path of possibleLinks) {
-    if (!existsSync(path) || !lstatSync(path).isSymbolicLink()) continue;
-    if (realpathSync(path) === commonRoot) unlinkSync(path);
-  }
-
-  for (const repository of [
-    resolve(workspaceRoot, "openma-desktop"),
-    resolve(workspaceRoot, "open-managed-agents"),
-  ]) {
-    if (!existsSync(resolve(repository, "package.json"))) continue;
-    console.log(`Restoring locked dependencies in ${repository}`);
-    const result = spawnSync("pnpm", ["--dir", repository, "install", "--offline"], {
-      stdio: "inherit",
-    });
-    if (result.status !== 0) process.exit(result.status ?? 1);
-  }
+  unlinkSync(statePath);
 }

@@ -1,3 +1,4 @@
 node_modules/
 *.tgz
+.consumer-links.json
 .DS_Store
