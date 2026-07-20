@@ -35,6 +35,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static-assets.mjs",
     "dev": "node scripts/dev.mjs",
+    "dev:consumers": "node scripts/dev-consumers.mjs",
     "link:consumers": "node scripts/consumers.mjs link",
     "unlink:consumers": "node scripts/consumers.mjs unlink",
     "test": "vitest run",

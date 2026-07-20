@@ -34,23 +34,24 @@ move an existing tag; create a new one for every consumer-visible change.
 
 ## Fast local development
 
-No npm or GitHub release is needed while iterating.
+No npm or GitHub release is needed while iterating. From this repository, the
+single-command flow links all consumers, starts the common watch build, and
+restores the original dependencies on exit:
 
 ```bash
-# terminal 1
-cd ../openma-common
 pnpm install
-pnpm build
-pnpm dev
-
-# terminal 2: links Desktop and all Managed Agents consumer packages
-pnpm link:consumers
+pnpm dev:consumers
 ```
 
-The helper expects `openma-common`, `openma-desktop`, and `open-managed-agents`
-to be siblings. It swaps only each consumer's `node_modules/@openma/common`
-symlink and never edits a manifest or lockfile. Run `pnpm unlink:consumers` to
-restore the exact pnpm-store symlinks that were present before linking.
+Run the consumer's normal dev server in another terminal, for example
+`pnpm --dir ../openma-desktop dev` or `pnpm --dir ../open-managed-agents/apps/console dev`.
+Press `Ctrl+C` in the common terminal when finished.
+
+For more control, `pnpm dev` starts only the common watch build;
+`pnpm link:consumers` and `pnpm unlink:consumers` can be run independently.
+The helper expects `openma-common`, `openma-desktop`, and
+`open-managed-agents` to be siblings. It swaps only each consumer's
+`node_modules/@openma/common` symlink and never edits a manifest or lockfile.
 
 ## Change lifecycle
 
