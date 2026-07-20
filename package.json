@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Shared OpenMA brand assets, design tokens, and session event adapters.",
   "repository": {
@@ -38,8 +38,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm test && pnpm typecheck && pnpm build",
-    "prepare": "pnpm build"
+    "verify": "pnpm test && pnpm typecheck && pnpm build"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

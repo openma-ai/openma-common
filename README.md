@@ -23,13 +23,14 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.1.0"
+    "@openma/common": "github:openma-ai/openma-common#v0.1.1"
   }
 }
 ```
 
-The lockfile resolves that tag to an exact commit. Never move an existing tag;
-create a new one for every consumer-visible change.
+The lockfile resolves that tag to an exact commit. Built `dist/` output is
+committed, so consumer installs do not run package lifecycle scripts. Never
+move an existing tag; create a new one for every consumer-visible change.
 
 ## Fast local development
 

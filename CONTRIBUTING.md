@@ -26,9 +26,10 @@ https://agentclientprotocol.com/protocol/v1
 
 1. All common tests, type checks, and builds pass.
 2. Both consumer repositories pass their focused event/theme tests and builds.
-3. `package.json#version` follows semantic versioning.
-4. The release commit is merged to `main`.
-5. Create and push an immutable matching tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-6. Update both consumers from the old Git tag to the new one and commit their lockfiles.
+3. Run `pnpm build` and commit the matching `dist/` output so Git consumers install without scripts.
+4. `package.json#version` follows semantic versioning.
+5. The release commit is merged to `main`.
+6. Create and push an immutable matching tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+7. Update both consumers from the old Git tag to the new one and commit their lockfiles.
 
 The package has `private: true` by design, so accidental npm publication fails.
