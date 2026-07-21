@@ -78,11 +78,11 @@ export interface AcpSession {
   readonly authMethods: readonly schema.AuthMethod[];
   readonly agentInfo: schema.Implementation | null;
   readonly configOptions: readonly schema.SessionConfigOption[];
-  readonly modes: schema.SessionModeState | undefined;
+  readonly modes?: schema.SessionModeState;
   readonly promptCapabilities: schema.PromptCapabilities;
   readonly supportsSessionFork: boolean;
   /** Transcript-like updates produced by session/load, excluded from live prompts. */
-  readonly loadedReplayEvents: readonly AcpSessionEvent[];
+  readonly loadedReplayEvents?: readonly AcpSessionEvent[];
   prompt(
     input: AcpPromptInput,
     opts?: { abortSignal?: AbortSignal },
