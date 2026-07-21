@@ -244,7 +244,9 @@ export class AcpSessionImpl {
                 this.#pushEvent(update);
             },
             requestPermission: async (params) => {
-                this.#pushEvent({ type: "requestPermission", params });
+                if (this.options.emitPermissionEvents) {
+                    this.#pushEvent({ type: "requestPermission", params });
+                }
                 if (!callbacks.requestPermission) {
                     return { outcome: { outcome: "cancelled" } };
                 }

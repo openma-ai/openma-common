@@ -67,6 +67,8 @@ export interface SessionOptions {
   clientCapabilities?: schema.ClientCapabilities;
   /** Retry session open once with the first agent-handled auth method. Defaults to true. */
   autoAuthenticate?: boolean;
+  /** Mirror permission requests into the session event stream. Defaults to false. */
+  emitPermissionEvents?: boolean;
 }
 
 export interface AcpSession {
