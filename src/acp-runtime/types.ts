@@ -86,10 +86,10 @@ export interface AcpSession {
   prompt(
     input: AcpPromptInput,
     opts?: { abortSignal?: AbortSignal },
-  ): AsyncIterable<AcpSessionEvent>;
+  ): AsyncIterable<unknown>;
   /** Compatibility hook for older hosts; ACP tool results are handled through client callbacks. */
   provideToolResult?(toolCallId: string, result: unknown): Promise<void>;
-  drainPendingEvents(): AcpSessionEvent[];
+  drainPendingEvents(): unknown[];
   setConfigOption(
     configId: string,
     value: string | boolean,
