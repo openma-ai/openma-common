@@ -1,4 +1,18 @@
 import type * as schema from "@agentclientprotocol/sdk";
+export type AcpSessionEvent = schema.SessionUpdate | {
+    type: "requestPermission";
+    params: schema.RequestPermissionRequest;
+} | {
+    type: "requestPermissionError";
+    error: string;
+} | {
+    type: "promptComplete";
+    response: schema.PromptResponse;
+} | {
+    type: "promptError";
+    error: string;
+};
+export type AcpPromptInput = string | readonly schema.ContentBlock[];
 export interface AgentSpec {
     command: string;
     args?: string[];
@@ -39,10 +53,16 @@ export interface SessionOptions {
     restart?: RestartPolicy;
     idleTimeoutMs?: number;
     perTurnTimeoutMs?: number;
+    /** Hard cap on initialize/auth/session creation. 0 disables it. */
+    initTimeoutMs?: number;
     resumeAcpSessionId?: string;
     forkFromAcpSessionId?: string;
     mcpServers?: schema.McpServer[];
     clientCallbacks?: ClientCallbacks;
+    /** Extra capabilities a host can advertise in addition to callback-derived ones. */
+    clientCapabilities?: schema.ClientCapabilities;
+    /** Retry session open once with the first agent-handled auth method. Defaults to true. */
+    autoAuthenticate?: boolean;
 }
 export interface AcpSession {
     readonly id: string;
@@ -51,17 +71,20 @@ export interface AcpSession {
     readonly authMethods: readonly schema.AuthMethod[];
     readonly agentInfo: schema.Implementation | null;
     readonly configOptions: readonly schema.SessionConfigOption[];
+    readonly modes: schema.SessionModeState | undefined;
     readonly promptCapabilities: schema.PromptCapabilities;
     readonly supportsSessionFork: boolean;
-    prompt(input: string | readonly schema.ContentBlock[], opts?: {
+    /** Transcript-like updates produced by session/load, excluded from live prompts. */
+    readonly loadedReplayEvents: readonly AcpSessionEvent[];
+    prompt(input: AcpPromptInput, opts?: {
         abortSignal?: AbortSignal;
-    }): AsyncIterable<unknown>;
+    }): AsyncIterable<AcpSessionEvent>;
     /** Compatibility hook for older hosts; ACP tool results are handled through client callbacks. */
     provideToolResult?(toolCallId: string, result: unknown): Promise<void>;
-    drainPendingEvents(): unknown[];
+    drainPendingEvents(): AcpSessionEvent[];
     setConfigOption(configId: string, value: string | boolean): Promise<readonly schema.SessionConfigOption[]>;
     authenticate(methodId: string): Promise<void>;
-    setMode(modeId: string): Promise<void>;
+    setMode(modeId: string): Promise<schema.SessionModeState | undefined>;
     isAlive(): boolean;
     dispose(): Promise<void>;
 }

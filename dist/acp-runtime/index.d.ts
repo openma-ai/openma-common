@@ -1,4 +1,4 @@
-export type { AgentSpec, ChildHandle, Spawner, AcpSession, AcpRuntime, RestartPolicy, SessionOptions, ClientCallbacks, } from "./types.js";
+export type { AgentSpec, ChildHandle, Spawner, AcpSession, AcpRuntime, RestartPolicy, SessionOptions, ClientCallbacks, AcpPromptInput, AcpSessionEvent, } from "./types.js";
 export type { ContentBlock, PromptCapabilities } from "@agentclientprotocol/sdk";
 export { AcpRuntimeImpl } from "./runtime.js";
 export { AcpSessionImpl } from "./session.js";

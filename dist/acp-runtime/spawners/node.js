@@ -1,16 +1,56 @@
 import { spawn as nodeSpawn } from "node:child_process";
+const activeChildren = new Set();
+let cleanupHandlersInstalled = false;
+function killProcessTree(child, signal, detached) {
+    if (child.exitCode !== null || child.signalCode !== null)
+        return;
+    if (detached && child.pid !== undefined) {
+        try {
+            process.kill(-child.pid, signal);
+            return;
+        }
+        catch {
+            // The process may have exited between the state check and kill(2).
+        }
+    }
+    child.kill(signal);
+}
+function cleanupActiveChildren(signal = "SIGTERM") {
+    for (const managed of activeChildren) {
+        killProcessTree(managed.child, signal, managed.detached);
+    }
+}
+function installProcessCleanupHandlers() {
+    if (cleanupHandlersInstalled)
+        return;
+    cleanupHandlersInstalled = true;
+    process.once("exit", () => cleanupActiveChildren());
+    for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
+        const handler = () => {
+            cleanupActiveChildren();
+            if (process.listenerCount(signal) === 1) {
+                process.off(signal, handler);
+                process.kill(process.pid, signal);
+            }
+        };
+        process.on(signal, handler);
+    }
+}
 export class NodeSpawner {
     async spawn(spec) {
+        installProcessCleanupHandlers();
         const merged = { ...process.env, ...(spec.env ?? {}) };
         const env = {};
         for (const [key, value] of Object.entries(merged)) {
             if (typeof value === "string")
                 env[key] = value;
         }
+        const detached = process.platform !== "win32";
         const child = nodeSpawn(spec.command, spec.args ?? [], {
             env,
             cwd: spec.cwd,
             stdio: ["pipe", "pipe", "pipe"],
+            detached,
         });
         if (spec.onDiagnosticLine) {
             let buffer = "";
@@ -39,14 +79,17 @@ export class NodeSpawner {
             child.once("close", settle);
             child.once("error", () => settle(null, null));
         });
+        const managed = { child, detached };
+        activeChildren.add(managed);
+        void exited.finally(() => activeChildren.delete(managed));
         const kill = async (signal = "SIGTERM") => {
             if (child.exitCode !== null || child.signalCode !== null)
                 return;
-            child.kill(signal);
+            killProcessTree(child, signal, detached);
             if (await waitForChildExit(exited, 2_000))
                 return;
             if (signal !== "SIGKILL") {
-                child.kill("SIGKILL");
+                killProcessTree(child, "SIGKILL", detached);
                 await waitForChildExit(exited, 2_000);
             }
         };

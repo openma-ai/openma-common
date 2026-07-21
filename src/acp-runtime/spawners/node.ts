@@ -2,17 +2,69 @@ import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from "node:ch
 import { Readable, Writable } from "node:stream";
 import type { AgentSpec, ChildHandle, Spawner } from "../types.js";
 
+interface ManagedChild {
+  child: ChildProcessWithoutNullStreams;
+  detached: boolean;
+}
+
+type ShutdownSignal = "SIGHUP" | "SIGINT" | "SIGTERM";
+
+const activeChildren = new Set<ManagedChild>();
+let cleanupHandlersInstalled = false;
+
+function killProcessTree(
+  child: ChildProcessWithoutNullStreams,
+  signal: "SIGTERM" | "SIGKILL",
+  detached: boolean,
+): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (detached && child.pid !== undefined) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // The process may have exited between the state check and kill(2).
+    }
+  }
+  child.kill(signal);
+}
+
+function cleanupActiveChildren(signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): void {
+  for (const managed of activeChildren) {
+    killProcessTree(managed.child, signal, managed.detached);
+  }
+}
+
+function installProcessCleanupHandlers(): void {
+  if (cleanupHandlersInstalled) return;
+  cleanupHandlersInstalled = true;
+  process.once("exit", () => cleanupActiveChildren());
+  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] satisfies ShutdownSignal[]) {
+    const handler = () => {
+      cleanupActiveChildren();
+      if (process.listenerCount(signal) === 1) {
+        process.off(signal, handler);
+        process.kill(process.pid, signal);
+      }
+    };
+    process.on(signal, handler);
+  }
+}
+
 export class NodeSpawner implements Spawner {
   async spawn(spec: AgentSpec): Promise<ChildHandle> {
+    installProcessCleanupHandlers();
     const merged = { ...process.env, ...(spec.env ?? {}) };
     const env: NodeJS.ProcessEnv = {};
     for (const [key, value] of Object.entries(merged)) {
       if (typeof value === "string") env[key] = value;
     }
+    const detached = process.platform !== "win32";
     const child: ChildProcessWithoutNullStreams = nodeSpawn(spec.command, spec.args ?? [], {
       env,
       cwd: spec.cwd,
       stdio: ["pipe", "pipe", "pipe"],
+      detached,
     });
 
     if (spec.onDiagnosticLine) {
@@ -40,13 +92,16 @@ export class NodeSpawner implements Spawner {
       child.once("close", settle);
       child.once("error", () => settle(null, null));
     });
+    const managed: ManagedChild = { child, detached };
+    activeChildren.add(managed);
+    void exited.finally(() => activeChildren.delete(managed));
 
     const kill = async (signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): Promise<void> => {
       if (child.exitCode !== null || child.signalCode !== null) return;
-      child.kill(signal);
+      killProcessTree(child, signal, detached);
       if (await waitForChildExit(exited, 2_000)) return;
       if (signal !== "SIGKILL") {
-        child.kill("SIGKILL");
+        killProcessTree(child, "SIGKILL", detached);
         await waitForChildExit(exited, 2_000);
       }
     };

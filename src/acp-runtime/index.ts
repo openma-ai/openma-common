@@ -7,6 +7,8 @@ export type {
   RestartPolicy,
   SessionOptions,
   ClientCallbacks,
+  AcpPromptInput,
+  AcpSessionEvent,
 } from "./types.js";
 export type { ContentBlock, PromptCapabilities } from "@agentclientprotocol/sdk";
 export { AcpRuntimeImpl } from "./runtime.js";

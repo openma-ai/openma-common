@@ -12,7 +12,7 @@ to npm.
 - `@openma/common/session-events/managed` — Managed Agents wire-event normalizer and turn projector.
 - `@openma/common/session-events/acp` — ACP event parser and chat-turn reducer.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
-- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
+- `@openma/common/acp-runtime` — shared ACP session/runtime implementation, including resume/load replay isolation, graceful close, auth retry, and bounded initialization.
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
 - `@openma/common/session-ui` — shared Session turn frame and status semantics with product-specific content slots.
 
@@ -32,7 +32,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.4.0"
+    "@openma/common": "github:openma-ai/openma-common#v0.5.0"
   }
 }
 ```

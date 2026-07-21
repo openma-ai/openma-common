@@ -1,5 +1,6 @@
+import { type SessionModeState } from "@agentclientprotocol/sdk";
 import type * as schema from "@agentclientprotocol/sdk";
-import type { AcpSession, ChildHandle, SessionOptions } from "./types.js";
+import type { AcpPromptInput, AcpSession, AcpSessionEvent, ChildHandle, SessionOptions } from "./types.js";
 export interface AcpSessionConstructOptions {
     child: ChildHandle;
     options: SessionOptions;
@@ -14,17 +15,19 @@ export declare class AcpSessionImpl implements AcpSession {
     get authMethods(): readonly schema.AuthMethod[];
     get agentInfo(): schema.Implementation | null;
     get configOptions(): readonly schema.SessionConfigOption[];
+    get modes(): schema.SessionModeState | undefined;
     get promptCapabilities(): schema.PromptCapabilities;
     get supportsSessionFork(): boolean;
+    get loadedReplayEvents(): readonly AcpSessionEvent[];
     init(): Promise<void>;
     authenticate(methodId: string): Promise<void>;
-    setMode(modeId: string): Promise<void>;
+    setMode(modeId: string): Promise<SessionModeState | undefined>;
     setConfigOption(configId: string, value: string | boolean): Promise<readonly schema.SessionConfigOption[]>;
-    prompt(input: string | readonly schema.ContentBlock[], options?: {
+    prompt(input: AcpPromptInput, options?: {
         abortSignal?: AbortSignal;
-    }): AsyncIterable<unknown>;
+    }): AsyncIterable<AcpSessionEvent>;
     provideToolResult(toolCallId: string, result: unknown): Promise<void>;
-    drainPendingEvents(): unknown[];
+    drainPendingEvents(): AcpSessionEvent[];
     isAlive(): boolean;
     dispose(): Promise<void>;
 }
