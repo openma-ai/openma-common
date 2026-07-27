@@ -578,7 +578,13 @@ export function mergeStreamingText(accumulated: string, incoming: string): strin
   if (!incoming) return accumulated;
   if (incoming === accumulated) return accumulated;
   if (incoming.startsWith(accumulated)) return incoming;
-  if (accumulated.endsWith(incoming)) return accumulated;
+  // ACP message chunks are deltas. A short incoming chunk may legitimately
+  // repeat the final character(s) of the accumulated text (for example the
+  // second "3" in a UUID ending in "4233"). Only treat a suffix as an
+  // already-applied snapshot when it is long enough to be meaningful.
+  if (incoming.length >= MIN_OVERLAP && accumulated.endsWith(incoming)) {
+    return accumulated;
+  }
   if (incoming.length >= accumulated.length) {
     const head = Math.min(SNAPSHOT_HEAD_PROBE, accumulated.length);
     if (head > 0 && incoming.slice(0, head) === accumulated.slice(0, head)) {

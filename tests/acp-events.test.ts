@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAcpEvent, reduceTurn, sanitizeThoughtText } from "../src/session-events/acp.js";
+import {
+  mergeStreamingText,
+  parseAcpEvent,
+  reduceTurn,
+  sanitizeThoughtText,
+} from "../src/session-events/acp.js";
 
 const render = (...payloads: unknown[]) => reduceTurn(payloads.map((payload) => ({ payload })));
 
@@ -77,5 +82,24 @@ describe("ACP event adapter", () => {
       sessionUpdate: "agent_thought_chunk",
       content: { type: "text", text: "<!-- -->" },
     }).thoughtText).toBe("");
+  });
+
+  it("preserves repeated short delta chunks", () => {
+    expect(mergeStreamingText("/project-423", "3")).toBe("/project-4233");
+    expect(mergeStreamingText("path/", "/")).toBe("path//");
+    expect(mergeStreamingText("dash-", "-")).toBe("dash--");
+
+    expect(render(
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "m1",
+        content: { type: "text", text: "/project-423" },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "m1",
+        content: { type: "text", text: "3" },
+      },
+    ).assistantText).toBe("/project-4233");
   });
 });
