@@ -60,6 +60,19 @@ function legacyModelConfigOption(state) {
 function isLegacyModelConfigOption(option) {
     return option._meta?.[LEGACY_MODEL_META_KEY] === true;
 }
+export function sessionConfigOptionsFromResponse(value) {
+    const responseConfigOptions = value && typeof value === "object"
+        ? value.configOptions
+        : undefined;
+    const configOptions = Array.isArray(responseConfigOptions)
+        ? responseConfigOptions.map((option) => structuredClone(option))
+        : [];
+    const legacyModels = legacyModelStateFromResponse(value);
+    if (legacyModels && !configOptions.some(isModelConfigOption)) {
+        configOptions.push(legacyModelConfigOption(legacyModels));
+    }
+    return configOptions;
+}
 function sessionUpdateKind(update) {
     if (!update || typeof update !== "object")
         return null;
@@ -481,14 +494,10 @@ export class AcpSessionImpl {
             this.#waiters.shift()?.();
     }
     #setSessionStateFromResponse(value) {
-        if (Array.isArray(value?.configOptions))
-            this.#configOptions = value.configOptions;
-        const legacyModels = legacyModelStateFromResponse(value);
-        if (legacyModels && !this.#configOptions.some(isModelConfigOption)) {
-            this.#configOptions = [
-                ...this.#configOptions,
-                legacyModelConfigOption(legacyModels),
-            ];
+        const hasConfigOptions = Array.isArray(value?.configOptions);
+        const hasLegacyModels = legacyModelStateFromResponse(value) !== null;
+        if (hasConfigOptions || hasLegacyModels) {
+            this.#configOptions = sessionConfigOptionsFromResponse(value);
         }
         if (value?.modes)
             this.#modes = structuredClone(value.modes);

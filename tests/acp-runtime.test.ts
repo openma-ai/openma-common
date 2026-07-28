@@ -8,10 +8,37 @@ import {
 } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
 import { AcpRuntimeImpl } from "../src/acp-runtime/runtime.js";
-import { AcpSessionImpl } from "../src/acp-runtime/session.js";
+import {
+  AcpSessionImpl,
+  sessionConfigOptionsFromResponse,
+} from "../src/acp-runtime/session.js";
 import type { ChildHandle, Spawner } from "../src/acp-runtime/types.js";
 
 describe("shared ACP session runtime", () => {
+  it("prefers standard model config over legacy model state", () => {
+    expect(sessionConfigOptionsFromResponse({
+      configOptions: [{
+        id: "model-picker",
+        name: "Model",
+        category: "model",
+        type: "select",
+        options: [{ value: "modern", name: "Modern" }],
+        currentValue: "modern",
+      }],
+      models: {
+        currentModelId: "legacy",
+        availableModels: [{ modelId: "legacy", name: "Legacy" }],
+      },
+    })).toEqual([{
+      id: "model-picker",
+      name: "Model",
+      category: "model",
+      type: "select",
+      options: [{ value: "modern", name: "Modern" }],
+      currentValue: "modern",
+    }]);
+  });
+
   it("uses the ACP session lifecycle and streams only the active prompt", async () => {
     const harness = createHarness((conn) => ({
       async initialize() {

@@ -1,4 +1,4 @@
-import { type SessionModeState } from "@agentclientprotocol/sdk";
+import { type SessionConfigOption, type SessionModeState } from "@agentclientprotocol/sdk";
 import type * as schema from "@agentclientprotocol/sdk";
 import type { AcpPromptInput, AcpSession, AcpSessionEvent, ChildHandle, SessionOptions } from "./types.js";
 export interface AcpSessionConstructOptions {
@@ -6,6 +6,7 @@ export interface AcpSessionConstructOptions {
     options: SessionOptions;
     id: string;
 }
+export declare function sessionConfigOptionsFromResponse(value: unknown): SessionConfigOption[];
 export declare class AcpSessionImpl implements AcpSession {
     #private;
     readonly id: string;
