@@ -138,6 +138,79 @@ describe("shared ACP session runtime", () => {
     await session.dispose();
   });
 
+  it("adapts legacy ACP model state into a real model config option", async () => {
+    const setModelCalls: Array<Record<string, unknown>> = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return { protocolVersion: PROTOCOL_VERSION };
+      },
+      async newSession() {
+        return {
+          sessionId: "legacy-model-session",
+          models: {
+            currentModelId: "gemini-2.5-pro",
+            availableModels: [
+              {
+                modelId: "gemini-2.5-pro",
+                name: "Gemini 2.5 Pro",
+                description: "Best quality",
+              },
+              { modelId: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+            ],
+          },
+        };
+      },
+      async extMethod(method, params) {
+        expect(method).toBe("session/set_model");
+        setModelCalls.push(params);
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "shared-legacy-model-session",
+      options: { agent: { command: "fake-agent" } },
+    });
+
+    await session.init();
+
+    expect(session.configOptions).toEqual([
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "gemini-2.5-pro",
+        options: [
+          {
+            value: "gemini-2.5-pro",
+            name: "Gemini 2.5 Pro",
+            description: "Best quality",
+          },
+          { value: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+        ],
+        _meta: { "openma.dev/legacy-model-state": true },
+      },
+    ]);
+
+    await session.setConfigOption("model", "gemini-2.5-flash");
+
+    expect(setModelCalls).toEqual([
+      { sessionId: "legacy-model-session", modelId: "gemini-2.5-flash" },
+    ]);
+    expect(session.configOptions[0]).toEqual(
+      expect.objectContaining({ currentValue: "gemini-2.5-flash" }),
+    );
+    await session.dispose();
+  });
+
   it("authenticates and retries an agent-handled session open challenge", async () => {
     const calls: string[] = [];
     let authenticated = false;

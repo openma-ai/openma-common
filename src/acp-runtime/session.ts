@@ -39,6 +39,70 @@ const LOAD_REPLAY_QUIET_MS = 30;
 const LOAD_REPLAY_MAX_SETTLE_MS = 300;
 const SESSION_CLOSE_TIMEOUT_MS = 1_000;
 const ACP_AUTH_REQUIRED_CODE = -32000;
+const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
+
+interface LegacyModelInfo {
+  modelId: string;
+  name: string;
+  description?: string;
+}
+
+interface LegacyModelState {
+  currentModelId: string;
+  availableModels: LegacyModelInfo[];
+}
+
+function legacyModelStateFromResponse(value: unknown): LegacyModelState | null {
+  if (!value || typeof value !== "object") return null;
+  const models = (value as { models?: unknown }).models;
+  if (!models || typeof models !== "object") return null;
+  const currentModelId = (models as { currentModelId?: unknown }).currentModelId;
+  const availableModels = (models as { availableModels?: unknown }).availableModels;
+  if (typeof currentModelId !== "string" || !Array.isArray(availableModels)) return null;
+
+  const normalized = availableModels.flatMap((model): LegacyModelInfo[] => {
+    if (!model || typeof model !== "object") return [];
+    const candidate = model as {
+      modelId?: unknown;
+      name?: unknown;
+      description?: unknown;
+    };
+    if (typeof candidate.modelId !== "string" || typeof candidate.name !== "string") return [];
+    return [{
+      modelId: candidate.modelId,
+      name: candidate.name,
+      ...(typeof candidate.description === "string"
+        ? { description: candidate.description }
+        : {}),
+    }];
+  });
+  if (normalized.length === 0) return null;
+  return { currentModelId, availableModels: normalized };
+}
+
+function isModelConfigOption(option: SessionConfigOption): boolean {
+  return option.category === "model" || option.id === "model";
+}
+
+function legacyModelConfigOption(state: LegacyModelState): SessionConfigOption {
+  return {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: state.currentModelId,
+    options: state.availableModels.map((model) => ({
+      value: model.modelId,
+      name: model.name,
+      ...(model.description ? { description: model.description } : {}),
+    })),
+    _meta: { [LEGACY_MODEL_META_KEY]: true },
+  };
+}
+
+function isLegacyModelConfigOption(option: SessionConfigOption): boolean {
+  return option._meta?.[LEGACY_MODEL_META_KEY] === true;
+}
 
 function sessionUpdateKind(update: unknown): string | null {
   if (!update || typeof update !== "object") return null;
@@ -375,6 +439,26 @@ export class AcpSessionImpl implements AcpSession {
     value: string | boolean,
   ): Promise<readonly schema.SessionConfigOption[]> {
     if (!this.#agent || !this.#sessionId) throw new Error("AcpSession not initialized");
+    const legacyModelOption = this.#configOptions.find(
+      (option) => option.id === configId && isLegacyModelConfigOption(option),
+    );
+    if (legacyModelOption) {
+      if (typeof value !== "string") {
+        throw new Error("Legacy ACP model selection requires a string model id");
+      }
+      if (!this.#agent.extMethod) {
+        throw new Error("ACP agent does not support legacy model selection");
+      }
+      await this.#agent.extMethod("session/set_model", {
+        sessionId: this.#sessionId,
+        modelId: value,
+      });
+      this.#configOptions = this.#configOptions.map((option) => {
+        if (option !== legacyModelOption || option.type !== "select") return option;
+        return { ...option, currentValue: value };
+      });
+      return this.#configOptions;
+    }
     if (!this.#agent.setSessionConfigOption) {
       throw new Error("ACP agent does not support session config options");
     }
@@ -513,6 +597,13 @@ export class AcpSessionImpl implements AcpSession {
       | undefined,
   ): void {
     if (Array.isArray(value?.configOptions)) this.#configOptions = value.configOptions;
+    const legacyModels = legacyModelStateFromResponse(value);
+    if (legacyModels && !this.#configOptions.some(isModelConfigOption)) {
+      this.#configOptions = [
+        ...this.#configOptions,
+        legacyModelConfigOption(legacyModels),
+      ];
+    }
     if (value?.modes) this.#modes = structuredClone(value.modes);
   }
 

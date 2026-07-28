@@ -10,6 +10,56 @@ const LOAD_REPLAY_QUIET_MS = 30;
 const LOAD_REPLAY_MAX_SETTLE_MS = 300;
 const SESSION_CLOSE_TIMEOUT_MS = 1_000;
 const ACP_AUTH_REQUIRED_CODE = -32000;
+const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
+function legacyModelStateFromResponse(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const models = value.models;
+    if (!models || typeof models !== "object")
+        return null;
+    const currentModelId = models.currentModelId;
+    const availableModels = models.availableModels;
+    if (typeof currentModelId !== "string" || !Array.isArray(availableModels))
+        return null;
+    const normalized = availableModels.flatMap((model) => {
+        if (!model || typeof model !== "object")
+            return [];
+        const candidate = model;
+        if (typeof candidate.modelId !== "string" || typeof candidate.name !== "string")
+            return [];
+        return [{
+                modelId: candidate.modelId,
+                name: candidate.name,
+                ...(typeof candidate.description === "string"
+                    ? { description: candidate.description }
+                    : {}),
+            }];
+    });
+    if (normalized.length === 0)
+        return null;
+    return { currentModelId, availableModels: normalized };
+}
+function isModelConfigOption(option) {
+    return option.category === "model" || option.id === "model";
+}
+function legacyModelConfigOption(state) {
+    return {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: state.currentModelId,
+        options: state.availableModels.map((model) => ({
+            value: model.modelId,
+            name: model.name,
+            ...(model.description ? { description: model.description } : {}),
+        })),
+        _meta: { [LEGACY_MODEL_META_KEY]: true },
+    };
+}
+function isLegacyModelConfigOption(option) {
+    return option._meta?.[LEGACY_MODEL_META_KEY] === true;
+}
 function sessionUpdateKind(update) {
     if (!update || typeof update !== "object")
         return null;
@@ -306,6 +356,25 @@ export class AcpSessionImpl {
     async setConfigOption(configId, value) {
         if (!this.#agent || !this.#sessionId)
             throw new Error("AcpSession not initialized");
+        const legacyModelOption = this.#configOptions.find((option) => option.id === configId && isLegacyModelConfigOption(option));
+        if (legacyModelOption) {
+            if (typeof value !== "string") {
+                throw new Error("Legacy ACP model selection requires a string model id");
+            }
+            if (!this.#agent.extMethod) {
+                throw new Error("ACP agent does not support legacy model selection");
+            }
+            await this.#agent.extMethod("session/set_model", {
+                sessionId: this.#sessionId,
+                modelId: value,
+            });
+            this.#configOptions = this.#configOptions.map((option) => {
+                if (option !== legacyModelOption || option.type !== "select")
+                    return option;
+                return { ...option, currentValue: value };
+            });
+            return this.#configOptions;
+        }
         if (!this.#agent.setSessionConfigOption) {
             throw new Error("ACP agent does not support session config options");
         }
@@ -414,6 +483,13 @@ export class AcpSessionImpl {
     #setSessionStateFromResponse(value) {
         if (Array.isArray(value?.configOptions))
             this.#configOptions = value.configOptions;
+        const legacyModels = legacyModelStateFromResponse(value);
+        if (legacyModels && !this.#configOptions.some(isModelConfigOption)) {
+            this.#configOptions = [
+                ...this.#configOptions,
+                legacyModelConfigOption(legacyModels),
+            ];
+        }
         if (value?.modes)
             this.#modes = structuredClone(value.modes);
     }
