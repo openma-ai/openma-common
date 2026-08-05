@@ -14,9 +14,14 @@ export function extractAcpSystemNotice(event) {
     const codex = asRecord(meta?.codex);
     if (codex?.phase === "final_answer")
         return null;
+    const piAcp = asRecord(meta?.piAcp);
+    const piNotify = asRecord(piAcp?.notify);
+    const piLevel = piNotify?.level;
     const content = asRecord(inner.content);
     const text = typeof content?.text === "string" ? content.text.trim() : "";
-    if (!CODEX_SKILL_CONTEXT_WARNING.test(text))
+    if (!CODEX_SKILL_CONTEXT_WARNING.test(text)
+        && piLevel !== "warning"
+        && piLevel !== "error")
         return null;
     return { message: text, tone: "warning" };
 }

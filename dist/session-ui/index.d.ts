@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
-export type SessionTurnStatus = "queued" | "running" | "complete" | "completed" | "error" | "errored" | "cancelled" | "terminated";
+export type SessionTurnStatus = "queued" | "running" | "complete" | "completed" | "error" | "errored" | "cancelled" | "unknown" | "terminated";
 export interface SessionTurnFrameLabels {
     queued?: string;
     cancelled?: string;
+    unknown?: string;
     terminated?: string;
     failed?: string;
 }

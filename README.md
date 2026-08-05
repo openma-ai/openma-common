@@ -11,6 +11,7 @@ to npm.
 - `@openma/common/brand/openma-logo-mark.svg` — canonical OpenMA vector mark.
 - `@openma/common/session-events/managed` — Managed Agents wire-event normalizer and turn projector.
 - `@openma/common/session-events/acp` — ACP event parser and chat-turn reducer.
+- `@openma/common/session-events/openma` — OpenMA canonical event envelope, Vendor/raw records, and WorkItem lifecycle reducer.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
@@ -24,6 +25,10 @@ format.
 Adapters keep wire-protocol differences at the boundary. Consumers may add
 product-specific presentation after normalization, but should not fork the
 shared parsing and reduction logic.
+
+The `session-events/openma` export is the harness-neutral event boundary. It
+distinguishes canonical events from `vendor.event` records and opaque
+`raw.event` records; vendor/raw records do not imply GUI lifecycle semantics.
 
 ## Install from Git
 

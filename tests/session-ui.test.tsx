@@ -40,4 +40,14 @@ describe("SessionTurnFrame", () => {
     expect(error).toContain('data-annotation-ready="true"');
     expect(cancelled).toContain("cancelled");
   });
+
+  it("shows an explicit non-streaming state when terminal evidence is missing", () => {
+    const unknown = renderToStaticMarkup(
+      <SessionTurnFrame turnId="turn-unknown" status="unknown" />,
+    );
+
+    expect(unknown).toContain('data-session-turn-status="unknown"');
+    expect(unknown).toContain('data-annotation-ready="true"');
+    expect(unknown).toContain("terminal status unavailable");
+  });
 });

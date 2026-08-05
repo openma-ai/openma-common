@@ -22,6 +22,12 @@
  * with the turn length (a few hundred at most).
  */
 export { extractAcpSystemNotice, type AcpSystemNotice } from "./acp-system-notices.js";
+/** Internal transport context added when the ACP SDK gives OpenMA a
+ * notification-scoped `_meta` alongside `params.update`. The explicit key
+ * keeps wire-layer metadata separate from update/harness `_meta` while the
+ * existing flat update shape remains compatible with consumers. */
+export declare const ACP_NOTIFICATION_CONTEXT_KEY: "_openma.acp.notification";
+export declare function preserveAcpNotificationContext(params: unknown): unknown;
 export interface ChunkText {
     text: string;
 }
@@ -53,6 +59,16 @@ export interface ToolEntry {
         line?: number;
     }>;
 }
+interface ToolOutputDelta {
+    data: string;
+    /** Terminal output is byte-stream-like; MCP progress is line-oriented. */
+    separator: string;
+}
+interface NormalizedToolPatch extends Partial<ToolEntry> {
+    toolCallId: string;
+    /** Incoming-only adapter extension data consumed by reduceTurn. */
+    outputDelta?: ToolOutputDelta;
+}
 export type ToolContentBlock = {
     type: "content";
     content?: {
@@ -72,9 +88,17 @@ export type ToolContentBlock = {
     terminalId?: string;
 };
 export interface PlanEntry {
+    id?: string;
     content: string;
-    status?: "pending" | "in_progress" | "completed";
+    status?: "pending" | "in_progress" | "completed" | "cancelled";
     priority?: "high" | "medium" | "low";
+}
+export interface PlanDocument {
+    id?: string;
+    title?: string;
+    type?: "markdown" | "file";
+    markdown?: string;
+    uri?: string;
 }
 export type TimelineItem = {
     /** Continuous block of assistant text — concatenated agent_message_chunk
@@ -104,6 +128,7 @@ export interface TurnRender {
     assistantText: string;
     tools: ToolEntry[];
     plan: PlanEntry[];
+    planDocument?: PlanDocument;
     /** Synthetic runtime notes that belong in the activity transcript. */
     notes: string[];
     /** Time-ordered list of "what to render between thought and assistant
@@ -126,11 +151,15 @@ export type ParsedAcpEvent = {
     text: string;
     phase?: "commentary" | "final_answer";
     messageId?: string;
+    /** Claude Agent ACP's nested transcript correlation. */
+    parentToolUseId?: string;
     event: unknown;
 } | {
     kind: "thought";
     text: string;
     messageId?: string;
+    /** Claude Agent ACP's nested transcript correlation. */
+    parentToolUseId?: string;
     event: unknown;
 } | {
     kind: "notice";
@@ -138,9 +167,7 @@ export type ParsedAcpEvent = {
     event: unknown;
 } | {
     kind: "tool_call";
-    tool: Partial<ToolEntry> & {
-        toolCallId: string;
-    };
+    tool: NormalizedToolPatch;
     event: unknown;
 } | {
     kind: "commands";
@@ -148,7 +175,18 @@ export type ParsedAcpEvent = {
     event: unknown;
 } | {
     kind: "plan";
+    planId?: string;
+    updateMode?: "replace" | "merge";
     plan: PlanEntry[];
+    document?: PlanDocument;
+    event: unknown;
+} | {
+    kind: "plan_document";
+    document?: PlanDocument;
+    event: unknown;
+} | {
+    kind: "plan_removed";
+    planId?: string;
     event: unknown;
 } | {
     kind: "note";

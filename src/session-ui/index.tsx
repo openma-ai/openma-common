@@ -8,11 +8,13 @@ export type SessionTurnStatus =
   | "error"
   | "errored"
   | "cancelled"
+  | "unknown"
   | "terminated";
 
 export interface SessionTurnFrameLabels {
   queued?: string;
   cancelled?: string;
+  unknown?: string;
   terminated?: string;
   failed?: string;
 }
@@ -114,6 +116,13 @@ function renderStatus(
     return (
       <p className="text-xs italic text-fg-subtle" data-session-turn-status-message="cancelled">
         {labels?.cancelled ?? "cancelled"}
+      </p>
+    );
+  }
+  if (status === "unknown") {
+    return (
+      <p className="text-xs italic text-fg-subtle" data-session-turn-status-message="unknown">
+        {labels?.unknown ?? "terminal status unavailable"}
       </p>
     );
   }
