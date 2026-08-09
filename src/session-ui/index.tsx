@@ -23,6 +23,11 @@ export interface SessionTurnFrameProps {
   turnId: string;
   sessionId?: string;
   promptText?: string;
+  /** Content attached to the prompt rather than the response — a note about how
+   *  this message was sent. Kept as a node so this component learns nothing
+   *  about any product's commands; a consumer with nothing to add passes
+   *  nothing and the markup is unchanged. */
+  promptAnnotation?: ReactNode;
   status: SessionTurnStatus;
   errorMessage?: string;
   errorNotice?: ReactNode;
@@ -43,6 +48,7 @@ export function SessionTurnFrame({
   turnId,
   sessionId,
   promptText,
+  promptAnnotation,
   status,
   errorMessage,
   errorNotice,
@@ -62,14 +68,24 @@ export function SessionTurnFrame({
       data-turn-id={turnId}
       data-session-turn-status={status}
     >
-      {promptText ? (
+      {promptText || promptAnnotation ? (
         <div
           className="group is-user ml-auto flex w-full max-w-[95%] flex-col items-end gap-2"
           data-session-turn-prompt="true"
         >
-          <div className="is-user:dark ml-auto flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden rounded-lg bg-secondary px-4 py-3 text-sm text-foreground">
-            <p className="whitespace-pre-wrap">{promptText}</p>
-          </div>
+          {promptText ? (
+            <div className="is-user:dark ml-auto flex w-fit min-w-0 max-w-full flex-col gap-2 overflow-hidden rounded-lg bg-secondary px-4 py-3 text-sm text-foreground">
+              <p className="whitespace-pre-wrap">{promptText}</p>
+            </div>
+          ) : null}
+          {promptAnnotation ? (
+            <div
+              className="flex min-w-0 max-w-full items-center gap-1.5 text-xs text-fg-muted"
+              data-session-turn-prompt-annotation="true"
+            >
+              {promptAnnotation}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
