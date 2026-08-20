@@ -9,6 +9,7 @@ import {
   isPermissionRequestEvent,
   isTurnTerminalEvent,
   turnTerminalStatus,
+  type AgentSessionInput,
   type AgentTurnInput,
   type OpenMAAgentConnector,
 } from "../src/agent-contract/index.js";
@@ -24,6 +25,31 @@ const context = {
 };
 
 describe("OpenMA Agent Contract", () => {
+  it("carries durable host identities into connector session and Turn calls", () => {
+    const session: AgentSessionInput = {
+      sessionId: "session-1",
+      idempotencyKey: "session-1",
+      generation: 2,
+      agentId: "claude",
+    };
+    const turn: AgentTurnInput = {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      afterSequence: 7,
+      content: "continue",
+    };
+
+    expect(session).toMatchObject({
+      sessionId: "session-1",
+      idempotencyKey: "session-1",
+      generation: 2,
+    });
+    expect(turn).toMatchObject({
+      sessionId: "session-1",
+      turnId: "turn-1",
+      afterSequence: 7,
+    });
+  });
   it.each([
     ["undefined property", { value: undefined }],
     ["function property", { value: () => "not JSON" }],
@@ -133,13 +159,20 @@ describe("OpenMA Agent Contract", () => {
     };
 
     const turn: AgentTurnInput = {
+      sessionId: "session-1",
       turnId: "turn-1",
+      afterSequence: 0,
       contextDigest: "sha256:context",
       content: "do the work",
     };
     const events = [];
     for await (const event of connector.execute(
-      await connector.open({ agentId: "agent-1" }),
+      await connector.open({
+        sessionId: "session-1",
+        idempotencyKey: "session-1",
+        generation: 1,
+        agentId: "agent-1",
+      }),
       turn,
     )) events.push(event);
 

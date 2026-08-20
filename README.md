@@ -51,6 +51,11 @@ Every event emitted by an Agent Connector is a deeply immutable JSON fact and
 is correlated by `session_id`, `turn_id`, and monotonic `seq`. The wire bindings
 standardize these provider lifecycles:
 
+`open()` receives the host's durable `sessionId`, `generation`, and stable
+`idempotencyKey`; `execute()` receives the logical `turnId` plus the last
+durably observed `afterSequence`. A connector must preserve those identities
+across replay rather than manufacture a new Session or Turn.
+
 The JSON boundary is strict: it accepts primitives, finite numbers, arrays, and
 plain or null-prototype objects. It rejects undefined values, functions,
 symbols, BigInt, non-finite numbers, cyclic/sparse structures, and objects such

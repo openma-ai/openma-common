@@ -22,6 +22,11 @@ export interface AgentCapabilities {
     readonly extensions?: JsonObject;
 }
 export interface AgentSessionInput {
+    /** Canonical durable Session id chosen by the host before remote creation. */
+    readonly sessionId: string;
+    /** Stable key for replaying remote Session creation without duplication. */
+    readonly idempotencyKey: string;
+    readonly generation: number;
     readonly agentId: string;
     readonly cwd?: string;
     readonly additionalDirectories?: readonly string[];
@@ -34,7 +39,11 @@ export interface AgentContentBlock {
 }
 export type AgentContent = string | readonly AgentContentBlock[];
 export interface AgentTurnInput {
+    /** Canonical durable Session id used by every emitted OpenMA event. */
+    readonly sessionId: string;
     readonly turnId: string;
+    /** Last sequence already committed by the host during crash recovery. */
+    readonly afterSequence: number;
     readonly contextDigest?: string;
     readonly content: AgentContent;
     readonly grants?: readonly string[];
