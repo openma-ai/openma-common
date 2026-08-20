@@ -95,12 +95,21 @@ export type AgentCommand =
 export interface OpenMAAgentConnector {
   readonly id: string;
   capabilities(): Promise<AgentCapabilities>;
+  /** MUST be idempotent by input.idempotencyKey. A replay returns the same
+   * remote Session identity instead of creating an orphan Session. */
   open(input: AgentSessionInput): Promise<AgentSessionHandle>;
+  /** A repeated logical turnId MUST resume/replay that Turn without repeating
+   * already-applied Agent/tool side effects. Events at or below afterSequence
+   * may be omitted; emitted facts keep the supplied sessionId and turnId. */
   execute(
     session: AgentSessionHandle,
     input: AgentTurnInput,
   ): AsyncIterable<OpenMAEvent>;
+  /** Repeating callback.respond for one callbackId or turn.cancel for one
+   * turnId MUST be safe and equivalent to one application. */
   send(session: AgentSessionHandle, command: AgentCommand): Promise<void>;
+  /** MUST be idempotent. An already-closed or provider-missing Session is a
+   * successful close, not a permanent replay failure. */
   close(session: AgentSessionHandle): Promise<void>;
 }
 

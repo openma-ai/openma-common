@@ -84,6 +84,148 @@ function cloneJsonArray(value, path, ancestors) {
 function invalidJson(path, reason) {
     throw new TypeError(`Invalid JSON at ${path}: ${reason}`);
 }
+export const OPENMA_CANONICAL_EVENT_TYPES = [
+    "user.message",
+    "user.interrupt",
+    "user.permission_response",
+    "user.elicitation_response",
+    "agent.message",
+    "agent.message_chunk",
+    "agent.thinking",
+    "turn.queued",
+    "turn.started",
+    "turn.completed",
+    "turn.failed",
+    "turn.cancelled",
+    "turn.interrupted",
+    "tool.started",
+    "tool.progress",
+    "tool.completed",
+    "tool.failed",
+    "tool.cancelled",
+    "work_item.started",
+    "work_item.progress",
+    "work_item.output",
+    "work_item.completed",
+    "work_item.failed",
+    "work_item.cancelled",
+    "work_item.killed",
+    "work_item.terminated",
+    "work_item.missing_terminal",
+    "work_item.reidentified",
+    "work_item.classified",
+    "monitor.event",
+    "plan.updated",
+    "plan.completed",
+    "plan.removed",
+    "session.started",
+    "session.running",
+    "session.idle",
+    "session.terminated",
+    "session.error",
+    "system.notice",
+    "command_catalog.updated",
+    "capability.updated",
+    "usage.updated",
+    "callback.requested",
+    "callback.completed",
+    "callback.failed",
+    "callback.notification",
+];
+export const OPENMA_EVENT_TYPES = [
+    ...OPENMA_CANONICAL_EVENT_TYPES,
+    "vendor.event",
+    "raw.event",
+];
+const EVENT_TYPES = new Set(OPENMA_EVENT_TYPES);
+const SOURCE_KINDS = new Set(["harness", "openma", "user", "system"]);
+const RAW_SOURCES = new Set(["acp", "adapter", "transport"]);
+const RAW_REASONS = new Set(["unknown", "unsupported", "malformed"]);
+function recordValue(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value
+        : undefined;
+}
+function optionalString(value) {
+    return value === undefined || typeof value === "string";
+}
+function validSource(value) {
+    const source = recordValue(value);
+    return source !== undefined
+        && typeof source.kind === "string"
+        && SOURCE_KINDS.has(source.kind)
+        && optionalString(source.harness)
+        && optionalString(source.adapter);
+}
+function validRawRecord(value) {
+    const raw = recordValue(value);
+    return raw !== undefined
+        && raw.kind === "raw"
+        && typeof raw.source === "string"
+        && RAW_SOURCES.has(raw.source)
+        && optionalString(raw.method)
+        && optionalString(raw.event_type)
+        && Object.hasOwn(raw, "payload")
+        && typeof raw.received_at === "string"
+        && typeof raw.reason === "string"
+        && RAW_REASONS.has(raw.reason);
+}
+function validVendorRecord(value) {
+    const vendor = recordValue(value);
+    const correlation = vendor?.correlation === undefined
+        ? undefined
+        : recordValue(vendor.correlation);
+    return vendor !== undefined
+        && vendor.kind === "vendor"
+        && typeof vendor.harness === "string"
+        && typeof vendor.namespace === "string"
+        && typeof vendor.name === "string"
+        && optionalString(vendor.version)
+        && (vendor.correlation === undefined
+            || (correlation !== undefined
+                && optionalString(correlation.session_id)
+                && optionalString(correlation.turn_id)
+                && optionalString(correlation.work_item_id)
+                && optionalString(correlation.parent_id)))
+        && Object.hasOwn(vendor, "data");
+}
+/** The single runtime validator for Agent/UI/Store consumers. It accepts only
+ * the published event vocabulary and strict portable JSON facts. */
+export function isOpenMAEvent(input) {
+    try {
+        const event = recordValue(immutableJson(input));
+        if (event === undefined
+            || event.schema_version !== OPENMA_EVENT_SCHEMA_VERSION
+            || typeof event.event_id !== "string"
+            || event.event_id.length === 0
+            || typeof event.type !== "string"
+            || !EVENT_TYPES.has(event.type)
+            || typeof event.session_id !== "string"
+            || event.session_id.length === 0
+            || !optionalString(event.session_thread_id)
+            || !optionalString(event.turn_id)
+            || !optionalString(event.work_item_id)
+            || !optionalString(event.parent_event_id)
+            || !optionalString(event.parent_id)
+            || !validSource(event.source)
+            || typeof event.occurred_at !== "string"
+            || event.occurred_at.length === 0
+            || !optionalString(event.ingested_at)
+            || (event.seq !== undefined
+                && (!Number.isSafeInteger(event.seq) || event.seq < 0))
+            || !Object.hasOwn(event, "data")
+            || (event.raw !== undefined && !validRawRecord(event.raw)))
+            return false;
+        if (event.type === "raw.event")
+            return validRawRecord(event.data);
+        if (event.type === "vendor.event")
+            return validVendorRecord(event.data);
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
 export function createOpenMAEvent(input) {
     return immutableJson({
         schema_version: OPENMA_EVENT_SCHEMA_VERSION,

@@ -5,6 +5,7 @@ import {
   createAgentSessionHandle,
   callbackFingerprint,
   immutableJson,
+  isOpenMAEvent,
   isElicitationRequestEvent,
   isPermissionRequestEvent,
   isTurnTerminalEvent,
@@ -25,6 +26,46 @@ const context = {
 };
 
 describe("OpenMA Agent Contract", () => {
+  it("publishes one strict validator for canonical Agent facts", () => {
+    const event = createOpenMAEvent({
+      event_id: "event-validator-1",
+      type: "agent.message",
+      session_id: "session-1",
+      turn_id: "turn-1",
+      source: { kind: "harness", harness: "acp" },
+      occurred_at: "2026-08-20T10:00:00.000Z",
+      seq: 1,
+      data: { text: "hello" },
+    });
+
+    expect(isOpenMAEvent(event)).toBe(true);
+    expect(isOpenMAEvent({ ...event, type: "future.unknown" })).toBe(false);
+    expect(isOpenMAEvent({ ...event, seq: -1 })).toBe(false);
+    expect(isOpenMAEvent({ ...event, data: new Date() })).toBe(false);
+  });
+
+  it("types published Agent facts as deeply readonly", () => {
+    const event = createOpenMAEvent({
+      event_id: "event-readonly-1",
+      type: "agent.message",
+      session_id: "session-1",
+      turn_id: "turn-1",
+      source: { kind: "harness", harness: "acp" },
+      occurred_at: "2026-08-20T10:00:00.000Z",
+      seq: 1,
+      data: { text: "hello", evidence: [{ id: "issue-1" }] },
+    });
+
+    if (false) {
+      // @ts-expect-error Published facts are readonly at compile time.
+      event.data.text = "mutated";
+      // @ts-expect-error Nested fact data is deeply readonly.
+      event.data.evidence[0].id = "mutated";
+      // @ts-expect-error Envelope correlation is readonly.
+      event.turn_id = "turn-2";
+    }
+    expect(Object.isFrozen(event.data.evidence[0])).toBe(true);
+  });
   it("carries durable host identities into connector session and Turn calls", () => {
     const session: AgentSessionInput = {
       sessionId: "session-1",

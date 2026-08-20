@@ -56,6 +56,12 @@ standardize these provider lifecycles:
 durably observed `afterSequence`. A connector must preserve those identities
 across replay rather than manufacture a new Session or Turn.
 
+Connector replay rules are normative: `open()` is idempotent by
+`idempotencyKey`; repeating the same logical `turnId` does not repeat committed
+Agent/tool side effects; repeated callback responses and cancellations are safe
+by callback/Turn identity; and closing an already-closed or missing Session is
+success.
+
 The JSON boundary is strict: it accepts primitives, finite numbers, arrays, and
 plain or null-prototype objects. It rejects undefined values, functions,
 symbols, BigInt, non-finite numbers, cyclic/sparse structures, and objects such

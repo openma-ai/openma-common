@@ -109,83 +109,93 @@ function invalidJson(path: string, reason: string): never {
 export type OpenMAEventSourceKind = "harness" | "openma" | "user" | "system";
 
 export interface OpenMAEventSource {
-  kind: OpenMAEventSourceKind;
-  harness?: string;
-  adapter?: string;
+  readonly kind: OpenMAEventSourceKind;
+  readonly harness?: string;
+  readonly adapter?: string;
 }
 
 export interface RawEventRecord {
-  kind: "raw";
-  source: "acp" | "adapter" | "transport";
-  method?: string;
-  event_type?: string;
-  payload: unknown;
-  received_at: string;
-  reason: "unknown" | "unsupported" | "malformed";
+  readonly kind: "raw";
+  readonly source: "acp" | "adapter" | "transport";
+  readonly method?: string;
+  readonly event_type?: string;
+  readonly payload: unknown;
+  readonly received_at: string;
+  readonly reason: "unknown" | "unsupported" | "malformed";
 }
 
 export interface VendorEventRecord {
-  kind: "vendor";
-  harness: string;
-  namespace: string;
-  name: string;
-  version?: string;
-  correlation?: {
-    session_id?: string;
-    turn_id?: string;
-    work_item_id?: string;
-    parent_id?: string;
+  readonly kind: "vendor";
+  readonly harness: string;
+  readonly namespace: string;
+  readonly name: string;
+  readonly version?: string;
+  readonly correlation?: {
+    readonly session_id?: string;
+    readonly turn_id?: string;
+    readonly work_item_id?: string;
+    readonly parent_id?: string;
   };
-  data: unknown;
+  readonly data: unknown;
 }
 
+export const OPENMA_CANONICAL_EVENT_TYPES = [
+  "user.message",
+  "user.interrupt",
+  "user.permission_response",
+  "user.elicitation_response",
+  "agent.message",
+  "agent.message_chunk",
+  "agent.thinking",
+  "turn.queued",
+  "turn.started",
+  "turn.completed",
+  "turn.failed",
+  "turn.cancelled",
+  "turn.interrupted",
+  "tool.started",
+  "tool.progress",
+  "tool.completed",
+  "tool.failed",
+  "tool.cancelled",
+  "work_item.started",
+  "work_item.progress",
+  "work_item.output",
+  "work_item.completed",
+  "work_item.failed",
+  "work_item.cancelled",
+  "work_item.killed",
+  "work_item.terminated",
+  "work_item.missing_terminal",
+  "work_item.reidentified",
+  "work_item.classified",
+  "monitor.event",
+  "plan.updated",
+  "plan.completed",
+  "plan.removed",
+  "session.started",
+  "session.running",
+  "session.idle",
+  "session.terminated",
+  "session.error",
+  "system.notice",
+  "command_catalog.updated",
+  "capability.updated",
+  "usage.updated",
+  "callback.requested",
+  "callback.completed",
+  "callback.failed",
+  "callback.notification",
+] as const;
+
 export type CanonicalEventType =
-  | "user.message"
-  | "user.interrupt"
-  | "user.permission_response"
-  | "user.elicitation_response"
-  | "agent.message"
-  | "agent.message_chunk"
-  | "agent.thinking"
-  | "turn.queued"
-  | "turn.started"
-  | "turn.completed"
-  | "turn.failed"
-  | "turn.cancelled"
-  | "turn.interrupted"
-  | "tool.started"
-  | "tool.progress"
-  | "tool.completed"
-  | "tool.failed"
-  | "tool.cancelled"
-  | "work_item.started"
-  | "work_item.progress"
-  | "work_item.output"
-  | "work_item.completed"
-  | "work_item.failed"
-  | "work_item.cancelled"
-  | "work_item.killed"
-  | "work_item.terminated"
-  | "work_item.missing_terminal"
-  | "work_item.reidentified"
-  | "work_item.classified"
-  | "monitor.event"
-  | "plan.updated"
-  | "plan.completed"
-  | "plan.removed"
-  | "session.started"
-  | "session.running"
-  | "session.idle"
-  | "session.terminated"
-  | "session.error"
-  | "system.notice"
-  | "command_catalog.updated"
-  | "capability.updated"
-  | "usage.updated"
-  | "callback.requested"
-  | "callback.completed"
-  | "callback.failed"
-  | "callback.notification";
+  (typeof OPENMA_CANONICAL_EVENT_TYPES)[number];
+
+export const OPENMA_EVENT_TYPES = [
+  ...OPENMA_CANONICAL_EVENT_TYPES,
+  "vendor.event",
+  "raw.event",
+] as const;
 
 export type ToolStatus =
   | "pending"
@@ -241,22 +251,22 @@ export interface MessageEventData {
 }
 
 export interface OpenMAEventEnvelope<TType extends string, TData> {
-  schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
-  event_id: string;
-  type: TType;
-  session_id: string;
-  session_thread_id?: string;
-  turn_id?: string;
-  work_item_id?: string;
-  parent_event_id?: string;
-  parent_id?: string;
-  source: OpenMAEventSource;
-  occurred_at: string;
-  ingested_at?: string;
-  seq?: number;
-  data: TData;
+  readonly schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
+  readonly event_id: string;
+  readonly type: TType;
+  readonly session_id: string;
+  readonly session_thread_id?: string;
+  readonly turn_id?: string;
+  readonly work_item_id?: string;
+  readonly parent_event_id?: string;
+  readonly parent_id?: string;
+  readonly source: DeepReadonly<OpenMAEventSource>;
+  readonly occurred_at: string;
+  readonly ingested_at?: string;
+  readonly seq?: number;
+  readonly data: DeepReadonly<TData>;
   /** Known canonical events may retain the adapter's original wire record. */
-  raw?: RawEventRecord;
+  readonly raw?: DeepReadonly<RawEventRecord>;
 }
 
 export type OpenMACanonicalEvent = OpenMAEventEnvelope<CanonicalEventType, unknown>;
@@ -338,6 +348,100 @@ export type VendorEvent = OpenMAEventEnvelope<"vendor.event", VendorEventRecord>
 export type RawEvent = OpenMAEventEnvelope<"raw.event", RawEventRecord>;
 export type OpenMAEvent = OpenMACanonicalEvent | VendorEvent | RawEvent;
 
+const EVENT_TYPES = new Set<string>(OPENMA_EVENT_TYPES);
+const SOURCE_KINDS = new Set<string>(["harness", "openma", "user", "system"]);
+const RAW_SOURCES = new Set<string>(["acp", "adapter", "transport"]);
+const RAW_REASONS = new Set<string>(["unknown", "unsupported", "malformed"]);
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function optionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function validSource(value: unknown): boolean {
+  const source = recordValue(value);
+  return source !== undefined
+    && typeof source.kind === "string"
+    && SOURCE_KINDS.has(source.kind)
+    && optionalString(source.harness)
+    && optionalString(source.adapter);
+}
+
+function validRawRecord(value: unknown): boolean {
+  const raw = recordValue(value);
+  return raw !== undefined
+    && raw.kind === "raw"
+    && typeof raw.source === "string"
+    && RAW_SOURCES.has(raw.source)
+    && optionalString(raw.method)
+    && optionalString(raw.event_type)
+    && Object.hasOwn(raw, "payload")
+    && typeof raw.received_at === "string"
+    && typeof raw.reason === "string"
+    && RAW_REASONS.has(raw.reason);
+}
+
+function validVendorRecord(value: unknown): boolean {
+  const vendor = recordValue(value);
+  const correlation = vendor?.correlation === undefined
+    ? undefined
+    : recordValue(vendor.correlation);
+  return vendor !== undefined
+    && vendor.kind === "vendor"
+    && typeof vendor.harness === "string"
+    && typeof vendor.namespace === "string"
+    && typeof vendor.name === "string"
+    && optionalString(vendor.version)
+    && (vendor.correlation === undefined
+      || (correlation !== undefined
+        && optionalString(correlation.session_id)
+        && optionalString(correlation.turn_id)
+        && optionalString(correlation.work_item_id)
+        && optionalString(correlation.parent_id)))
+    && Object.hasOwn(vendor, "data");
+}
+
+/** The single runtime validator for Agent/UI/Store consumers. It accepts only
+ * the published event vocabulary and strict portable JSON facts. */
+export function isOpenMAEvent(input: unknown): input is OpenMAEvent {
+  try {
+    const event = recordValue(immutableJson(input));
+    if (
+      event === undefined
+      || event.schema_version !== OPENMA_EVENT_SCHEMA_VERSION
+      || typeof event.event_id !== "string"
+      || event.event_id.length === 0
+      || typeof event.type !== "string"
+      || !EVENT_TYPES.has(event.type)
+      || typeof event.session_id !== "string"
+      || event.session_id.length === 0
+      || !optionalString(event.session_thread_id)
+      || !optionalString(event.turn_id)
+      || !optionalString(event.work_item_id)
+      || !optionalString(event.parent_event_id)
+      || !optionalString(event.parent_id)
+      || !validSource(event.source)
+      || typeof event.occurred_at !== "string"
+      || event.occurred_at.length === 0
+      || !optionalString(event.ingested_at)
+      || (event.seq !== undefined
+        && (!Number.isSafeInteger(event.seq) || (event.seq as number) < 0))
+      || !Object.hasOwn(event, "data")
+      || (event.raw !== undefined && !validRawRecord(event.raw))
+    ) return false;
+    if (event.type === "raw.event") return validRawRecord(event.data);
+    if (event.type === "vendor.event") return validVendorRecord(event.data);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface CanonicalPlanEntry {
   id?: string;
   content: string;
@@ -375,8 +479,12 @@ export type PlanEvent =
 
 type OpenMAEventInput<TType extends string, TData> = Omit<
   OpenMAEventEnvelope<TType, TData>,
-  "schema_version"
->;
+  "schema_version" | "source" | "data" | "raw"
+> & {
+  readonly source: OpenMAEventSource;
+  readonly data: TData;
+  readonly raw?: RawEventRecord;
+};
 
 export function createOpenMAEvent<TType extends string, TData>(
   input: OpenMAEventInput<TType, TData>,
