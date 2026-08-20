@@ -8,6 +8,104 @@
 
 export const OPENMA_EVENT_SCHEMA_VERSION = "oma.event.v1" as const;
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+export interface JsonObject {
+  readonly [key: string]: JsonValue;
+}
+export interface JsonArray extends ReadonlyArray<JsonValue> {}
+
+export type DeepReadonly<T> =
+  T extends JsonPrimitive ? T
+    : T extends readonly (infer U)[] ? readonly DeepReadonly<U>[]
+      : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+        : T;
+
+/** Validate, clone, and recursively freeze one portable JSON value.
+ * Unlike a JSON stringify/parse round trip, this rejects values that would be
+ * silently omitted or coerced. Published facts therefore preserve exactly the
+ * data the adapter supplied. */
+export function immutableJson<T>(value: T): DeepReadonly<T> {
+  return cloneJson(value, "$", new WeakSet()) as DeepReadonly<T>;
+}
+
+function cloneJson(
+  value: unknown,
+  path: string,
+  ancestors: WeakSet<object>,
+): JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) invalidJson(path, "number must be finite");
+    return value;
+  }
+  if (typeof value !== "object") {
+    invalidJson(path, `${typeof value} is not a JSON value`);
+  }
+  if (ancestors.has(value)) invalidJson(path, "cyclic reference");
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return cloneJsonArray(value, path, ancestors);
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      invalidJson(path, "object must have a plain or null prototype");
+    }
+    const clone: Record<string, JsonValue> = {};
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key === "symbol") invalidJson(path, "symbol keys are not JSON");
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor?.enumerable || !("value" in descriptor)) {
+        invalidJson(`${path}.${key}`, "property must be enumerable data");
+      }
+      Object.defineProperty(clone, key, {
+        value: cloneJson(descriptor.value, `${path}.${key}`, ancestors),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    }
+    return Object.freeze(clone);
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function cloneJsonArray(
+  value: unknown[],
+  path: string,
+  ancestors: WeakSet<object>,
+): JsonArray {
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    invalidJson(path, "array must use the standard Array prototype");
+  }
+  const allowedKeys = new Set<string>(["length"]);
+  const clone: JsonValue[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(value, index)) {
+      invalidJson(`${path}[${index}]`, "sparse arrays are not JSON facts");
+    }
+    const key = String(index);
+    allowedKeys.add(key);
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !("value" in descriptor)) {
+      invalidJson(`${path}[${index}]`, "array item must be enumerable data");
+    }
+    clone.push(cloneJson(descriptor.value, `${path}[${index}]`, ancestors));
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === "symbol" || !allowedKeys.has(key)) {
+      invalidJson(path, "array has a non-JSON property");
+    }
+  }
+  return Object.freeze(clone);
+}
+
+function invalidJson(path: string, reason: string): never {
+  throw new TypeError(`Invalid JSON at ${path}: ${reason}`);
+}
+
 export type OpenMAEventSourceKind = "harness" | "openma" | "user" | "system";
 
 export interface OpenMAEventSource {
@@ -50,9 +148,11 @@ export type CanonicalEventType =
   | "agent.message_chunk"
   | "agent.thinking"
   | "turn.queued"
+  | "turn.started"
   | "turn.completed"
   | "turn.failed"
   | "turn.cancelled"
+  | "turn.interrupted"
   | "tool.started"
   | "tool.progress"
   | "tool.completed"
@@ -185,6 +285,8 @@ export type CallbackCategory =
  * GUI projections. `callback_id` correlates a request with its terminal fact. */
 export interface CallbackLifecycleData {
   callback_id?: string;
+  /** Stable within one session/turn and suitable for callback deduplication. */
+  fingerprint?: string;
   method: string;
   category: CallbackCategory;
   params?: unknown;
@@ -192,11 +294,35 @@ export interface CallbackLifecycleData {
   error?: unknown;
 }
 
+export interface CallbackRequestedData extends CallbackLifecycleData {
+  callback_id: string;
+  fingerprint: string;
+}
+
+export type CallbackRequestedEvent = OpenMAEventEnvelope<
+  "callback.requested",
+  CallbackRequestedData
+>;
+
 export type CallbackEvent =
-  | OpenMAEventEnvelope<"callback.requested", CallbackLifecycleData>
+  | CallbackRequestedEvent
   | OpenMAEventEnvelope<"callback.completed", CallbackLifecycleData>
   | OpenMAEventEnvelope<"callback.failed", CallbackLifecycleData>
   | OpenMAEventEnvelope<"callback.notification", CallbackLifecycleData>;
+
+export interface TurnTerminalData {
+  stop_reason?: string;
+  reason?: string;
+  error?: string;
+  usage?: unknown;
+  adapter_meta?: Record<string, unknown>;
+}
+
+export type TurnTerminalEvent =
+  | OpenMAEventEnvelope<"turn.completed", TurnTerminalData>
+  | OpenMAEventEnvelope<"turn.failed", TurnTerminalData>
+  | OpenMAEventEnvelope<"turn.cancelled", TurnTerminalData>
+  | OpenMAEventEnvelope<"turn.interrupted", TurnTerminalData>;
 
 /** One event delivered by a long-lived external subscription. Monitor
  * notifications do not necessarily carry a stable subscription id, so
@@ -255,7 +381,10 @@ type OpenMAEventInput<TType extends string, TData> = Omit<
 export function createOpenMAEvent<TType extends string, TData>(
   input: OpenMAEventInput<TType, TData>,
 ): OpenMAEventEnvelope<TType, TData> {
-  return { schema_version: OPENMA_EVENT_SCHEMA_VERSION, ...input };
+  return immutableJson({
+    schema_version: OPENMA_EVENT_SCHEMA_VERSION,
+    ...input,
+  }) as OpenMAEventEnvelope<TType, TData>;
 }
 
 export interface CreateVendorEventInput

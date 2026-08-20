@@ -6,6 +6,21 @@
  * projection into a second event vocabulary.
  */
 export declare const OPENMA_EVENT_SCHEMA_VERSION: "oma.event.v1";
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+export interface JsonObject {
+    readonly [key: string]: JsonValue;
+}
+export interface JsonArray extends ReadonlyArray<JsonValue> {
+}
+export type DeepReadonly<T> = T extends JsonPrimitive ? T : T extends readonly (infer U)[] ? readonly DeepReadonly<U>[] : T extends object ? {
+    readonly [K in keyof T]: DeepReadonly<T[K]>;
+} : T;
+/** Validate, clone, and recursively freeze one portable JSON value.
+ * Unlike a JSON stringify/parse round trip, this rejects values that would be
+ * silently omitted or coerced. Published facts therefore preserve exactly the
+ * data the adapter supplied. */
+export declare function immutableJson<T>(value: T): DeepReadonly<T>;
 export type OpenMAEventSourceKind = "harness" | "openma" | "user" | "system";
 export interface OpenMAEventSource {
     kind: OpenMAEventSourceKind;
@@ -35,7 +50,7 @@ export interface VendorEventRecord {
     };
     data: unknown;
 }
-export type CanonicalEventType = "user.message" | "user.interrupt" | "user.permission_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.completed" | "turn.failed" | "turn.cancelled" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.running" | "session.idle" | "session.terminated" | "session.error" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
+export type CanonicalEventType = "user.message" | "user.interrupt" | "user.permission_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.started" | "turn.completed" | "turn.failed" | "turn.cancelled" | "turn.interrupted" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.running" | "session.idle" | "session.terminated" | "session.error" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 export type ToolOutputKind = "terminal" | "mcp" | "text" | "structured";
 export interface ToolOutputData {
@@ -109,13 +124,28 @@ export type CallbackCategory = "permission" | "filesystem" | "terminal" | "elici
  * GUI projections. `callback_id` correlates a request with its terminal fact. */
 export interface CallbackLifecycleData {
     callback_id?: string;
+    /** Stable within one session/turn and suitable for callback deduplication. */
+    fingerprint?: string;
     method: string;
     category: CallbackCategory;
     params?: unknown;
     result?: unknown;
     error?: unknown;
 }
-export type CallbackEvent = OpenMAEventEnvelope<"callback.requested", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.completed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.failed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.notification", CallbackLifecycleData>;
+export interface CallbackRequestedData extends CallbackLifecycleData {
+    callback_id: string;
+    fingerprint: string;
+}
+export type CallbackRequestedEvent = OpenMAEventEnvelope<"callback.requested", CallbackRequestedData>;
+export type CallbackEvent = CallbackRequestedEvent | OpenMAEventEnvelope<"callback.completed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.failed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.notification", CallbackLifecycleData>;
+export interface TurnTerminalData {
+    stop_reason?: string;
+    reason?: string;
+    error?: string;
+    usage?: unknown;
+    adapter_meta?: Record<string, unknown>;
+}
+export type TurnTerminalEvent = OpenMAEventEnvelope<"turn.completed", TurnTerminalData> | OpenMAEventEnvelope<"turn.failed", TurnTerminalData> | OpenMAEventEnvelope<"turn.cancelled", TurnTerminalData> | OpenMAEventEnvelope<"turn.interrupted", TurnTerminalData>;
 /** One event delivered by a long-lived external subscription. Monitor
  * notifications do not necessarily carry a stable subscription id, so
  * correlation remains optional on the envelope's `work_item_id`. */

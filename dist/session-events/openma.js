@@ -6,8 +6,89 @@
  * projection into a second event vocabulary.
  */
 export const OPENMA_EVENT_SCHEMA_VERSION = "oma.event.v1";
+/** Validate, clone, and recursively freeze one portable JSON value.
+ * Unlike a JSON stringify/parse round trip, this rejects values that would be
+ * silently omitted or coerced. Published facts therefore preserve exactly the
+ * data the adapter supplied. */
+export function immutableJson(value) {
+    return cloneJson(value, "$", new WeakSet());
+}
+function cloneJson(value, path, ancestors) {
+    if (value === null || typeof value === "string" || typeof value === "boolean") {
+        return value;
+    }
+    if (typeof value === "number") {
+        if (!Number.isFinite(value))
+            invalidJson(path, "number must be finite");
+        return value;
+    }
+    if (typeof value !== "object") {
+        invalidJson(path, `${typeof value} is not a JSON value`);
+    }
+    if (ancestors.has(value))
+        invalidJson(path, "cyclic reference");
+    ancestors.add(value);
+    try {
+        if (Array.isArray(value))
+            return cloneJsonArray(value, path, ancestors);
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype !== Object.prototype && prototype !== null) {
+            invalidJson(path, "object must have a plain or null prototype");
+        }
+        const clone = {};
+        for (const key of Reflect.ownKeys(value)) {
+            if (typeof key === "symbol")
+                invalidJson(path, "symbol keys are not JSON");
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (!descriptor?.enumerable || !("value" in descriptor)) {
+                invalidJson(`${path}.${key}`, "property must be enumerable data");
+            }
+            Object.defineProperty(clone, key, {
+                value: cloneJson(descriptor.value, `${path}.${key}`, ancestors),
+                enumerable: true,
+                configurable: true,
+                writable: true,
+            });
+        }
+        return Object.freeze(clone);
+    }
+    finally {
+        ancestors.delete(value);
+    }
+}
+function cloneJsonArray(value, path, ancestors) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+        invalidJson(path, "array must use the standard Array prototype");
+    }
+    const allowedKeys = new Set(["length"]);
+    const clone = [];
+    for (let index = 0; index < value.length; index += 1) {
+        if (!Object.prototype.hasOwnProperty.call(value, index)) {
+            invalidJson(`${path}[${index}]`, "sparse arrays are not JSON facts");
+        }
+        const key = String(index);
+        allowedKeys.add(key);
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (!descriptor?.enumerable || !("value" in descriptor)) {
+            invalidJson(`${path}[${index}]`, "array item must be enumerable data");
+        }
+        clone.push(cloneJson(descriptor.value, `${path}[${index}]`, ancestors));
+    }
+    for (const key of Reflect.ownKeys(value)) {
+        if (typeof key === "symbol" || !allowedKeys.has(key)) {
+            invalidJson(path, "array has a non-JSON property");
+        }
+    }
+    return Object.freeze(clone);
+}
+function invalidJson(path, reason) {
+    throw new TypeError(`Invalid JSON at ${path}: ${reason}`);
+}
 export function createOpenMAEvent(input) {
-    return { schema_version: OPENMA_EVENT_SCHEMA_VERSION, ...input };
+    return immutableJson({
+        schema_version: OPENMA_EVENT_SCHEMA_VERSION,
+        ...input,
+    });
 }
 export function createVendorEvent(input) {
     const { harness, namespace, name, version, correlation, data, ...envelope } = input;

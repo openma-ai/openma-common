@@ -13,4 +13,25 @@ describe("shared session kernel contract", () => {
       import: "./dist/session-kernel/index.js",
     });
   });
+
+  it("publishes the vendor-neutral Agent Contract and wire adapter entrypoints", () => {
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"),
+    ) as { exports?: Record<string, unknown> };
+
+    expect(pkg.exports).toMatchObject({
+      "./agent-contract": {
+        types: "./dist/agent-contract/index.d.ts",
+        import: "./dist/agent-contract/index.js",
+      },
+      "./agent-contract/acp": {
+        types: "./dist/agent-contract/acp.d.ts",
+        import: "./dist/agent-contract/acp.js",
+      },
+      "./agent-contract/managed": {
+        types: "./dist/agent-contract/managed.d.ts",
+        import: "./dist/agent-contract/managed.js",
+      },
+    });
+  });
 });

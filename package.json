@@ -2,7 +2,7 @@
   "name": "@openma/common",
   "version": "0.4.0",
   "private": true,
-  "description": "Shared OpenMA brand assets, design tokens, and session event adapters.",
+  "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
     "type": "git",
     "url": "https://github.com/openma-ai/openma-common.git"
@@ -23,6 +23,18 @@
     },
     "./brand/tokens.css": "./dist/brand/tokens.css",
     "./brand/openma-logo-mark.svg": "./dist/brand/openma-logo-mark.svg",
+    "./agent-contract": {
+      "types": "./dist/agent-contract/index.d.ts",
+      "import": "./dist/agent-contract/index.js"
+    },
+    "./agent-contract/acp": {
+      "types": "./dist/agent-contract/acp.d.ts",
+      "import": "./dist/agent-contract/acp.js"
+    },
+    "./agent-contract/managed": {
+      "types": "./dist/agent-contract/managed.d.ts",
+      "import": "./dist/agent-contract/managed.js"
+    },
     "./session-events/managed": {
       "types": "./dist/session-events/managed.d.ts",
       "import": "./dist/session-events/managed.js"
