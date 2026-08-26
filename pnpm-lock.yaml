@@ -11,6 +11,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^1.3.0
         version: 1.3.0(zod@4.4.3)
+      streaming-markdown:
+        specifier: ^0.2.15
+        version: 0.2.15
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: 0.120.0
@@ -415,6 +418,10 @@ packages:
 
   std-env@4.2.0:
     resolution: {integrity: sha512-oCUKSupKTHX53EyjDtuZQ64pjLJ6yYCtpmEw0goYxtjG9KpbRe8KAsl2tBUGU9DyMcJ0RwJ8GqJAFzMXcXW1Rw==}
+
+  streaming-markdown@0.2.15:
+    resolution: {integrity: sha512-eSWjdvLSTznl2+FIzuxw1TRXwhjZiY1RfSygGCMpcNY8CrsaUM2zHtxe/JFcPoXCQxeO3TSJ72QMDIN5B/Ui1w==}
+    engines: {node: '>=20'}
 
   tinybench@2.9.0:
     resolution: {integrity: sha512-0+DUvqWMValLmha6lr4kD8iAMK1HzV0/aKnCtWb9v9641TnP/MFb7Pc2bxoxQjTXAErryXVgUOfv2YqNllqGeg==}
@@ -844,6 +851,8 @@ snapshots:
       fast-sha256: 1.3.0
 
   std-env@4.2.0: {}
+
+  streaming-markdown@0.2.15: {}
 
   tinybench@2.9.0: {}
 

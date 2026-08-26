@@ -39,6 +39,8 @@ export type AgentUITurnStatus =
 
 export interface AgentUIMessageItem {
   id: string;
+  /** Present when a tool split one protocol message into multiple UI segments. */
+  messageId?: string;
   kind: "message" | "thinking" | "notice";
   role: "user" | "assistant" | "system";
   text: string;
@@ -466,21 +468,30 @@ function upsertMessage(
     ? data.message_id
     : event.event_id;
   const text = typeof data.text === "string" ? data.text : "";
-  const existing = turn.items.find(
-    (item): item is AgentUIMessageItem =>
-      item.kind !== "tool" && item.id === id,
-  );
+  const tail = turn.items.at(-1);
+  const existing = tail
+    && tail.kind !== "tool"
+    && tail.kind === input.kind
+    && tail.role === input.role
+    && (data.message_id === undefined
+      || (tail.messageId ?? tail.id) === data.message_id)
+    ? tail
+    : undefined;
   if (existing) {
     existing.kind = input.kind;
     existing.role = input.role;
-    existing.text = input.streaming ? `${existing.text}${text}` : text;
+    existing.text = input.streaming
+      ? mergeStreamingText(existing.text, text)
+      : text;
     existing.status = input.streaming ? "streaming" : "complete";
     if (data.content !== undefined) existing.content = data.content;
     if (data.phase !== undefined) existing.phase = data.phase;
     return;
   }
+  const segmentId = uniqueMessageItemId(turn, id);
   turn.items.push({
-    id,
+    id: segmentId,
+    ...(segmentId !== id ? { messageId: id } : {}),
     kind: input.kind,
     role: input.role,
     text,
@@ -488,6 +499,33 @@ function upsertMessage(
     ...(data.content !== undefined ? { content: data.content } : {}),
     ...(data.phase !== undefined ? { phase: data.phase } : {}),
   });
+}
+
+function uniqueMessageItemId(turn: AgentUITurnState, sourceId: string): string {
+  if (!turn.items.some((item) => item.id === sourceId)) return sourceId;
+  let segment = 2;
+  while (turn.items.some((item) => item.id === `${sourceId}:segment:${segment}`)) {
+    segment += 1;
+  }
+  return `${sourceId}:segment:${segment}`;
+}
+
+const MIN_STREAM_OVERLAP = 8;
+
+function mergeStreamingText(accumulated: string, incoming: string): string {
+  if (!accumulated) return incoming;
+  if (!incoming || incoming === accumulated) return accumulated;
+  if (incoming.startsWith(accumulated)) return incoming;
+  if (incoming.length >= MIN_STREAM_OVERLAP && accumulated.endsWith(incoming)) {
+    return accumulated;
+  }
+  const maxOverlap = Math.min(accumulated.length, incoming.length);
+  for (let size = maxOverlap; size >= MIN_STREAM_OVERLAP; size -= 1) {
+    if (accumulated.endsWith(incoming.slice(0, size))) {
+      return accumulated + incoming.slice(size);
+    }
+  }
+  return accumulated + incoming;
 }
 
 function upsertTool(
@@ -706,10 +744,11 @@ export function reduceAgentUIEvent(
       break;
     case "agent.thinking":
       if (turn) {
+        const data = eventData(event);
         upsertMessage(turn, event, {
           kind: "thinking",
           role: "assistant",
-          streaming: false,
+          streaming: typeof data.text === "string" && data.text.length > 0,
         });
       }
       break;
@@ -773,20 +812,52 @@ export function replayAgentUIEvents(
 
 export interface AgentUIStore {
   getState(): AgentUIState;
+  getSnapshot(): AgentUIState;
   dispatch(event: OpenMAEvent): AgentUIState;
   subscribe(listener: (state: AgentUIState) => void): () => void;
+  subscribeTurnStream(
+    turnId: string,
+    listener: AgentUIStreamSubscriber,
+  ): () => void;
 }
+
+export type AgentUIStreamDelta =
+  | { kind: "assistant"; text: string }
+  | { kind: "thought"; text: string };
+
+export type AgentUIStreamSubscriber = (delta: AgentUIStreamDelta) => void;
 
 export function createAgentUIStore(sessionId: string): AgentUIStore {
   let state = createAgentUIState(sessionId);
   const listeners = new Set<(state: AgentUIState) => void>();
+  const streamSubscribers = new Map<string, Set<AgentUIStreamSubscriber>>();
+  const getState = () => state;
   return {
-    getState: () => state,
+    getState,
+    getSnapshot: getState,
     dispatch: (event) => {
+      const stream = streamProjection(event);
+      const beforeText = stream
+        ? accumulatedTurnStream(state, event.turn_id, stream.kind)
+        : "";
+      const opensSegment = stream ? opensStreamSegment(state, event, stream.kind) : false;
       const next = reduceAgentUIEvent(state, event);
       if (next !== state) {
         state = next;
-        for (const listener of listeners) listener(state);
+        if (stream) {
+          const afterText = accumulatedTurnStream(state, event.turn_id, stream.kind);
+          const delta = afterText.startsWith(beforeText)
+            ? afterText.slice(beforeText.length)
+            : "";
+          if (delta && event.turn_id) {
+            for (const subscriber of streamSubscribers.get(event.turn_id) ?? []) {
+              subscriber({ kind: stream.kind, text: delta });
+            }
+          }
+        }
+        if (!stream || opensSegment) {
+          for (const listener of listeners) listener(state);
+        }
       }
       return state;
     },
@@ -794,5 +865,71 @@ export function createAgentUIStore(sessionId: string): AgentUIStore {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    subscribeTurnStream: (turnId, listener) => {
+      let subscribers = streamSubscribers.get(turnId);
+      if (!subscribers) {
+        subscribers = new Set();
+        streamSubscribers.set(turnId, subscribers);
+      }
+      subscribers.add(listener);
+      const thought = accumulatedTurnStream(state, turnId, "thought");
+      if (thought) listener({ kind: "thought", text: thought });
+      const assistant = accumulatedTurnStream(state, turnId, "assistant");
+      if (assistant) listener({ kind: "assistant", text: assistant });
+      return () => {
+        const current = streamSubscribers.get(turnId);
+        if (!current) return;
+        current.delete(listener);
+        if (current.size === 0) streamSubscribers.delete(turnId);
+      };
+    },
   };
+}
+
+function streamProjection(
+  event: OpenMAEvent,
+): { kind: "assistant" | "thought" } | undefined {
+  if (event.type === "agent.message_chunk") return { kind: "assistant" };
+  if (event.type === "agent.thinking") {
+    const data = eventData(event);
+    return typeof data.text === "string" && data.text.length > 0
+      ? { kind: "thought" }
+      : undefined;
+  }
+  return undefined;
+}
+
+function accumulatedTurnStream(
+  state: AgentUIState,
+  turnId: string | undefined,
+  kind: "assistant" | "thought",
+): string {
+  if (!turnId) return "";
+  const turn = state.turns[turnId];
+  if (!turn) return "";
+  return turn.items.flatMap((item) => {
+    if (item.kind === "tool") return [];
+    if (kind === "thought") return item.kind === "thinking" ? [item.text] : [];
+    return item.kind === "message" && item.role === "assistant" ? [item.text] : [];
+  }).join("");
+}
+
+function opensStreamSegment(
+  state: AgentUIState,
+  event: OpenMAEvent,
+  kind: "assistant" | "thought",
+): boolean {
+  if (!event.turn_id) return false;
+  const tail = state.turns[event.turn_id]?.items.at(-1);
+  if (!tail || tail.kind === "tool") return true;
+  if (kind === "thought") {
+    if (tail.kind !== "thinking") return true;
+  } else if (tail.kind !== "message" || tail.role !== "assistant") {
+    return true;
+  }
+  const data = eventData(event);
+  if (typeof data.message_id !== "string" || data.message_id.length === 0) {
+    return false;
+  }
+  return (tail.messageId ?? tail.id) !== data.message_id;
 }

@@ -4,6 +4,8 @@ export type AgentUISessionStatus = "unknown" | "running" | "rescheduled" | "idle
 export type AgentUITurnStatus = "unknown" | "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface AgentUIMessageItem {
     id: string;
+    /** Present when a tool split one protocol message into multiple UI segments. */
+    messageId?: string;
     kind: "message" | "thinking" | "notice";
     role: "user" | "assistant" | "system";
     text: string;
@@ -110,8 +112,18 @@ export declare function reduceAgentUIEvent(state: AgentUIState, event: OpenMAEve
 export declare function replayAgentUIEvents(sessionId: string, events: readonly OpenMAEvent[]): AgentUIState;
 export interface AgentUIStore {
     getState(): AgentUIState;
+    getSnapshot(): AgentUIState;
     dispatch(event: OpenMAEvent): AgentUIState;
     subscribe(listener: (state: AgentUIState) => void): () => void;
+    subscribeTurnStream(turnId: string, listener: AgentUIStreamSubscriber): () => void;
 }
+export type AgentUIStreamDelta = {
+    kind: "assistant";
+    text: string;
+} | {
+    kind: "thought";
+    text: string;
+};
+export type AgentUIStreamSubscriber = (delta: AgentUIStreamDelta) => void;
 export declare function createAgentUIStore(sessionId: string): AgentUIStore;
 //# sourceMappingURL=index.d.ts.map
