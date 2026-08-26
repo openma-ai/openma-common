@@ -8,15 +8,18 @@ export declare const ChatCollapsible: import("react").ForwardRefExoticComponent<
 export declare const ChatCollapsibleTrigger: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleTriggerProps & import("react").RefAttributes<HTMLButtonElement>>;
 export declare const ChatCollapsibleContent: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleContentProps & import("react").RefAttributes<HTMLDivElement>>;
 export interface ChatCollapsiblePrimitives {
-    Root: (props: ComponentProps<typeof CollapsiblePrimitive.Root>) => ReactNode;
-    Trigger: (props: ComponentProps<typeof CollapsiblePrimitive.Trigger>) => ReactNode;
-    Content: (props: ComponentProps<typeof CollapsiblePrimitive.Content>) => ReactNode;
+    /** Adapter boundary: never leak the common checkout's React/Radix types. */
+    Root: (props: any) => any;
+    Trigger: (props: any) => any;
+    Content: (props: any) => any;
 }
 export declare const defaultChatCollapsiblePrimitives: ChatCollapsiblePrimitives;
 export declare const CHAT_COMPOSER_FRAME_CLASS = "chat-composer-frame mx-auto w-full max-w-3xl min-w-0";
 export declare const CHAT_TURN_FRAME_CLASS = "chat-turn-frame mx-auto w-full max-w-3xl min-w-0";
-export type ChatConversationProps = ComponentProps<typeof StickToBottom>;
-export declare function ChatConversation({ className, ...props }: ChatConversationProps): import("react").JSX.Element;
+export type ChatConversationProps = Omit<ComponentProps<typeof StickToBottom>, "children"> & {
+    children?: ReactNode;
+};
+export declare function ChatConversation({ className, children, ...props }: ChatConversationProps): import("react").JSX.Element;
 export type ChatConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 export declare function ChatConversationContent({ className, ...props }: ChatConversationContentProps): import("react").JSX.Element;
 export interface ChatConversationScrollButtonProps extends Omit<ComponentProps<"button">, "children"> {
@@ -31,6 +34,29 @@ export declare function ChatConversationScrollButton({ className, icon, renderBu
 export declare function ChatDisclosureChevron({ open, className, }: {
     open: boolean;
     className?: string;
+}): import("react").JSX.Element;
+export interface ChatThoughtEventProjection {
+    leading?: ReactNode;
+    multiline?: boolean;
+    summary: ReactNode;
+}
+export declare function projectChatThoughtEvent({ text, live, liveFallback, completedLabel, renderLiveSummary, }: {
+    text: string;
+    live: boolean;
+    liveFallback: ReactNode;
+    completedLabel: ReactNode;
+    renderLiveSummary?: (fallback: ReactNode) => ReactNode;
+}): ChatThoughtEventProjection;
+export declare function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, projection, renderLiveSummary, renderBody, }: {
+    live: boolean;
+    text: string;
+    liveFallback: ReactNode;
+    completedLabel: ReactNode;
+    projection?: ChatThoughtEventProjection;
+    renderLiveSummary?: (fallback: ReactNode) => ReactNode;
+    renderBody: (input: {
+        live: boolean;
+    }) => ReactNode;
 }): import("react").JSX.Element;
 export type ChatReasoningProps = ComponentProps<typeof ChatCollapsible> & {
     isStreaming?: boolean;

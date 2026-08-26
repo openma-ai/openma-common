@@ -9,6 +9,7 @@ import {
   ChatReasoning,
   ChatReasoningContent,
   ChatReasoningTrigger,
+  ChatThoughtEventRow,
 } from "../src/chat-ui/components.js";
 import type {
   AgentUIMessageItem,
@@ -111,6 +112,24 @@ describe("Backchat main chat disclosures", () => {
 
     expect(processHtml).toContain('data-disclosure-chevron-slot="true"');
     expect(eventHtml).toContain('data-disclosure-chevron-slot="true"');
+  });
+
+  it("keeps an atomic completed thought behind its own disclosure", () => {
+    const html = renderToStaticMarkup(
+      <ChatThoughtEventRow
+        live={false}
+        text="Inspecting the repository"
+        liveFallback="Thinking"
+        completedLabel="Thought for 2s"
+        renderBody={() => <p>Inspecting the repository</p>}
+      />,
+    );
+
+    expect(html).toContain('data-thought-block="true"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Thought for 2s");
+    expect(html).toContain('data-thought-stream-body="true"');
+    expect(html).toContain("Inspecting the repository");
   });
 });
 

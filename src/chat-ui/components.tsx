@@ -1,6 +1,5 @@
 "use client";
 
-import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { ArrowDownIcon, BrainIcon, ChevronRightIcon } from "lucide-react";
 import type {
@@ -45,18 +44,57 @@ import {
 } from "./presentation.js";
 import { chatClassNames, preserveChatScrollAnchor } from "./utils.js";
 
+type ChatScrollAnchorValue = ReturnType<typeof useStickToBottomContext>;
+
+const FALLBACK_CHAT_SCROLL_ANCHOR = {
+  contentRef: { current: null as HTMLElement | null },
+  scrollRef: { current: null as HTMLElement | null },
+  isAtBottom: true,
+  scrollToBottom: () => false,
+  stopScroll: () => {},
+} as ChatScrollAnchorValue;
+
+const ChatScrollAnchorContext = createContext<ChatScrollAnchorValue | null>(
+  null,
+);
+
 function useOptionalChatStickToBottom() {
-  try {
-    return useStickToBottomContext();
-  } catch {
-    return {
-      contentRef: { current: null },
-      scrollRef: { current: null },
-      isAtBottom: true,
-      scrollToBottom: async () => {},
-      stopScroll: () => {},
-    };
-  }
+  return useContext(ChatScrollAnchorContext) ?? FALLBACK_CHAT_SCROLL_ANCHOR;
+}
+
+function ChatScrollAnchorBridge({ children }: { children: ReactNode }) {
+  const stick = useStickToBottomContext();
+  return (
+    <ChatScrollAnchorContext.Provider value={stick}>
+      {children}
+    </ChatScrollAnchorContext.Provider>
+  );
+}
+
+function useChatControllableState<T>({
+  prop,
+  defaultProp,
+  onChange,
+}: {
+  prop: T | undefined;
+  defaultProp: T;
+  onChange?: (value: T) => void;
+}): [T, (next: T | ((previous: T) => T)) => void] {
+  const [uncontrolled, setUncontrolled] = useState(defaultProp);
+  const controlled = prop !== undefined;
+  const value = controlled ? prop : uncontrolled;
+  const setValue = useCallback(
+    (next: T | ((previous: T) => T)) => {
+      const resolved =
+        typeof next === "function"
+          ? (next as (previous: T) => T)(value)
+          : next;
+      if (!controlled) setUncontrolled(resolved);
+      if (!Object.is(resolved, value)) onChange?.(resolved);
+    },
+    [controlled, onChange, value],
+  );
+  return [value, setValue];
 }
 
 export const ChatCollapsible = CollapsiblePrimitive.Root;
@@ -64,13 +102,10 @@ export const ChatCollapsibleTrigger = CollapsiblePrimitive.Trigger;
 export const ChatCollapsibleContent = CollapsiblePrimitive.Content;
 
 export interface ChatCollapsiblePrimitives {
-  Root: (props: ComponentProps<typeof CollapsiblePrimitive.Root>) => ReactNode;
-  Trigger: (
-    props: ComponentProps<typeof CollapsiblePrimitive.Trigger>,
-  ) => ReactNode;
-  Content: (
-    props: ComponentProps<typeof CollapsiblePrimitive.Content>,
-  ) => ReactNode;
+  /** Adapter boundary: never leak the common checkout's React/Radix types. */
+  Root: (props: any) => any;
+  Trigger: (props: any) => any;
+  Content: (props: any) => any;
 }
 
 export const defaultChatCollapsiblePrimitives: ChatCollapsiblePrimitives = {
@@ -84,10 +119,14 @@ export const CHAT_COMPOSER_FRAME_CLASS =
 export const CHAT_TURN_FRAME_CLASS =
   "chat-turn-frame mx-auto w-full max-w-3xl min-w-0";
 
-export type ChatConversationProps = ComponentProps<typeof StickToBottom>;
+export type ChatConversationProps = Omit<
+  ComponentProps<typeof StickToBottom>,
+  "children"
+> & { children?: ReactNode };
 
 export function ChatConversation({
   className,
+  children,
   ...props
 }: ChatConversationProps) {
   return (
@@ -100,7 +139,9 @@ export function ChatConversation({
       resize="smooth"
       role="log"
       {...props}
-    />
+    >
+      <ChatScrollAnchorBridge>{children}</ChatScrollAnchorBridge>
+    </StickToBottom>
   );
 }
 
@@ -189,6 +230,120 @@ export function ChatDisclosureChevron({
   );
 }
 
+export interface ChatThoughtEventProjection {
+  leading?: ReactNode;
+  multiline?: boolean;
+  summary: ReactNode;
+}
+
+export function projectChatThoughtEvent({
+  text,
+  live,
+  liveFallback,
+  completedLabel,
+  renderLiveSummary,
+}: {
+  text: string;
+  live: boolean;
+  liveFallback: ReactNode;
+  completedLabel: ReactNode;
+  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
+}): ChatThoughtEventProjection {
+  if (live) {
+    const fallback = text.trim() || liveFallback;
+    return {
+      multiline: true,
+      summary: renderLiveSummary?.(fallback) ?? fallback,
+    };
+  }
+  return {
+    leading: (
+      <BrainIcon
+        className="chat-activity-icon shrink-0 text-fg-muted"
+        aria-hidden="true"
+      />
+    ),
+    summary: completedLabel,
+  };
+}
+
+export function ChatThoughtEventRow({
+  live,
+  text,
+  liveFallback,
+  completedLabel,
+  projection,
+  renderLiveSummary,
+  renderBody,
+}: {
+  live: boolean;
+  text: string;
+  liveFallback: ReactNode;
+  completedLabel: ReactNode;
+  projection?: ChatThoughtEventProjection;
+  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
+  renderBody: (input: { live: boolean }) => ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const stick = useOptionalChatStickToBottom();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const resolvedProjection =
+    projection ??
+    projectChatThoughtEvent({
+      text,
+      live,
+      liveFallback,
+      completedLabel,
+      renderLiveSummary,
+    });
+
+  const toggleOpen = () => {
+    preserveChatScrollAnchor({
+      scrollElement: stick.scrollRef.current,
+      anchorElement: triggerRef.current,
+      contentElement: stick.contentRef.current,
+      update: () => setOpen((value) => !value),
+      stopScroll: stick.stopScroll,
+    });
+  };
+
+  return (
+    <div className="py-0.5" data-thought-block="true" data-thought-live={live}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-expanded={open}
+        onClick={toggleOpen}
+        className="activity-disclosure-row min-h-6 text-[13px]"
+      >
+        {resolvedProjection.leading && (
+          <span className="grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center">
+            {resolvedProjection.leading}
+          </span>
+        )}
+        <span
+          className={chatClassNames(
+            "min-w-0 flex-1 text-left text-fg-muted",
+            !resolvedProjection.multiline && "truncate",
+          )}
+        >
+          {resolvedProjection.summary}
+        </span>
+        <ChatDisclosureChevron open={open} />
+      </button>
+      <div
+        data-thought-stream-body="true"
+        hidden={!open}
+        aria-hidden={open ? undefined : true}
+        inert={open ? undefined : true}
+        className="ml-5 mt-1 min-w-0"
+      >
+        {renderBody({ live })}
+      </div>
+    </div>
+  );
+}
+
 interface ChatReasoningContextValue {
   isStreaming: boolean;
   isOpen: boolean;
@@ -234,12 +389,14 @@ export const ChatReasoning = memo(function ChatReasoning({
   const stick = useOptionalChatStickToBottom();
   const resolvedDefaultOpen = defaultOpen ?? isStreaming;
   const isExplicitlyClosed = defaultOpen === false;
-  const [isOpen, setIsOpen] = useControllableState<boolean>({
+  const [isOpen, setIsOpen] = useChatControllableState<boolean>({
     defaultProp: resolvedDefaultOpen,
     onChange: onOpenChange,
     prop: open,
   });
-  const [duration, setDuration] = useControllableState<number | undefined>({
+  const [duration, setDuration] = useChatControllableState<
+    number | undefined
+  >({
     defaultProp: undefined,
     prop: durationProp,
   });

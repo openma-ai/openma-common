@@ -1,6 +1,5 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
-import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { ArrowDownIcon, BrainIcon, ChevronRightIcon } from "lucide-react";
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, } from "react";
@@ -9,19 +8,35 @@ import { agentUIProcessEndIndex, agentUITurnElapsedSeconds, projectAgentUITurnIt
 import { SessionTurnFrame, } from "../session-ui/index.js";
 import { groupAgentUIActivityEvents, isAgentUIToolRunning, projectAgentUIActivityTools, } from "./presentation.js";
 import { chatClassNames, preserveChatScrollAnchor } from "./utils.js";
+const FALLBACK_CHAT_SCROLL_ANCHOR = {
+    contentRef: { current: null },
+    scrollRef: { current: null },
+    isAtBottom: true,
+    scrollToBottom: () => false,
+    stopScroll: () => { },
+};
+const ChatScrollAnchorContext = createContext(null);
 function useOptionalChatStickToBottom() {
-    try {
-        return useStickToBottomContext();
-    }
-    catch {
-        return {
-            contentRef: { current: null },
-            scrollRef: { current: null },
-            isAtBottom: true,
-            scrollToBottom: async () => { },
-            stopScroll: () => { },
-        };
-    }
+    return useContext(ChatScrollAnchorContext) ?? FALLBACK_CHAT_SCROLL_ANCHOR;
+}
+function ChatScrollAnchorBridge({ children }) {
+    const stick = useStickToBottomContext();
+    return (_jsx(ChatScrollAnchorContext.Provider, { value: stick, children: children }));
+}
+function useChatControllableState({ prop, defaultProp, onChange, }) {
+    const [uncontrolled, setUncontrolled] = useState(defaultProp);
+    const controlled = prop !== undefined;
+    const value = controlled ? prop : uncontrolled;
+    const setValue = useCallback((next) => {
+        const resolved = typeof next === "function"
+            ? next(value)
+            : next;
+        if (!controlled)
+            setUncontrolled(resolved);
+        if (!Object.is(resolved, value))
+            onChange?.(resolved);
+    }, [controlled, onChange, value]);
+    return [value, setValue];
 }
 export const ChatCollapsible = CollapsiblePrimitive.Root;
 export const ChatCollapsibleTrigger = CollapsiblePrimitive.Trigger;
@@ -33,8 +48,8 @@ export const defaultChatCollapsiblePrimitives = {
 };
 export const CHAT_COMPOSER_FRAME_CLASS = "chat-composer-frame mx-auto w-full max-w-3xl min-w-0";
 export const CHAT_TURN_FRAME_CLASS = "chat-turn-frame mx-auto w-full max-w-3xl min-w-0";
-export function ChatConversation({ className, ...props }) {
-    return (_jsx(StickToBottom, { className: chatClassNames("relative flex-1 overflow-y-hidden", className), initial: false, resize: "smooth", role: "log", ...props }));
+export function ChatConversation({ className, children, ...props }) {
+    return (_jsx(StickToBottom, { className: chatClassNames("relative flex-1 overflow-y-hidden", className), initial: false, resize: "smooth", role: "log", ...props, children: _jsx(ChatScrollAnchorBridge, { children: children }) }));
 }
 export function ChatConversationContent({ className, ...props }) {
     return (_jsx(StickToBottom.Content, { className: chatClassNames("flex flex-col gap-8 p-4", className), scrollClassName: "chat-scrollbar", ...props }));
@@ -59,6 +74,42 @@ export function ChatConversationScrollButton({ className, icon = _jsx(ArrowDownI
 export function ChatDisclosureChevron({ open, className, }) {
     return (_jsx("span", { className: chatClassNames("activity-disclosure-chevron", className), "data-disclosure-chevron-slot": "true", "aria-hidden": "true", children: _jsx(ChevronRightIcon, { className: chatClassNames("size-3.5 text-fg-subtle transition-transform", open && "rotate-90") }) }));
 }
+export function projectChatThoughtEvent({ text, live, liveFallback, completedLabel, renderLiveSummary, }) {
+    if (live) {
+        const fallback = text.trim() || liveFallback;
+        return {
+            multiline: true,
+            summary: renderLiveSummary?.(fallback) ?? fallback,
+        };
+    }
+    return {
+        leading: (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0 text-fg-muted", "aria-hidden": "true" })),
+        summary: completedLabel,
+    };
+}
+export function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, projection, renderLiveSummary, renderBody, }) {
+    const [open, setOpen] = useState(false);
+    const stick = useOptionalChatStickToBottom();
+    const triggerRef = useRef(null);
+    const resolvedProjection = projection ??
+        projectChatThoughtEvent({
+            text,
+            live,
+            liveFallback,
+            completedLabel,
+            renderLiveSummary,
+        });
+    const toggleOpen = () => {
+        preserveChatScrollAnchor({
+            scrollElement: stick.scrollRef.current,
+            anchorElement: triggerRef.current,
+            contentElement: stick.contentRef.current,
+            update: () => setOpen((value) => !value),
+            stopScroll: stick.stopScroll,
+        });
+    };
+    return (_jsxs("div", { className: "py-0.5", "data-thought-block": "true", "data-thought-live": live, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "activity-disclosure-row min-h-6 text-[13px]", children: [resolvedProjection.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: resolvedProjection.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-left text-fg-muted", !resolvedProjection.multiline && "truncate"), children: resolvedProjection.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { "data-thought-stream-body": "true", hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-5 mt-1 min-w-0", children: renderBody({ live }) })] }));
+}
 const ChatReasoningContext = createContext(null);
 function useChatReasoning() {
     const context = useContext(ChatReasoningContext);
@@ -71,12 +122,12 @@ export const ChatReasoning = memo(function ChatReasoning({ className, isStreamin
     const stick = useOptionalChatStickToBottom();
     const resolvedDefaultOpen = defaultOpen ?? isStreaming;
     const isExplicitlyClosed = defaultOpen === false;
-    const [isOpen, setIsOpen] = useControllableState({
+    const [isOpen, setIsOpen] = useChatControllableState({
         defaultProp: resolvedDefaultOpen,
         onChange: onOpenChange,
         prop: open,
     });
-    const [duration, setDuration] = useControllableState({
+    const [duration, setDuration] = useChatControllableState({
         defaultProp: undefined,
         prop: durationProp,
     });
