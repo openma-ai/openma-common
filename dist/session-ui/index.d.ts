@@ -11,6 +11,8 @@ export interface SessionTurnFrameProps {
     turnId: string;
     sessionId?: string;
     promptText?: string;
+    /** Product-owned prompt body when mentions or attachments need richer UI. */
+    promptNode?: ReactNode;
     status: SessionTurnStatus;
     errorMessage?: string;
     errorNotice?: ReactNode;
@@ -26,5 +28,5 @@ export interface SessionTurnFrameProps {
  * semantics so both products can evolve those slots without forking the
  * session-level GUI structure again.
  */
-export declare function SessionTurnFrame({ turnId, sessionId, promptText, status, errorMessage, errorNotice, labels, children, className, }: SessionTurnFrameProps): import("react").JSX.Element;
+export declare function SessionTurnFrame({ turnId, sessionId, promptText, promptNode, status, errorMessage, errorNotice, labels, children, className, }: SessionTurnFrameProps): import("react").JSX.Element;
 //# sourceMappingURL=index.d.ts.map

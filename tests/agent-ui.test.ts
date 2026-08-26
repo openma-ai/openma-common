@@ -73,6 +73,75 @@ describe("OpenMA headless Agent UI state", () => {
     });
   });
 
+  it("retains tool presentation fields and raw canonical evidence", () => {
+    const state = replayAgentUIEvents("session-1", [
+      event("tool", "tool.started", 1, {
+        tool_call_id: "tool-1",
+        title: "Read runtime.ts",
+        kind: "read",
+        content: [{ type: "terminal", terminalId: "term-1" }],
+        locations: [{ path: "/tmp/runtime.ts", line: 12 }],
+        adapter_meta: { acp_meta: { codex: { toolName: "read_file" } } },
+      }, "turn-tool"),
+      event("raw", "raw.event", 2, {
+        kind: "raw",
+        source: "acp",
+        event_type: "clash.canvas.patch",
+        payload: { op: "add_node" },
+        received_at: "2026-08-26T10:00:02.000Z",
+        reason: "unsupported",
+      }, "turn-tool"),
+    ]);
+
+    expect(state.turns["turn-tool"]?.items).toMatchObject([
+      {
+        id: "tool-1",
+        kind: "tool",
+        title: "Read runtime.ts",
+        toolKind: "read",
+        content: [{ type: "terminal", terminalId: "term-1" }],
+        locations: [{ path: "/tmp/runtime.ts", line: 12 }],
+        adapterMeta: { acp_meta: { codex: { toolName: "read_file" } } },
+      },
+      {
+        id: "raw",
+        kind: "raw",
+        event: { type: "raw.event" },
+      },
+    ]);
+  });
+
+  it("deep-merges tool adapter metadata across lifecycle updates", () => {
+    const state = replayAgentUIEvents("session-1", [
+      event("tool-start", "tool.started", 1, {
+        tool_call_id: "tool-meta",
+        adapter_meta: {
+          claudeCode: { toolName: "Edit", parentToolUseId: "parent-1" },
+        },
+      }, "turn-tool-meta"),
+      event("tool-fail", "tool.failed", 2, {
+        tool_call_id: "tool-meta",
+        adapter_meta: {
+          claudeCode: {
+            nonExecutionKind: "user-rejected",
+            userFeedback: "Use a different file.",
+          },
+        },
+      }, "turn-tool-meta"),
+    ]);
+
+    expect(state.turns["turn-tool-meta"]?.items[0]).toMatchObject({
+      adapterMeta: {
+        claudeCode: {
+          toolName: "Edit",
+          parentToolUseId: "parent-1",
+          nonExecutionKind: "user-rejected",
+          userFeedback: "Use a different file.",
+        },
+      },
+    });
+  });
+
   it("closes a Managed turn when session.idle reports end_turn", () => {
     const state = replayAgentUIEvents("session-1", [
       event("managed-running", "session.running", 1, {}, "managed-turn"),

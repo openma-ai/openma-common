@@ -14,6 +14,7 @@ type DecodeAcpSessionNotification = (
     ingestedAt?: string;
     turnId?: string;
     seq?: number;
+    harness?: string;
   },
 ) => {
   fidelity: "exact" | "lossy" | "unsupported";
@@ -86,6 +87,22 @@ const decodeAcpSessionNotification = (
     decodeAcpSessionNotification: DecodeAcpSessionNotification;
   }
 ).decodeAcpSessionNotification;
+
+const decodeAcpSessionUpdate = (
+  acpEvents as unknown as {
+    decodeAcpSessionUpdate: (
+      sessionId: string,
+      update: unknown,
+      context: {
+        eventId: string;
+        occurredAt: string;
+        turnId?: string;
+        seq?: number;
+        harness?: string;
+      },
+    ) => ReturnType<DecodeAcpSessionNotification>;
+  }
+).decodeAcpSessionUpdate;
 
 const encodeAcpInput = (
   acpEvents as unknown as { encodeAcpInput: EncodeAcpInput }
@@ -162,6 +179,86 @@ describe("ACP ↔ OpenMA event codec", () => {
         params: { sessionId: "session-1" },
       },
     });
+  });
+
+  it("preserves Backchat's Codex phase, harness identity, and ACP metadata", () => {
+    const result = decodeAcpSessionNotification(
+      {
+        sessionId: "session-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "answer-1",
+          content: { type: "text", text: "Checking" },
+          _meta: { codex: { phase: "commentary" }, trace: "trace-1" },
+        },
+      },
+      {
+        eventId: "answer-event-1",
+        occurredAt: "2026-08-27T00:00:00.000Z",
+        turnId: "turn-1",
+        harness: "codex-acp",
+      },
+    );
+
+    expect(result.event).toMatchObject({
+      source: { kind: "harness", harness: "codex-acp" },
+      type: "agent.message_chunk",
+      data: {
+        text: "Checking",
+        message_id: "answer-1",
+        phase: "commentary",
+        adapter_meta: { codex: { phase: "commentary" }, trace: "trace-1" },
+      },
+    });
+  });
+
+  it("decodes the runtime's direct ACP update without a product parser", () => {
+    const result = decodeAcpSessionUpdate(
+      "session-1",
+      {
+        type: "agent_thought_chunk",
+        messageId: "thought-1",
+        content: { type: "text", text: "Planning" },
+      },
+      {
+        eventId: "thought-event-1",
+        occurredAt: "2026-08-27T00:00:01.000Z",
+        turnId: "turn-1",
+        harness: "codex-acp",
+      },
+    );
+
+    expect(result).toMatchObject({
+      fidelity: "exact",
+      event: {
+        event_id: "thought-event-1",
+        type: "agent.thinking",
+        session_id: "session-1",
+        turn_id: "turn-1",
+        source: { harness: "codex-acp" },
+        data: { message_id: "thought-1", text: "Planning" },
+      },
+    });
+  });
+
+  it("passes an OpenMA event straight into Agent UI instead of re-parsing it", () => {
+    const canonical = {
+      schema_version: "oma.event.v1",
+      event_id: "canonical-1",
+      type: "agent.message_chunk",
+      session_id: "session-1",
+      turn_id: "turn-1",
+      source: { kind: "harness", harness: "managed-agents" },
+      occurred_at: "2026-08-27T00:00:02.000Z",
+      data: { text: "Done" },
+    } satisfies OpenMAEvent;
+
+    expect(
+      decodeAcpSessionUpdate("session-1", canonical, {
+        eventId: "ignored",
+        occurredAt: "2026-08-27T00:00:03.000Z",
+      }),
+    ).toEqual({ fidelity: "exact", event: canonical, diagnostics: [] });
   });
 
   it("decodes an ACP permission request as a correlated host callback", () => {
@@ -776,6 +873,109 @@ describe("ACP ↔ OpenMA event codec", () => {
           updated_at: "2026-08-26T11:03:03.000Z",
         },
       },
+    });
+  });
+
+  it("canonicalizes the current ACP wire variants used by Backchat", () => {
+    const decode = (update: unknown, seq: number) =>
+      decodeAcpSessionUpdate("session-1", update, {
+        eventId: `acp-wire-${seq}`,
+        occurredAt: `2026-08-26T11:04:0${seq}.000Z`,
+        turnId: "turn-1",
+        seq,
+        harness: "codex-acp",
+      });
+
+    expect(decode({
+      type: "agent_thought_chunk",
+      text: "Inspecting canvas",
+      message_id: "thought-1",
+    }, 1).event).toMatchObject({
+      type: "agent.thinking",
+      data: { text: "Inspecting canvas", message_id: "thought-1" },
+    });
+    expect(decode({
+      type: "agent_message_chunk",
+      content: "Done",
+      message_id: "message-1",
+    }, 2).event).toMatchObject({
+      type: "agent.message_chunk",
+      data: { text: "Done", message_id: "message-1" },
+    });
+    expect(decode({
+      type: "tool_call_update",
+      tool_call_id: "tool-2",
+      tool_name: "Bash",
+      raw_input: { command: "ls" },
+      raw_output: "ok",
+      status: "completed",
+    }, 3).event).toMatchObject({
+      type: "tool.completed",
+      data: {
+        tool_call_id: "tool-2",
+        title: "Bash",
+        tool_name: "Bash",
+        raw_input: { command: "ls" },
+        raw_output: "ok",
+        status: "completed",
+      },
+    });
+    expect(decode({
+      sessionUpdate: "available_commands_update",
+      available_commands: [{ name: "review" }],
+    }, 4).event).toMatchObject({
+      type: "command_catalog.updated",
+      data: { commands: [{ name: "review" }] },
+    });
+    expect(decode({
+      sessionUpdate: "plan_update",
+      plan: {
+        id: "plan-1",
+        content: {
+          type: "plan",
+          entries: [{ content: "Inspect", status: "in_progress" }],
+        },
+      },
+    }, 5).event).toMatchObject({
+      type: "plan.updated",
+      data: {
+        representation: "items",
+        plan_id: "plan-1",
+        entries: [{ content: "Inspect", status: "in_progress" }],
+      },
+    });
+  });
+
+  it("splits the current Codex skill warning away from same-chunk prose", () => {
+    const warning =
+      "Warning: Skill descriptions were shortened to fit the skills context budget. " +
+      "Codex can still see every skill, but some descriptions are shorter.";
+    const mixed = decodeAcpSessionUpdate("session-1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: `${warning}\n\nDrink some water.` },
+    }, {
+      eventId: "acp-warning-mixed",
+      occurredAt: "2026-08-26T11:05:00.000Z",
+      turnId: "turn-1",
+      harness: "codex-acp",
+    });
+    const standalone = decodeAcpSessionUpdate("session-1", {
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: warning },
+    }, {
+      eventId: "acp-warning-only",
+      occurredAt: "2026-08-26T11:05:01.000Z",
+      turnId: "turn-1",
+      harness: "codex-acp",
+    });
+
+    expect(mixed.event).toMatchObject({
+      type: "agent.message_chunk",
+      data: { text: "Drink some water." },
+    });
+    expect(standalone.event).toMatchObject({
+      type: "system.notice",
+      data: { text: warning, tone: "warning" },
     });
   });
 });

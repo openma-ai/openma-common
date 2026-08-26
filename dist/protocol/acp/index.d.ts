@@ -14,6 +14,8 @@ export interface AcpDecodeContext {
     ingestedAt?: string;
     turnId?: string;
     seq?: number;
+    /** Concrete ACP harness identity used by presentation policy. */
+    harness?: string;
 }
 export interface AcpRequestDecodeContext extends AcpDecodeContext {
     sessionId: string;
@@ -40,4 +42,11 @@ export declare function decodeAcpClientResponse(response: ClientResponse, contex
 export declare function decodeAcpAgentResponse(response: AgentResponse, context: AcpResponseDecodeContext): AcpDecodeResult;
 export declare function encodeAcpInput(event: OpenMAEvent, context?: AcpEncodeContext): AcpEncodeResult;
 export declare function decodeAcpSessionNotification(notification: AcpSessionNotification, context: AcpDecodeContext): AcpDecodeResult;
+/**
+ * ACP runtimes commonly expose the official SessionUpdate directly while the
+ * SDK codec receives a SessionNotification envelope. This is the one boundary
+ * adapter products use for both live transport and replay; canonical OpenMA
+ * events pass through untouched.
+ */
+export declare function decodeAcpSessionUpdate(sessionId: string, input: unknown, context: AcpDecodeContext): AcpDecodeResult;
 //# sourceMappingURL=index.d.ts.map

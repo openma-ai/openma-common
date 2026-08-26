@@ -38,7 +38,17 @@ function cloneState(state) {
             {
                 ...turn,
                 items: turn.items.map((item) => item.kind === "tool"
-                    ? { ...item, outputs: item.outputs.map((output) => ({ ...output })) }
+                    ? {
+                        ...item,
+                        outputs: item.outputs.map((output) => ({ ...output })),
+                        ...(item.content ? { content: [...item.content] } : {}),
+                        ...(item.locations
+                            ? { locations: item.locations.map((location) => ({ ...location })) }
+                            : {}),
+                        ...(item.adapterMeta
+                            ? { adapterMeta: { ...item.adapterMeta } }
+                            : {}),
+                    }
                     : { ...item }),
             },
         ])),
@@ -294,7 +304,7 @@ function upsertMessage(turn, event, input) {
         existing.kind = input.kind;
         existing.role = input.role;
         existing.text = input.streaming
-            ? mergeStreamingText(existing.text, text)
+            ? mergeAgentUIStreamingText(existing.text, text)
             : text;
         existing.status = input.streaming ? "streaming" : "complete";
         if (data.content !== undefined)
@@ -324,8 +334,23 @@ function uniqueMessageItemId(turn, sourceId) {
     }
     return `${sourceId}:segment:${segment}`;
 }
+function mergeAdapterMeta(current, incoming) {
+    const next = { ...(current ?? {}) };
+    for (const [key, value] of Object.entries(incoming)) {
+        const previous = next[key];
+        next[key] = value
+            && typeof value === "object"
+            && !Array.isArray(value)
+            && previous
+            && typeof previous === "object"
+            && !Array.isArray(previous)
+            ? mergeAdapterMeta(previous, value)
+            : value;
+    }
+    return next;
+}
 const MIN_STREAM_OVERLAP = 8;
-function mergeStreamingText(accumulated, incoming) {
+export function mergeAgentUIStreamingText(accumulated, incoming) {
     if (!accumulated)
         return incoming;
     if (!incoming || incoming === accumulated)
@@ -365,10 +390,20 @@ function upsertTool(turn, event, status) {
         item.name = data.tool_name;
     if (data.title !== undefined)
         item.title = data.title;
+    if (data.kind !== undefined)
+        item.toolKind = data.kind;
     if (data.raw_input !== undefined)
         item.rawInput = data.raw_input;
     if (data.raw_output !== undefined)
         item.rawOutput = data.raw_output;
+    if (data.content !== undefined)
+        item.content = [...data.content];
+    if (data.locations !== undefined) {
+        item.locations = data.locations.map((location) => ({ ...location }));
+    }
+    if (data.adapter_meta !== undefined) {
+        item.adapterMeta = mergeAdapterMeta(item.adapterMeta, data.adapter_meta);
+    }
     if (data.error !== undefined)
         item.error = data.error;
     if (data.reason !== undefined)
@@ -611,6 +646,11 @@ export function reduceAgentUIEvent(state, event) {
             if (turn)
                 upsertTool(turn, event, "cancelled");
             break;
+        case "raw.event":
+        case "vendor.event":
+            if (turn)
+                turn.items.push({ id: event.event_id, kind: "raw", event });
+            break;
     }
     return next;
 }
@@ -736,4 +776,5 @@ function opensStreamSegment(state, event, kind) {
     }
     return (tail.messageId ?? tail.id) !== data.message_id;
 }
+export * from "./presentation.js";
 //# sourceMappingURL=index.js.map

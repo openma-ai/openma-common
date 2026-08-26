@@ -18,14 +18,26 @@ export interface AgentUIToolItem {
     kind: "tool";
     name?: string;
     title?: string;
+    toolKind?: string;
     status: ToolStatus;
     rawInput?: unknown;
     rawOutput?: unknown;
+    content?: unknown[];
+    locations?: Array<{
+        path?: string;
+        line?: number;
+    }>;
+    adapterMeta?: Record<string, unknown>;
     outputs: ToolOutputData[];
     error?: string;
     reason?: string;
 }
-export type AgentUITimelineItem = AgentUIMessageItem | AgentUIToolItem;
+export interface AgentUIRawItem {
+    id: string;
+    kind: "raw";
+    event: OpenMAEvent;
+}
+export type AgentUITimelineItem = AgentUIMessageItem | AgentUIToolItem | AgentUIRawItem;
 export interface AgentUIWorkItemState {
     id: string;
     kind: WorkItemKind;
@@ -108,6 +120,7 @@ export interface AgentUIState {
     lastError?: string;
 }
 export declare function createAgentUIState(sessionId: string): AgentUIState;
+export declare function mergeAgentUIStreamingText(accumulated: string, incoming: string): string;
 export declare function reduceAgentUIEvent(state: AgentUIState, event: OpenMAEvent): AgentUIState;
 export declare function replayAgentUIEvents(sessionId: string, events: readonly OpenMAEvent[]): AgentUIState;
 export interface AgentUIStore {
@@ -126,4 +139,5 @@ export type AgentUIStreamDelta = {
 };
 export type AgentUIStreamSubscriber = (delta: AgentUIStreamDelta) => void;
 export declare function createAgentUIStore(sessionId: string): AgentUIStore;
+export * from "./presentation.js";
 //# sourceMappingURL=index.d.ts.map

@@ -1,9 +1,23 @@
 import { createOpenMAEvent, createRawEvent, createVendorEvent, } from "../../session-events/openma.js";
+import { parseAcpEvent as parseCommonAcpEvent, sessionUpdateInner, sessionUpdateType, } from "../../session-events/acp.js";
+import { splitAcpSystemNoticeText } from "../../session-events/acp-system-notices.js";
 const source = {
     kind: "harness",
     harness: "acp",
     adapter: "acp-events",
 };
+function sourceFor(context) {
+    return context.harness ? { ...source, harness: context.harness } : source;
+}
+function adapterMeta(value) {
+    return isRecord(value._meta) ? { ...value._meta } : undefined;
+}
+function messagePhase(value) {
+    if (!isRecord(value._meta) || !isRecord(value._meta.codex))
+        return undefined;
+    const phase = value._meta.codex.phase;
+    return phase === "commentary" || phase === "final_answer" ? phase : undefined;
+}
 function textFromContent(content) {
     return content.type === "text" ? content.text : undefined;
 }
@@ -39,6 +53,248 @@ function callbackCategory(method) {
 }
 function isRecord(value) {
     return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function directAdapterMeta(input) {
+    const inner = sessionUpdateInner(input);
+    return isRecord(inner._meta) ? inner._meta : undefined;
+}
+function parsedAcpEvent(sessionId, input, context) {
+    const parsed = parseCommonAcpEvent(input);
+    const inner = sessionUpdateInner(input);
+    const wireType = sessionUpdateType(input)
+        ?? (typeof inner.type === "string" ? inner.type : undefined);
+    const metadata = directAdapterMeta(input);
+    const base = {
+        event_id: context.eventId,
+        session_id: sessionId,
+        ...(context.turnId ? { turn_id: context.turnId } : {}),
+        source: sourceFor(context),
+        occurred_at: context.occurredAt,
+        ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+        ...(context.seq !== undefined ? { seq: context.seq } : {}),
+    };
+    const exact = (event) => ({
+        fidelity: "exact",
+        diagnostics: [],
+        event,
+    });
+    const contentRecord = isRecord(inner.content) ? inner.content : undefined;
+    const rawMessageText = typeof contentRecord?.text === "string"
+        ? contentRecord.text
+        : typeof inner.content === "string"
+            ? inner.content
+            : typeof inner.text === "string"
+                ? inner.text
+                : undefined;
+    if ((wireType === "agent_message_chunk" || wireType === "agent.message_chunk")
+        && rawMessageText) {
+        const split = splitAcpSystemNoticeText(rawMessageText);
+        if (split.notice && split.transcript) {
+            return exact(createOpenMAEvent({
+                ...base,
+                type: "agent.message_chunk",
+                data: {
+                    text: split.transcript,
+                    ...(typeof inner.messageId === "string"
+                        ? { message_id: inner.messageId }
+                        : typeof inner.message_id === "string"
+                            ? { message_id: inner.message_id }
+                            : {}),
+                    ...(messagePhase(inner) ? { phase: messagePhase(inner) } : {}),
+                    ...(metadata ? { adapter_meta: metadata } : {}),
+                },
+            }));
+        }
+    }
+    if (parsed.kind === "text") {
+        const split = splitAcpSystemNoticeText(parsed.text);
+        if (split.notice && !split.transcript) {
+            return exact(createOpenMAEvent({
+                ...base,
+                type: "system.notice",
+                data: {
+                    text: split.notice,
+                    tone: "warning",
+                    ...(metadata ? { adapter_meta: metadata } : {}),
+                },
+            }));
+        }
+        const text = split.transcript;
+        if (!text)
+            return undefined;
+        const complete = wireType === "agent_message" || wireType === "agent.message";
+        return exact(createOpenMAEvent({
+            ...base,
+            ...(parsed.parentToolUseId ? { parent_id: parsed.parentToolUseId } : {}),
+            type: complete ? "agent.message" : "agent.message_chunk",
+            data: {
+                text,
+                ...(parsed.messageId ? { message_id: parsed.messageId } : {}),
+                ...(parsed.phase ? { phase: parsed.phase } : {}),
+                ...(inner.content !== undefined ? { content: inner.content } : {}),
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "thought") {
+        return exact(createOpenMAEvent({
+            ...base,
+            ...(parsed.parentToolUseId ? { parent_id: parsed.parentToolUseId } : {}),
+            type: "agent.thinking",
+            data: {
+                text: parsed.text,
+                ...(parsed.messageId ? { message_id: parsed.messageId } : {}),
+                ...(inner.content !== undefined ? { content: inner.content } : {}),
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "notice") {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "system.notice",
+            data: {
+                text: parsed.notice,
+                tone: "warning",
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "tool_call") {
+        const status = parsed.tool.status?.toLowerCase();
+        const type = status === "completed" || status === "complete"
+            ? "tool.completed"
+            : status === "failed" || status === "error"
+                ? "tool.failed"
+                : status === "cancelled" || status === "canceled"
+                    ? "tool.cancelled"
+                    : wireType === "tool_call_update"
+                        ? "tool.progress"
+                        : "tool.started";
+        return exact(createOpenMAEvent({
+            ...base,
+            work_item_id: parsed.tool.toolCallId,
+            ...(parsed.tool.parentToolUseId
+                ? { parent_id: parsed.tool.parentToolUseId }
+                : {}),
+            type,
+            data: {
+                tool_call_id: parsed.tool.toolCallId,
+                ...(parsed.tool.title ? { title: parsed.tool.title } : {}),
+                ...(parsed.tool.kind ? { kind: parsed.tool.kind } : {}),
+                ...(parsed.tool.status ? { status: parsed.tool.status } : {}),
+                ...(parsed.tool.toolName ? { tool_name: parsed.tool.toolName } : {}),
+                ...(parsed.tool.rawInput !== undefined
+                    ? { raw_input: parsed.tool.rawInput }
+                    : {}),
+                ...(parsed.tool.rawOutput !== undefined
+                    ? { raw_output: parsed.tool.rawOutput }
+                    : {}),
+                ...(parsed.tool.content ? { content: parsed.tool.content } : {}),
+                ...(parsed.tool.locations ? { locations: parsed.tool.locations } : {}),
+                ...(parsed.tool.meta ? { adapter_meta: parsed.tool.meta } : {}),
+                ...(parsed.tool.outputDelta
+                    ? {
+                        output: {
+                            kind: "text",
+                            data: parsed.tool.outputDelta.data,
+                            append: true,
+                            separator: parsed.tool.outputDelta.separator,
+                        },
+                    }
+                    : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "commands") {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "command_catalog.updated",
+            data: {
+                commands: parsed.commands,
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "plan") {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "plan.updated",
+            data: {
+                representation: parsed.document?.markdown
+                    ? "markdown"
+                    : parsed.document?.uri
+                        ? "file"
+                        : "items",
+                ...(parsed.planId ? { plan_id: parsed.planId } : {}),
+                update_mode: parsed.updateMode ?? "replace",
+                entries: parsed.plan,
+                ...(parsed.document
+                    ? {
+                        document: {
+                            ...(parsed.document.id ? { id: parsed.document.id } : {}),
+                            ...(parsed.document.title ? { title: parsed.document.title } : {}),
+                            ...(parsed.document.markdown
+                                ? { markdown: parsed.document.markdown }
+                                : {}),
+                            ...(parsed.document.uri ? { uri: parsed.document.uri } : {}),
+                        },
+                    }
+                    : {}),
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "plan_document" && parsed.document) {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "plan.updated",
+            data: {
+                representation: parsed.document.uri ? "file" : "markdown",
+                ...(parsed.document.id ? { plan_id: parsed.document.id } : {}),
+                update_mode: "replace",
+                document: {
+                    ...(parsed.document.id ? { id: parsed.document.id } : {}),
+                    ...(parsed.document.title ? { title: parsed.document.title } : {}),
+                    ...(parsed.document.markdown
+                        ? { markdown: parsed.document.markdown }
+                        : {}),
+                    ...(parsed.document.uri ? { uri: parsed.document.uri } : {}),
+                },
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "plan_removed") {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "plan.removed",
+            data: {
+                ...(parsed.planId ? { plan_id: parsed.planId } : {}),
+                ...(metadata ? { adapter_meta: metadata } : {}),
+            },
+        }));
+    }
+    if (parsed.kind === "note") {
+        return exact(createOpenMAEvent({
+            ...base,
+            type: "system.message",
+            data: { text: parsed.note },
+        }));
+    }
+    return undefined;
+}
+function isOpenMAEvent(value) {
+    if (!isRecord(value))
+        return false;
+    return value.schema_version === "oma.event.v1"
+        && typeof value.event_id === "string"
+        && typeof value.type === "string"
+        && typeof value.session_id === "string"
+        && isRecord(value.source)
+        && typeof value.source.kind === "string"
+        && typeof value.occurred_at === "string"
+        && Object.prototype.hasOwnProperty.call(value, "data");
 }
 function isPermissionRequest(value) {
     if (!isRecord(value) || typeof value.sessionId !== "string")
@@ -256,7 +512,7 @@ export function decodeAcpAgentResponse(response, context) {
                 request_id: response.id,
                 stop_reason: result.stopReason,
                 ...(result.usage ? { usage: result.usage } : {}),
-                ...(result._meta ? { adapter_meta: { acp_meta: result._meta } } : {}),
+                ...(result._meta ? { adapter_meta: result._meta } : {}),
             },
         }),
     };
@@ -386,12 +642,14 @@ export function decodeAcpSessionNotification(notification, context) {
         event_id: context.eventId,
         session_id: notification.sessionId,
         ...(context.turnId ? { turn_id: context.turnId } : {}),
-        source,
+        source: sourceFor(context),
         occurred_at: context.occurredAt,
         ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
         ...(context.seq !== undefined ? { seq: context.seq } : {}),
     };
     if (update.sessionUpdate === "agent_message_chunk") {
+        const phase = messagePhase(update);
+        const metadata = adapterMeta(update);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -404,11 +662,14 @@ export function decodeAcpSessionNotification(notification, context) {
                         ? { text: textFromContent(update.content) }
                         : {}),
                     content: update.content,
+                    ...(phase ? { phase } : {}),
+                    ...(metadata ? { adapter_meta: metadata } : {}),
                 },
             }),
         };
     }
     if (update.sessionUpdate === "user_message_chunk") {
+        const metadata = adapterMeta(update);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -422,11 +683,13 @@ export function decodeAcpSessionNotification(notification, context) {
                         ? { text: textFromContent(update.content) }
                         : {}),
                     content: update.content,
+                    ...(metadata ? { adapter_meta: metadata } : {}),
                 },
             }),
         };
     }
     if (update.sessionUpdate === "agent_thought_chunk") {
+        const metadata = adapterMeta(update);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -439,6 +702,7 @@ export function decodeAcpSessionNotification(notification, context) {
                         ? { text: textFromContent(update.content) }
                         : {}),
                     content: update.content,
+                    ...(metadata ? { adapter_meta: metadata } : {}),
                 },
             }),
         };
@@ -475,9 +739,7 @@ export function decodeAcpSessionNotification(notification, context) {
                             })),
                         }
                         : {}),
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -514,9 +776,7 @@ export function decodeAcpSessionNotification(notification, context) {
                             })),
                         }
                         : {}),
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -535,13 +795,9 @@ export function decodeAcpSessionNotification(notification, context) {
                         content: entry.content,
                         priority: entry.priority,
                         status: entry.status,
-                        ...(entry._meta
-                            ? { adapter_meta: { acp_meta: entry._meta } }
-                            : {}),
+                        ...(entry._meta ? { adapter_meta: entry._meta } : {}),
                     })),
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -557,9 +813,7 @@ export function decodeAcpSessionNotification(notification, context) {
                     content: entry.content,
                     priority: entry.priority,
                     status: entry.status,
-                    ...(entry._meta
-                        ? { adapter_meta: { acp_meta: entry._meta } }
-                        : {}),
+                    ...(entry._meta ? { adapter_meta: entry._meta } : {}),
                 })),
             }
             : plan.type === "markdown"
@@ -583,14 +837,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 type: "plan.updated",
                 data: {
                     ...data,
-                    ...(update._meta || plan._meta
-                        ? {
-                            adapter_meta: {
-                                ...(update._meta ? { acp_meta: update._meta } : {}),
-                                ...(plan._meta ? { acp_plan_meta: plan._meta } : {}),
-                            },
-                        }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -604,9 +851,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 type: "plan.removed",
                 data: {
                     plan_id: update.planId,
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -620,9 +865,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 type: "command_catalog.updated",
                 data: {
                     commands: update.availableCommands,
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -640,9 +883,7 @@ export function decodeAcpSessionNotification(notification, context) {
                         size: update.size,
                         ...(update.cost ? { cost: update.cost } : {}),
                     },
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -657,9 +898,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 data: {
                     capability: "session.mode",
                     value: { current_mode_id: update.currentModeId },
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -674,9 +913,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 data: {
                     capability: "session.config_options",
                     value: update.configOptions,
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -691,9 +928,7 @@ export function decodeAcpSessionNotification(notification, context) {
                 data: {
                     ...("title" in update ? { title: update.title } : {}),
                     ...("updatedAt" in update ? { updated_at: update.updatedAt } : {}),
-                    ...(update._meta
-                        ? { adapter_meta: { acp_meta: update._meta } }
-                        : {}),
+                    ...(update._meta ? { adapter_meta: update._meta } : {}),
                 },
             }),
         };
@@ -716,5 +951,101 @@ export function decodeAcpSessionNotification(notification, context) {
             reason: "unsupported",
         }),
     };
+}
+/**
+ * ACP runtimes commonly expose the official SessionUpdate directly while the
+ * SDK codec receives a SessionNotification envelope. This is the one boundary
+ * adapter products use for both live transport and replay; canonical OpenMA
+ * events pass through untouched.
+ */
+export function decodeAcpSessionUpdate(sessionId, input, context) {
+    if (isOpenMAEvent(input)) {
+        if (input.session_id === sessionId) {
+            return { fidelity: "exact", event: input, diagnostics: [] };
+        }
+        return {
+            fidelity: "unsupported",
+            diagnostics: [{
+                    code: "openma_session_mismatch",
+                    message: "Canonical event belongs to a different session",
+                }],
+            event: createRawEvent({
+                event_id: context.eventId,
+                session_id: sessionId,
+                ...(context.turnId ? { turn_id: context.turnId } : {}),
+                source: sourceFor(context),
+                occurred_at: context.occurredAt,
+                ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+                ...(context.seq !== undefined ? { seq: context.seq } : {}),
+                source_kind: "acp",
+                method: "session/update",
+                payload: input,
+                received_at: context.ingestedAt ?? context.occurredAt,
+                reason: "malformed",
+            }),
+        };
+    }
+    const outer = isRecord(input) && isRecord(input.update) ? input.update : input;
+    if (!isRecord(outer)) {
+        return {
+            fidelity: "unsupported",
+            diagnostics: [{
+                    code: "acp_session_update_malformed",
+                    message: "Malformed ACP session update",
+                }],
+            event: createRawEvent({
+                event_id: context.eventId,
+                session_id: sessionId,
+                ...(context.turnId ? { turn_id: context.turnId } : {}),
+                source: sourceFor(context),
+                occurred_at: context.occurredAt,
+                ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+                ...(context.seq !== undefined ? { seq: context.seq } : {}),
+                source_kind: "acp",
+                method: "session/update",
+                payload: input,
+                received_at: context.ingestedAt ?? context.occurredAt,
+                reason: "malformed",
+            }),
+        };
+    }
+    const parsed = parsedAcpEvent(sessionId, input, context);
+    if (parsed)
+        return parsed;
+    const sessionUpdate = typeof outer.sessionUpdate === "string"
+        ? outer.sessionUpdate
+        : typeof outer.type === "string"
+            ? outer.type
+            : undefined;
+    if (!sessionUpdate) {
+        return {
+            fidelity: "unsupported",
+            diagnostics: [{
+                    code: "acp_session_update_malformed",
+                    message: "ACP session update has no discriminant",
+                }],
+            event: createRawEvent({
+                event_id: context.eventId,
+                session_id: sessionId,
+                ...(context.turnId ? { turn_id: context.turnId } : {}),
+                source: sourceFor(context),
+                occurred_at: context.occurredAt,
+                ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+                ...(context.seq !== undefined ? { seq: context.seq } : {}),
+                source_kind: "acp",
+                method: "session/update",
+                payload: input,
+                received_at: context.ingestedAt ?? context.occurredAt,
+                reason: "malformed",
+            }),
+        };
+    }
+    return decodeAcpSessionNotification({
+        sessionId,
+        update: {
+            ...outer,
+            sessionUpdate,
+        },
+    }, context);
 }
 //# sourceMappingURL=index.js.map

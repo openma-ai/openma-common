@@ -23,6 +23,8 @@ export interface SessionTurnFrameProps {
   turnId: string;
   sessionId?: string;
   promptText?: string;
+  /** Product-owned prompt body when mentions or attachments need richer UI. */
+  promptNode?: ReactNode;
   status: SessionTurnStatus;
   errorMessage?: string;
   errorNotice?: ReactNode;
@@ -43,6 +45,7 @@ export function SessionTurnFrame({
   turnId,
   sessionId,
   promptText,
+  promptNode,
   status,
   errorMessage,
   errorNotice,
@@ -62,7 +65,7 @@ export function SessionTurnFrame({
       data-turn-id={turnId}
       data-session-turn-status={status}
     >
-      {promptText ? (
+      {promptNode ?? (promptText ? (
         <div
           className="group is-user ml-auto flex w-full max-w-[95%] flex-col items-end gap-2"
           data-session-turn-prompt="true"
@@ -71,7 +74,7 @@ export function SessionTurnFrame({
             <p className="whitespace-pre-wrap">{promptText}</p>
           </div>
         </div>
-      ) : null}
+      ) : null)}
 
       <div
         className="min-w-0"
