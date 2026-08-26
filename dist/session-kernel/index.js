@@ -18,6 +18,7 @@ export function decodeSessionCommand(input) {
                 sessionId: message.session_id,
                 agentId: message.agent_id,
                 runtime: "local",
+                ...(nonEmpty(message.cwd) ? { cwd: message.cwd } : {}),
                 ...(nonEmpty(message.resume?.acp_session_id)
                     ? { acpSessionId: message.resume.acp_session_id }
                     : {}),
@@ -37,6 +38,88 @@ export function decodeSessionCommand(input) {
             return { type: "session.cancel", sessionId: message.session_id, turnId: message.turn_id };
         case "session.dispose":
             return { type: "session.dispose", sessionId: message.session_id };
+        default:
+            return null;
+    }
+}
+/** Encode an application-native command at the relay transport edge. */
+export function encodeSessionCommand(command, options = {}) {
+    const tenant = options.tenantId ? { tenant_id: options.tenantId } : {};
+    switch (command.type) {
+        case "session.start":
+            return {
+                type: command.type,
+                session_id: command.sessionId,
+                ...tenant,
+                agent_id: command.agentId,
+                ...(command.cwd ? { cwd: command.cwd } : {}),
+                ...(command.acpSessionId
+                    ? { resume: { acp_session_id: command.acpSessionId } }
+                    : {}),
+            };
+        case "session.prompt":
+            return {
+                type: command.type,
+                session_id: command.sessionId,
+                ...tenant,
+                turn_id: command.turnId,
+                text: command.text,
+            };
+        case "session.cancel":
+            return {
+                type: command.type,
+                session_id: command.sessionId,
+                ...tenant,
+                turn_id: command.turnId,
+            };
+        case "session.dispose":
+            return { type: command.type, session_id: command.sessionId, ...tenant };
+    }
+}
+/** Decode host-to-cloud relay JSON into the shared application vocabulary. */
+export function decodeSessionHostEvent(input) {
+    if (!input || typeof input !== "object")
+        return null;
+    const message = input;
+    if (!nonEmpty(message.session_id))
+        return null;
+    switch (message.type) {
+        case "session.ready":
+            return nonEmpty(message.acp_session_id)
+                ? {
+                    type: message.type,
+                    sessionId: message.session_id,
+                    acpSessionId: message.acp_session_id,
+                }
+                : null;
+        case "session.event":
+            return nonEmpty(message.turn_id) && "event" in message
+                ? {
+                    type: message.type,
+                    sessionId: message.session_id,
+                    turnId: message.turn_id,
+                    event: message.event,
+                }
+                : null;
+        case "session.complete":
+            return nonEmpty(message.turn_id)
+                ? {
+                    type: message.type,
+                    sessionId: message.session_id,
+                    turnId: message.turn_id,
+                }
+                : null;
+        case "session.error":
+            return typeof message.message === "string"
+                ? {
+                    type: message.type,
+                    sessionId: message.session_id,
+                    ...(nonEmpty(message.turn_id) ? { turnId: message.turn_id } : {}),
+                    message: message.message,
+                }
+                : null;
+        case "session.disposed":
+            return { type: message.type, sessionId: message.session_id };
         default:
             return null;
     }

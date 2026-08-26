@@ -13,4 +13,24 @@ describe("shared session kernel contract", () => {
       import: "./dist/session-kernel/index.js",
     });
   });
+
+  it("publishes the ACP codec independently from the legacy turn projector", () => {
+    const pkg = JSON.parse(
+      readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"),
+    ) as { exports?: Record<string, unknown> };
+
+    expect(pkg.exports?.["./protocol/acp"]).toEqual({
+      types: "./dist/protocol/acp/index.d.ts",
+      import: "./dist/protocol/acp/index.js",
+    });
+  });
+
+  it("does not re-export the Agent UI domain from the runtime kernel", () => {
+    const source = readFileSync(
+      resolve(import.meta.dirname, "../src/session-kernel/index.ts"),
+      "utf8",
+    );
+
+    expect(source).not.toContain("../agent-ui");
+  });
 });

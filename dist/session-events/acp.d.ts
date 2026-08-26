@@ -208,4 +208,6 @@ export declare function reduceTurn(events: readonly {
     payload: unknown;
 }[]): TurnRender;
 export declare function latestThoughtSegment(text: string): string;
+/** @deprecated Use @openma/common/protocol/acp for the SDK codec. */
+export * from "../protocol/acp/index.js";
 //# sourceMappingURL=acp.d.ts.map

@@ -1149,3 +1149,6 @@ export function latestThoughtSegment(text: string): string {
     .filter(Boolean);
   return segments.at(-1) ?? "";
 }
+
+/** @deprecated Use @openma/common/protocol/acp for the SDK codec. */
+export * from "../protocol/acp/index.js";

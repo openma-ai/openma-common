@@ -43,6 +43,7 @@ export interface VendorEventRecord {
 
 export type CanonicalEventType =
   | "user.message"
+  | "user.message_chunk"
   | "user.interrupt"
   | "user.permission_response"
   | "user.elicitation_response"
@@ -74,14 +75,21 @@ export type CanonicalEventType =
   | "plan.completed"
   | "plan.removed"
   | "session.started"
+  | "session.updated"
   | "session.running"
+  | "session.rescheduled"
   | "session.idle"
   | "session.terminated"
   | "session.error"
+  | "system.message"
   | "system.notice"
   | "command_catalog.updated"
   | "capability.updated"
   | "usage.updated"
+  | "outcome.defined"
+  | "outcome.evaluation_started"
+  | "outcome.evaluation_progress"
+  | "outcome.evaluation_completed"
   | "callback.requested"
   | "callback.completed"
   | "callback.failed"
@@ -162,9 +170,11 @@ export interface OpenMAEventEnvelope<TType extends string, TData> {
 export type OpenMACanonicalEvent = OpenMAEventEnvelope<CanonicalEventType, unknown>;
 export type MessageEvent =
   | OpenMAEventEnvelope<"user.message", MessageEventData>
+  | OpenMAEventEnvelope<"user.message_chunk", MessageEventData>
   | OpenMAEventEnvelope<"agent.message", MessageEventData>
   | OpenMAEventEnvelope<"agent.message_chunk", MessageEventData>
-  | OpenMAEventEnvelope<"agent.thinking", MessageEventData>;
+  | OpenMAEventEnvelope<"agent.thinking", MessageEventData>
+  | OpenMAEventEnvelope<"system.message", MessageEventData>;
 export type ToolEvent =
   | OpenMAEventEnvelope<"tool.started", ToolLifecycleData>
   | OpenMAEventEnvelope<"tool.progress", ToolLifecycleData>
@@ -184,7 +194,7 @@ export type CallbackCategory =
  * This records the input lifecycle without leaking ACP transport shapes into
  * GUI projections. `callback_id` correlates a request with its terminal fact. */
 export interface CallbackLifecycleData {
-  callback_id?: string;
+  callback_id?: string | number | null;
   method: string;
   category: CallbackCategory;
   params?: unknown;
@@ -211,6 +221,30 @@ export type MonitorEvent = OpenMAEventEnvelope<"monitor.event", MonitorEventData
 export type VendorEvent = OpenMAEventEnvelope<"vendor.event", VendorEventRecord>;
 export type RawEvent = OpenMAEventEnvelope<"raw.event", RawEventRecord>;
 export type OpenMAEvent = OpenMACanonicalEvent | VendorEvent | RawEvent;
+
+export interface OutcomeDefinedData {
+  outcome_id?: string;
+  description: string;
+  rubric: unknown;
+  max_iterations?: number | null;
+  adapter_meta?: Record<string, unknown>;
+}
+
+export interface OutcomeEvaluationData {
+  outcome_id: string;
+  iteration: number;
+  outcome_evaluation_start_id?: string;
+  result?: string;
+  explanation?: string;
+  usage?: unknown;
+  adapter_meta?: Record<string, unknown>;
+}
+
+export type OutcomeEvent =
+  | OpenMAEventEnvelope<"outcome.defined", OutcomeDefinedData>
+  | OpenMAEventEnvelope<"outcome.evaluation_started", OutcomeEvaluationData>
+  | OpenMAEventEnvelope<"outcome.evaluation_progress", OutcomeEvaluationData>
+  | OpenMAEventEnvelope<"outcome.evaluation_completed", OutcomeEvaluationData>;
 
 export interface CanonicalPlanEntry {
   id?: string;
@@ -411,6 +445,10 @@ export interface WorkItemRegistry {
   seen_event_ids: Set<string>;
 }
 
+export function createWorkItemRegistry(): WorkItemRegistry {
+  return { items: new Map(), seen_event_ids: new Set() };
+}
+
 function isWorkItemEvent(event: OpenMAEvent): event is WorkItemEvent {
   return event.type.startsWith("work_item.") && typeof event.work_item_id === "string";
 }
@@ -532,8 +570,19 @@ function applyWorkItemEvent(items: Map<string, WorkItemSnapshot>, event: WorkIte
   }
 }
 
+export function reduceWorkItemEvent(
+  registry: WorkItemRegistry,
+  event: OpenMAEvent,
+): WorkItemRegistry {
+  if (registry.seen_event_ids.has(event.event_id)) return registry;
+  const next = cloneRegistry(registry);
+  next.seen_event_ids.add(event.event_id);
+  if (isWorkItemEvent(event)) applyWorkItemEvent(next.items, event);
+  return next;
+}
+
 export function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistry {
-  const registry: WorkItemRegistry = { items: new Map(), seen_event_ids: new Set() };
+  let registry = createWorkItemRegistry();
   const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => {
     if (a.event.seq === undefined && b.event.seq === undefined) return a.index - b.index;
     if (a.event.seq === undefined) return 1;
@@ -542,9 +591,7 @@ export function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistr
   });
 
   for (const { event } of ordered) {
-    if (registry.seen_event_ids.has(event.event_id)) continue;
-    registry.seen_event_ids.add(event.event_id);
-    if (isWorkItemEvent(event)) applyWorkItemEvent(registry.items, event);
+    registry = reduceWorkItemEvent(registry, event);
   }
   return registry;
 }

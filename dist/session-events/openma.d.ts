@@ -35,7 +35,7 @@ export interface VendorEventRecord {
     };
     data: unknown;
 }
-export type CanonicalEventType = "user.message" | "user.interrupt" | "user.permission_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.completed" | "turn.failed" | "turn.cancelled" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.running" | "session.idle" | "session.terminated" | "session.error" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
+export type CanonicalEventType = "user.message" | "user.message_chunk" | "user.interrupt" | "user.permission_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.completed" | "turn.failed" | "turn.cancelled" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.updated" | "session.running" | "session.rescheduled" | "session.idle" | "session.terminated" | "session.error" | "system.message" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "outcome.defined" | "outcome.evaluation_started" | "outcome.evaluation_progress" | "outcome.evaluation_completed" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 export type ToolOutputKind = "terminal" | "mcp" | "text" | "structured";
 export interface ToolOutputData {
@@ -101,14 +101,14 @@ export interface OpenMAEventEnvelope<TType extends string, TData> {
     raw?: RawEventRecord;
 }
 export type OpenMACanonicalEvent = OpenMAEventEnvelope<CanonicalEventType, unknown>;
-export type MessageEvent = OpenMAEventEnvelope<"user.message", MessageEventData> | OpenMAEventEnvelope<"agent.message", MessageEventData> | OpenMAEventEnvelope<"agent.message_chunk", MessageEventData> | OpenMAEventEnvelope<"agent.thinking", MessageEventData>;
+export type MessageEvent = OpenMAEventEnvelope<"user.message", MessageEventData> | OpenMAEventEnvelope<"user.message_chunk", MessageEventData> | OpenMAEventEnvelope<"agent.message", MessageEventData> | OpenMAEventEnvelope<"agent.message_chunk", MessageEventData> | OpenMAEventEnvelope<"agent.thinking", MessageEventData> | OpenMAEventEnvelope<"system.message", MessageEventData>;
 export type ToolEvent = OpenMAEventEnvelope<"tool.started", ToolLifecycleData> | OpenMAEventEnvelope<"tool.progress", ToolLifecycleData> | OpenMAEventEnvelope<"tool.completed", ToolLifecycleData> | OpenMAEventEnvelope<"tool.failed", ToolLifecycleData> | OpenMAEventEnvelope<"tool.cancelled", ToolLifecycleData>;
 export type CallbackCategory = "permission" | "filesystem" | "terminal" | "elicitation" | "mcp" | "extension";
 /** An agent-to-host request/notification observed at the client boundary.
  * This records the input lifecycle without leaking ACP transport shapes into
  * GUI projections. `callback_id` correlates a request with its terminal fact. */
 export interface CallbackLifecycleData {
-    callback_id?: string;
+    callback_id?: string | number | null;
     method: string;
     category: CallbackCategory;
     params?: unknown;
@@ -128,6 +128,23 @@ export type MonitorEvent = OpenMAEventEnvelope<"monitor.event", MonitorEventData
 export type VendorEvent = OpenMAEventEnvelope<"vendor.event", VendorEventRecord>;
 export type RawEvent = OpenMAEventEnvelope<"raw.event", RawEventRecord>;
 export type OpenMAEvent = OpenMACanonicalEvent | VendorEvent | RawEvent;
+export interface OutcomeDefinedData {
+    outcome_id?: string;
+    description: string;
+    rubric: unknown;
+    max_iterations?: number | null;
+    adapter_meta?: Record<string, unknown>;
+}
+export interface OutcomeEvaluationData {
+    outcome_id: string;
+    iteration: number;
+    outcome_evaluation_start_id?: string;
+    result?: string;
+    explanation?: string;
+    usage?: unknown;
+    adapter_meta?: Record<string, unknown>;
+}
+export type OutcomeEvent = OpenMAEventEnvelope<"outcome.defined", OutcomeDefinedData> | OpenMAEventEnvelope<"outcome.evaluation_started", OutcomeEvaluationData> | OpenMAEventEnvelope<"outcome.evaluation_progress", OutcomeEvaluationData> | OpenMAEventEnvelope<"outcome.evaluation_completed", OutcomeEvaluationData>;
 export interface CanonicalPlanEntry {
     id?: string;
     content: string;
@@ -238,6 +255,8 @@ export interface WorkItemRegistry {
     items: Map<string, WorkItemSnapshot>;
     seen_event_ids: Set<string>;
 }
+export declare function createWorkItemRegistry(): WorkItemRegistry;
+export declare function reduceWorkItemEvent(registry: WorkItemRegistry, event: OpenMAEvent): WorkItemRegistry;
 export declare function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistry;
 export declare function finalizeWorkItems(registry: WorkItemRegistry): WorkItemRegistry;
 export {};

@@ -41,6 +41,9 @@ export function createRawEvent(input) {
         },
     });
 }
+export function createWorkItemRegistry() {
+    return { items: new Map(), seen_event_ids: new Set() };
+}
 function isWorkItemEvent(event) {
     return event.type.startsWith("work_item.") && typeof event.work_item_id === "string";
 }
@@ -161,8 +164,17 @@ function applyWorkItemEvent(items, event) {
             return;
     }
 }
+export function reduceWorkItemEvent(registry, event) {
+    if (registry.seen_event_ids.has(event.event_id))
+        return registry;
+    const next = cloneRegistry(registry);
+    next.seen_event_ids.add(event.event_id);
+    if (isWorkItemEvent(event))
+        applyWorkItemEvent(next.items, event);
+    return next;
+}
 export function reduceWorkItems(events) {
-    const registry = { items: new Map(), seen_event_ids: new Set() };
+    let registry = createWorkItemRegistry();
     const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => {
         if (a.event.seq === undefined && b.event.seq === undefined)
             return a.index - b.index;
@@ -173,11 +185,7 @@ export function reduceWorkItems(events) {
         return a.event.seq - b.event.seq || a.index - b.index;
     });
     for (const { event } of ordered) {
-        if (registry.seen_event_ids.has(event.event_id))
-            continue;
-        registry.seen_event_ids.add(event.event_id);
-        if (isWorkItemEvent(event))
-            applyWorkItemEvent(registry.items, event);
+        registry = reduceWorkItemEvent(registry, event);
     }
     return registry;
 }

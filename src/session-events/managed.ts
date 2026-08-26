@@ -404,3 +404,6 @@ export function projectCanonicalChatTurns(
     };
   });
 }
+
+/** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
+export * from "../protocol/managed/index.js";

@@ -6,6 +6,7 @@ export interface SessionStartCommand {
     sessionId: string;
     agentId: string;
     runtime: SessionRuntime;
+    cwd?: string;
     acpSessionId?: string;
 }
 export interface SessionPromptCommand {
@@ -61,6 +62,7 @@ export type SessionWireMessage = {
     event?: unknown;
     message?: string;
     acp_session_id?: string;
+    cwd?: string;
     resume?: {
         acp_session_id?: string;
     };
@@ -68,6 +70,12 @@ export type SessionWireMessage = {
 /** Decode the relay's snake_case JSON once at the boundary. Hosts should not
  * scatter wire-shape checks through their lifecycle implementation. */
 export declare function decodeSessionCommand(input: unknown): SessionCommand | null;
+/** Encode an application-native command at the relay transport edge. */
+export declare function encodeSessionCommand(command: SessionCommand, options?: {
+    tenantId?: string;
+}): Record<string, unknown>;
+/** Decode host-to-cloud relay JSON into the shared application vocabulary. */
+export declare function decodeSessionHostEvent(input: unknown): SessionHostEvent | null;
 /** Encode a host event to the relay wire shape. The optional tenant is kept
  * at the transport edge; it is not part of the local lifecycle model. */
 export declare function encodeSessionHostEvent(event: SessionHostEvent, options?: {

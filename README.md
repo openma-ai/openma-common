@@ -9,9 +9,12 @@ to npm.
 - `@openma/common/brand` — canonical token names, light/dark values, and brand RGB.
 - `@openma/common/brand/tokens.css` — matching CSS custom properties.
 - `@openma/common/brand/openma-logo-mark.svg` — canonical OpenMA vector mark.
-- `@openma/common/session-events/managed` — Managed Agents wire-event normalizer and turn projector.
-- `@openma/common/session-events/acp` — ACP event parser and chat-turn reducer.
+- `@openma/common/protocol/managed` — v2 Managed Agents ↔ OpenMA codec, typed against the official Anthropic SDK event unions.
+- `@openma/common/protocol/acp` — ACP v1 ↔ OpenMA codec, typed against the official Agent Client Protocol SDK message unions.
+- `@openma/common/session-events/managed` — deprecated legacy Managed event projector plus a compatibility re-export of the v2 codec.
+- `@openma/common/session-events/acp` — deprecated ACP parser/turn projector plus a compatibility re-export of the SDK codec.
 - `@openma/common/session-events/openma` — OpenMA canonical event envelope, Vendor/raw records, and WorkItem lifecycle reducer.
+- `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
@@ -25,6 +28,32 @@ format.
 Adapters keep wire-protocol differences at the boundary. Consumers may add
 product-specific presentation after normalization, but should not fork the
 shared parsing and reduction logic.
+
+The v2 event path is deliberately bidirectional only through the canonical
+protocol; harness adapters never map directly to each other:
+
+```text
+Managed SessionEvent / StreamSessionEvents ──decode──┐
+ACP notifications / requests / responses  ──decode──┤
+                                                         ├──▶ OpenMAEvent
+Managed EventParams                         ◀─encode──┤
+ACP request / notification / response       ◀─encode──┘
+                                                                  │
+                                                                  ▼
+                                                        headless AgentUIState
+                                                                  │
+                                                       React / Vue / CLI bindings
+```
+
+Codec results declare `exact`, `lossy`, or `unsupported` fidelity. Current
+official events without a harness-neutral projection are retained as
+`vendor.event`; unknown future or malformed records are retained as
+`raw.event`, so replay never silently discards evidence. The Anthropic SDK is
+an optional peer and a development dependency: the public codec declarations
+track its official unions without adding a runtime SDK import.
+Every official Managed Session event discriminant is classified explicitly as
+canonical or vendor-preserved, so an SDK union change fails typecheck until the
+mapping policy is reviewed.
 
 The `session-events/openma` export is the harness-neutral event boundary. It
 distinguishes canonical events from `vendor.event` records and opaque
