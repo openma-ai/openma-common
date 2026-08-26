@@ -499,6 +499,7 @@ describe("ACP ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "acp-event-7",
         type: "agent.message_chunk",

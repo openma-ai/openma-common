@@ -83,7 +83,7 @@ export interface MessageEventData {
     adapter_meta?: Record<string, unknown>;
 }
 export interface OpenMAEventEnvelope<TType extends string, TData> {
-    /** Accepted from existing adapters; canonical constructors emit schema_version. */
+    /** Backchat main emits both markers on every canonical event. */
     schema?: typeof OPENMA_EVENT_SCHEMA_VERSION;
     schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
     event_id: string;

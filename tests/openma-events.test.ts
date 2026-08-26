@@ -29,7 +29,7 @@ const event = <TType extends string, TData>(
 });
 
 describe("OpenMA canonical events", () => {
-  it("adds the stable schema version without changing the event payload", () => {
+  it("adds Backchat main's canonical schema markers without changing the payload", () => {
     const result = createOpenMAEvent({
       event_id: "evt-1",
       type: "user.message",
@@ -40,6 +40,7 @@ describe("OpenMA canonical events", () => {
     });
 
     expect(result).toEqual({
+      schema: OPENMA_EVENT_SCHEMA_VERSION,
       schema_version: OPENMA_EVENT_SCHEMA_VERSION,
       event_id: "evt-1",
       type: "user.message",

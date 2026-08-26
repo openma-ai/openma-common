@@ -69,6 +69,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "event-user-1",
         type: "user.message",
@@ -166,6 +167,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
         },
       ],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "event-future-1",
         type: "raw.event",
@@ -220,6 +222,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "tool-use-1",
         type: "tool.started",
@@ -270,6 +273,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "tool-result-1",
         type: "tool.failed",
@@ -323,6 +327,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "session-idle-1",
         type: "session.idle",
@@ -370,6 +375,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "agent-message-1",
         type: "agent.message",
@@ -412,6 +418,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "session-running-1",
         type: "session.running",
@@ -505,6 +512,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "permission-response-server-1",
         type: "user.permission_response",
@@ -553,6 +561,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "session-error-1",
         type: "session.error",
@@ -605,6 +614,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "agent-message-2:delta:17",
         type: "agent.message_chunk",
@@ -915,6 +925,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "interrupt-server-1",
         type: "user.interrupt",
@@ -1196,6 +1207,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
         },
       ],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "managed:user.message:26",
         type: "raw.event",
@@ -1239,6 +1251,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "agent-message-3:start",
         type: "vendor.event",
@@ -1339,6 +1352,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
       fidelity: "exact",
       diagnostics: [],
       event: {
+        schema: "oma.event.v1",
         schema_version: "oma.event.v1",
         event_id: "session-updated-1",
         type: "session.updated",

@@ -7,7 +7,11 @@
  */
 export const OPENMA_EVENT_SCHEMA_VERSION = "oma.event.v1";
 export function createOpenMAEvent(input) {
-    return { schema_version: OPENMA_EVENT_SCHEMA_VERSION, ...input };
+    return {
+        schema: OPENMA_EVENT_SCHEMA_VERSION,
+        schema_version: OPENMA_EVENT_SCHEMA_VERSION,
+        ...input,
+    };
 }
 export function createVendorEvent(input) {
     const { harness, namespace, name, version, correlation, data, ...envelope } = input;

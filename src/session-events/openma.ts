@@ -150,7 +150,7 @@ export interface MessageEventData {
 }
 
 export interface OpenMAEventEnvelope<TType extends string, TData> {
-  /** Accepted from existing adapters; canonical constructors emit schema_version. */
+  /** Backchat main emits both markers on every canonical event. */
   schema?: typeof OPENMA_EVENT_SCHEMA_VERSION;
   schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
   event_id: string;
@@ -292,7 +292,11 @@ type OpenMAEventInput<TType extends string, TData> = Omit<
 export function createOpenMAEvent<TType extends string, TData>(
   input: OpenMAEventInput<TType, TData>,
 ): OpenMAEventEnvelope<TType, TData> {
-  return { schema_version: OPENMA_EVENT_SCHEMA_VERSION, ...input };
+  return {
+    schema: OPENMA_EVENT_SCHEMA_VERSION,
+    schema_version: OPENMA_EVENT_SCHEMA_VERSION,
+    ...input,
+  };
 }
 
 export interface CreateVendorEventInput
