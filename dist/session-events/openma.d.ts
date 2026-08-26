@@ -35,7 +35,7 @@ export interface VendorEventRecord {
     };
     data: unknown;
 }
-export type CanonicalEventType = "user.message" | "user.message_chunk" | "user.interrupt" | "user.permission_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.completed" | "turn.failed" | "turn.cancelled" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.updated" | "session.running" | "session.rescheduled" | "session.idle" | "session.terminated" | "session.error" | "system.message" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "outcome.defined" | "outcome.evaluation_started" | "outcome.evaluation_progress" | "outcome.evaluation_completed" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
+export type CanonicalEventType = "user.message" | "user.message_chunk" | "user.interrupt" | "user.permission_response" | "user.fs_write_response" | "user.elicitation_response" | "agent.message" | "agent.message_chunk" | "agent.thinking" | "turn.queued" | "turn.completed" | "turn.failed" | "turn.cancelled" | "tool.started" | "tool.progress" | "tool.completed" | "tool.failed" | "tool.cancelled" | "work_item.started" | "work_item.progress" | "work_item.output" | "work_item.completed" | "work_item.failed" | "work_item.cancelled" | "work_item.killed" | "work_item.terminated" | "work_item.missing_terminal" | "work_item.reidentified" | "work_item.classified" | "monitor.event" | "plan.updated" | "plan.completed" | "plan.removed" | "session.started" | "session.updated" | "session.running" | "session.rescheduled" | "session.idle" | "session.terminated" | "session.error" | "system.message" | "system.notice" | "command_catalog.updated" | "capability.updated" | "usage.updated" | "outcome.defined" | "outcome.evaluation_started" | "outcome.evaluation_progress" | "outcome.evaluation_completed" | "callback.requested" | "callback.completed" | "callback.failed" | "callback.notification";
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 export type ToolOutputKind = "terminal" | "mcp" | "text" | "structured";
 export interface ToolOutputData {
@@ -83,6 +83,8 @@ export interface MessageEventData {
     adapter_meta?: Record<string, unknown>;
 }
 export interface OpenMAEventEnvelope<TType extends string, TData> {
+    /** Accepted from existing adapters; canonical constructors emit schema_version. */
+    schema?: typeof OPENMA_EVENT_SCHEMA_VERSION;
     schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
     event_id: string;
     type: TType;

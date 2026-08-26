@@ -46,6 +46,7 @@ export type CanonicalEventType =
   | "user.message_chunk"
   | "user.interrupt"
   | "user.permission_response"
+  | "user.fs_write_response"
   | "user.elicitation_response"
   | "agent.message"
   | "agent.message_chunk"
@@ -149,6 +150,8 @@ export interface MessageEventData {
 }
 
 export interface OpenMAEventEnvelope<TType extends string, TData> {
+  /** Accepted from existing adapters; canonical constructors emit schema_version. */
+  schema?: typeof OPENMA_EVENT_SCHEMA_VERSION;
   schema_version: typeof OPENMA_EVENT_SCHEMA_VERSION;
   event_id: string;
   type: TType;

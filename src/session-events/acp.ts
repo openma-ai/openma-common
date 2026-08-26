@@ -94,7 +94,17 @@ interface NormalizedToolPatch extends Partial<ToolEntry> {
 }
 
 export type ToolContentBlock =
-  | { type: "content"; content?: { type?: string; text?: string; uri?: string; mimeType?: string; data?: string } }
+  | {
+      type: "content";
+      content?: {
+        type?: string;
+        text?: string;
+        uri?: string;
+        name?: string;
+        mimeType?: string;
+        data?: string;
+      };
+    }
   | { type: "diff"; path?: string; oldText?: string; newText?: string }
   | { type: "terminal"; terminalId?: string };
 

@@ -75,6 +75,7 @@ export type ToolContentBlock = {
         type?: string;
         text?: string;
         uri?: string;
+        name?: string;
         mimeType?: string;
         data?: string;
     };
