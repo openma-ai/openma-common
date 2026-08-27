@@ -130,6 +130,18 @@ export interface AgentUIStore {
     subscribe(listener: (state: AgentUIState) => void): () => void;
     subscribeTurnStream(turnId: string, listener: AgentUIStreamSubscriber): () => void;
 }
+/** Append-only host event row used by Backchat-compatible session stores.
+ * The host owns persistence; common owns deterministic replay into Agent UI. */
+export interface PersistedAgentUIEvent {
+    seq: number;
+    type: string;
+    data: unknown;
+    ts: number;
+}
+export type PersistedAgentUIEventDecoder = (row: PersistedAgentUIEvent) => OpenMAEvent | readonly OpenMAEvent[] | null | undefined;
+/** Rebuild a live Agent UI store from persisted host events. Stable seq
+ * ordering and the store's event-id dedupe make repeated hydration safe. */
+export declare function replayAgentUIEventLog(store: AgentUIStore, rows: readonly PersistedAgentUIEvent[], decode: PersistedAgentUIEventDecoder): AgentUIState;
 /**
  * In-memory transcript authority keyed by product session id. A host may swap
  * or reconnect transports, but selecting a session must resolve back to the

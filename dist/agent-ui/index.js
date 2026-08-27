@@ -669,6 +669,22 @@ export function replayAgentUIEvents(sessionId, events) {
     });
     return ordered.reduce((state, entry) => reduceAgentUIEvent(state, entry.event), createAgentUIState(sessionId));
 }
+/** Rebuild a live Agent UI store from persisted host events. Stable seq
+ * ordering and the store's event-id dedupe make repeated hydration safe. */
+export function replayAgentUIEventLog(store, rows, decode) {
+    const ordered = rows
+        .map((row, index) => ({ row, index }))
+        .sort((left, right) => left.row.seq - right.row.seq || left.index - right.index);
+    for (const { row } of ordered) {
+        const decoded = decode(row);
+        if (!decoded)
+            continue;
+        for (const event of Array.isArray(decoded) ? decoded : [decoded]) {
+            store.dispatch(event);
+        }
+    }
+    return store.getState();
+}
 export function createAgentUISessionRegistry() {
     const stores = new Map();
     return {
