@@ -172,6 +172,64 @@ describe("Backchat main AgentUITurnView", () => {
     ),
   };
 
+  it("renders Backchat's thinking fallback while a running turn has no visible event", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-silent"
+        turn={{
+          id: "turn-silent",
+          status: "running",
+          startedAt: "2026-08-27T00:00:00.000Z",
+          items: [],
+        }}
+        thoughts="history"
+        now={Date.parse("2026-08-27T00:00:01.000Z")}
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    expect(html).toContain('data-session-process-state="running"');
+    expect(html).toContain('data-thinking-fallback="true"');
+    expect(html).toContain("Thinking");
+  });
+
+  it("removes the generic fallback as soon as a visible answer event arrives", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-answering"
+        turn={{
+          id: "turn-answering",
+          status: "running",
+          items: [
+            {
+              ...assistant("answer-live", "Answering"),
+              status: "streaming",
+            },
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    expect(html).toContain("Answering");
+    expect(html).not.toContain('data-thinking-fallback="true"');
+  });
+
   it("closes the complete process instead of leaving its tool rows expanded", () => {
     const turn: AgentUITurnState = {
       id: "turn-complete",

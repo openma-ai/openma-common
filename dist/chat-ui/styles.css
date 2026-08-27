@@ -1,0 +1,324 @@
+/*
+ * Backchat chat structure. Hosts opt into this asset explicitly and map the
+ * --chat-* tokens to their own theme. Components never inject it from JS.
+ */
+
+.chat-turn-frame {
+  padding-inline: var(--chat-turn-content-inset, 32px);
+}
+
+.chat-composer-frame {
+  padding-inline: var(--composer-frame-padding-inline, 12px);
+}
+
+.chat-activity-icon {
+  width: var(--chat-activity-icon-size, 14px);
+  height: var(--chat-activity-icon-size, 14px);
+}
+
+.activity-disclosure-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  -webkit-user-select: none;
+  user-select: none;
+  align-items: center;
+  gap: 6px;
+  border-radius: 4px;
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  text-align: left;
+}
+
+.activity-disclosure-row:hover {
+  background: var(
+    --chat-interaction-bg-hover,
+    var(--interaction-bg-hover, transparent)
+  );
+}
+
+.activity-disclosure-row:focus-visible {
+  outline: 2px solid
+    color-mix(
+      in srgb,
+      var(--chat-focus-ring, var(--focus-ring, currentColor)) 40%,
+      transparent
+    );
+  outline-offset: 1px;
+}
+
+.activity-disclosure-chevron {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  flex: 0 0 20px;
+  place-items: center;
+}
+
+.home-empty-stage {
+  position: relative;
+}
+
+.home-empty-stack {
+  --home-composer-width: var(--home-composer-theme-width, 42rem);
+  --home-empty-stack-offset-y: clamp(-24px, -3vh, -12px);
+  margin-top: var(--home-empty-stack-offset-y);
+}
+
+.home-composer-stack {
+  max-width: var(--home-composer-frame-width, 48rem);
+}
+
+.chat-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--chat-fg, var(--fg, currentColor)) 30%,
+      transparent
+    )
+    transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  max-height: 50%;
+  border: 3px solid transparent;
+  border-radius: 9999px;
+  background: color-mix(
+    in srgb,
+    var(--chat-fg, var(--fg, currentColor)) 30%,
+    transparent
+  );
+  background-clip: padding-box;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(
+    in srgb,
+    var(--chat-fg, var(--fg, currentColor)) 50%,
+    transparent
+  );
+  background-clip: padding-box;
+}
+
+@keyframes reasoning-collapse-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+
+@keyframes reasoning-collapse-closed {
+  from {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+  to {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+.reasoning-collapse {
+  display: grid;
+}
+
+.reasoning-collapse[data-state="open"] {
+  animation: reasoning-collapse-open
+    var(
+      --chat-motion-disclosure-duration,
+      var(--motion-disclosure-duration, 220ms)
+    )
+    var(
+      --chat-motion-disclosure-easing,
+      var(--motion-disclosure-easing, cubic-bezier(0.25, 1, 0.5, 1))
+    )
+    both;
+}
+
+.reasoning-collapse[data-state="closed"] {
+  animation: reasoning-collapse-closed
+    var(
+      --chat-motion-disclosure-duration,
+      var(--motion-disclosure-duration, 220ms)
+    )
+    var(
+      --chat-motion-disclosure-easing,
+      var(--motion-disclosure-easing, cubic-bezier(0.25, 1, 0.5, 1))
+    )
+    both;
+}
+
+.reasoning-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The same settled/streaming block geometry prevents the final handoff jump. */
+.chat-markdown,
+.streaming-md {
+  min-width: 0;
+  color: var(--chat-fg, var(--fg, currentColor));
+  font-family: var(--font-chat, ui-sans-serif, system-ui, sans-serif);
+  font-size: 14px;
+  line-height: 1.75rem;
+}
+
+.chat-markdown--thought {
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+  font-size: 13px;
+  line-height: 1.5rem;
+}
+
+.chat-markdown :is(h1, h2, h3, h4),
+.streaming-md :is(h1, h2, h3, h4) {
+  margin-top: 0.75rem;
+  margin-bottom: 0.375rem;
+  font-weight: 600;
+  line-height: 1.75rem;
+}
+
+.chat-markdown h1,
+.streaming-md h1 {
+  font-size: 16px;
+}
+
+.chat-markdown h2,
+.streaming-md h2 {
+  font-size: 15px;
+}
+
+.chat-markdown :is(h3, h4),
+.streaming-md :is(h3, h4) {
+  font-size: 14px;
+}
+
+.chat-markdown p,
+.streaming-md p,
+.chat-markdown :is(ul, ol),
+.streaming-md :is(ul, ol) {
+  margin-block: 0.375rem;
+}
+
+.chat-markdown ul,
+.streaming-md ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.chat-markdown ol,
+.streaming-md ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+.chat-markdown li,
+.streaming-md li {
+  margin-block: 0.125rem;
+  padding-block: 0;
+}
+
+.chat-markdown li > p,
+.streaming-md li > p {
+  margin-block: 0;
+}
+
+.chat-markdown pre,
+.streaming-md pre {
+  margin-block: 0.5rem;
+  overflow-x: auto;
+  border: 1px solid
+    color-mix(in srgb, var(--chat-border, var(--border, currentColor)) 60%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(
+    in srgb,
+    var(--chat-bg-surface, var(--bg-surface, transparent)) 60%,
+    transparent
+  );
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 13px;
+  line-height: 1.5rem;
+}
+
+.chat-markdown code,
+.streaming-md code {
+  border-radius: 0.25rem;
+  background: color-mix(
+    in srgb,
+    var(--chat-bg-surface, var(--bg-surface, transparent)) 70%,
+    transparent
+  );
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+}
+
+.chat-markdown pre code,
+.streaming-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 13px;
+}
+
+.chat-markdown blockquote,
+.streaming-md blockquote {
+  margin-block: 0.5rem;
+  border-left: 2px solid var(--chat-border, var(--border, currentColor));
+  padding-left: 0.75rem;
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+}
+
+.chat-markdown table,
+.streaming-md table {
+  width: 100%;
+  margin-block: 0.5rem;
+  border-collapse: collapse;
+}
+
+.chat-markdown :is(th, td),
+.streaming-md :is(th, td) {
+  border: 1px solid
+    color-mix(in srgb, var(--chat-border, var(--border, currentColor)) 60%, transparent);
+  padding: 0.25rem 0.5rem;
+  font-size: 13px;
+  line-height: 1.5rem;
+}
+
+.chat-markdown th,
+.streaming-md th {
+  text-align: left;
+  font-weight: 600;
+}
+
+.chat-markdown a,
+.streaming-md a {
+  color: var(--chat-link, var(--chat-fg, var(--fg, currentColor)));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-markdown > :first-child,
+.streaming-md > :first-child {
+  margin-top: 0;
+}
+
+.chat-markdown > :last-child,
+.streaming-md > :last-child {
+  margin-bottom: 0;
+}

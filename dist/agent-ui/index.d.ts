@@ -130,6 +130,18 @@ export interface AgentUIStore {
     subscribe(listener: (state: AgentUIState) => void): () => void;
     subscribeTurnStream(turnId: string, listener: AgentUIStreamSubscriber): () => void;
 }
+/**
+ * In-memory transcript authority keyed by product session id. A host may swap
+ * or reconnect transports, but selecting a session must resolve back to the
+ * same store until the host explicitly removes it.
+ */
+export interface AgentUISessionRegistry {
+    get(sessionId: string): AgentUIStore;
+    has(sessionId: string): boolean;
+    remove(sessionId: string): boolean;
+    clear(): void;
+}
+export declare function createAgentUISessionRegistry(): AgentUISessionRegistry;
 export type AgentUIStreamDelta = {
     kind: "assistant";
     text: string;

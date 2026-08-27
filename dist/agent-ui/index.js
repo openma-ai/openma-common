@@ -669,6 +669,28 @@ export function replayAgentUIEvents(sessionId, events) {
     });
     return ordered.reduce((state, entry) => reduceAgentUIEvent(state, entry.event), createAgentUIState(sessionId));
 }
+export function createAgentUISessionRegistry() {
+    const stores = new Map();
+    return {
+        get(sessionId) {
+            const existing = stores.get(sessionId);
+            if (existing)
+                return existing;
+            const created = createAgentUIStore(sessionId);
+            stores.set(sessionId, created);
+            return created;
+        },
+        has(sessionId) {
+            return stores.has(sessionId);
+        },
+        remove(sessionId) {
+            return stores.delete(sessionId);
+        },
+        clear() {
+            stores.clear();
+        },
+    };
+}
 export function createAgentUIStore(sessionId) {
     let state = createAgentUIState(sessionId);
     const listeners = new Set();

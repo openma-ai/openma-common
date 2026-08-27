@@ -878,6 +878,40 @@ export interface AgentUIStore {
   ): () => void;
 }
 
+/**
+ * In-memory transcript authority keyed by product session id. A host may swap
+ * or reconnect transports, but selecting a session must resolve back to the
+ * same store until the host explicitly removes it.
+ */
+export interface AgentUISessionRegistry {
+  get(sessionId: string): AgentUIStore;
+  has(sessionId: string): boolean;
+  remove(sessionId: string): boolean;
+  clear(): void;
+}
+
+export function createAgentUISessionRegistry(): AgentUISessionRegistry {
+  const stores = new Map<string, AgentUIStore>();
+  return {
+    get(sessionId) {
+      const existing = stores.get(sessionId);
+      if (existing) return existing;
+      const created = createAgentUIStore(sessionId);
+      stores.set(sessionId, created);
+      return created;
+    },
+    has(sessionId) {
+      return stores.has(sessionId);
+    },
+    remove(sessionId) {
+      return stores.delete(sessionId);
+    },
+    clear() {
+      stores.clear();
+    },
+  };
+}
+
 export type AgentUIStreamDelta =
   | { kind: "assistant"; text: string }
   | { kind: "thought"; text: string };

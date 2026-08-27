@@ -1,4 +1,4 @@
-import type { AgentUIState, AgentUIStore } from "./index.js";
+import type { AgentUIState, AgentUIStore, AgentUIStreamSubscriber } from "./index.js";
 export interface StreamTextPacer {
     enqueue(text: string): void;
     flush(): void;
@@ -15,7 +15,7 @@ export declare function createStreamTextPacer({ write, schedule, cancel, onDrain
 /** React binding for the framework-neutral Agent UI store. */
 export declare function useAgentUIState(store: AgentUIStore): AgentUIState;
 export interface AgentUIStreamingMarkdownProps {
-    store: AgentUIStore;
+    store: AgentUIStreamSource;
     turnId: string;
     kind: "assistant" | "thought";
     className?: string;
@@ -23,6 +23,12 @@ export interface AgentUIStreamingMarkdownProps {
     paceReplay?: boolean;
     onLinkActivate?: (url: string) => void;
     decorate?: (host: HTMLDivElement) => void;
+}
+/** Minimal AI-SDK-like stream contract. A host can feed the shared renderer
+ * from the canonical Agent UI store or from an existing product transport
+ * adapter without exposing that transport to the component. */
+export interface AgentUIStreamSource {
+    subscribeTurnStream(turnId: string, listener: AgentUIStreamSubscriber): () => void;
 }
 /**
  * The DOM-mutating half of Backchat main's dual-track renderer. React owns

@@ -75,6 +75,7 @@
       "types": "./dist/chat-ui/index.d.ts",
       "import": "./dist/chat-ui/index.js"
     },
+    "./chat-ui/styles.css": "./dist/chat-ui/styles.css",
     "./chat-ui/presentation": {
       "types": "./dist/chat-ui/presentation.d.ts",
       "import": "./dist/chat-ui/presentation.js"
@@ -93,11 +94,12 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.120.0",
+    "@types/node": "^25.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "@types/node": "^25.0.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "jsdom": "29.1.1",
+    "react": "19.2.5",
+    "react-dom": "19.2.5",
     "typescript": "^5.8.0",
     "vitest": "^4.1.3"
   },
@@ -106,6 +108,7 @@
     "@radix-ui/react-collapsible": "^1.1.12",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
+    "streamdown": "^2.5.0",
     "streaming-markdown": "^0.2.15",
     "tailwind-merge": "^3.6.0",
     "use-stick-to-bottom": "^1.1.4"
@@ -116,9 +119,15 @@
     "react-dom": ">=18"
   },
   "peerDependenciesMeta": {
-    "@anthropic-ai/sdk": { "optional": true },
-    "react": { "optional": true },
-    "react-dom": { "optional": true }
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
   },
   "packageManager": "pnpm@11.0.8"
 }
