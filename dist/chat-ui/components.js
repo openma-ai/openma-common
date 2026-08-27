@@ -183,7 +183,7 @@ export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({ classNa
 export const ChatReasoningContent = memo(function ChatReasoningContent({ className, children, ...props }) {
     const { collapsible, isOpen } = useChatReasoning();
     const CollapsibleContent = collapsible.Content;
-    return (_jsx(CollapsibleContent, { "aria-hidden": isOpen ? undefined : true, inert: isOpen ? undefined : true, className: "reasoning-collapse text-fg-muted outline-none", ...props, children: _jsx("div", { className: "reasoning-collapse-inner", children: _jsx("div", { className: chatClassNames("pt-2 text-[13px] leading-6", className), children: children }) }) }));
+    return (_jsx(CollapsibleContent, { forceMount: true, "aria-hidden": isOpen ? undefined : true, inert: isOpen ? undefined : true, className: "reasoning-collapse text-fg-muted outline-none", ...props, children: _jsx("div", { className: "reasoning-collapse-inner", children: _jsx("div", { className: chatClassNames("pt-2 text-[13px] leading-6", className), children: children }) }) }));
 });
 export function ChatCollapsibleEventSequence({ nodes, active, completedProjection, }) {
     if (nodes.length === 1)
@@ -207,7 +207,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
             stopScroll: stick.stopScroll,
         });
     };
-    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "activity-disclosure-row min-h-6 text-[13px]", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), open && (_jsx("div", { className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) }))] }));
+    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "activity-disclosure-row min-h-6 text-[13px]", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
 }
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */

@@ -68,7 +68,7 @@ describe("Backchat main chat disclosures", () => {
     expect(html).toContain("Run tests body");
   });
 
-  it("keeps a completed event sequence folded", () => {
+  it("keeps a completed event sequence hidden without discarding its state", () => {
     const html = renderToStaticMarkup(
       <ChatCollapsibleEventSequence
         nodes={nodes}
@@ -79,7 +79,8 @@ describe("Backchat main chat disclosures", () => {
 
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("Ran commands");
-    expect(html).not.toContain("Read files body");
+    expect(html).toContain('hidden="" aria-hidden="true" inert=""');
+    expect(html).toContain("Read files body");
   });
 
   it("keeps a single atomic event out of an unnecessary second disclosure", () => {
@@ -230,7 +231,7 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).not.toContain('data-thinking-fallback="true"');
   });
 
-  it("closes the complete process instead of leaving its tool rows expanded", () => {
+  it("hides the complete process while retaining nested disclosure state", () => {
     const turn: AgentUITurnState = {
       id: "turn-complete",
       status: "completed",
@@ -254,8 +255,10 @@ describe("Backchat main AgentUITurnView", () => {
 
     expect(html).toContain('data-session-process-state="complete"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).not.toContain('data-tool-item="one"');
-    expect(html).not.toContain('data-tool-item="two"');
+    expect(html).toContain('data-state="closed"');
+    expect(html).toContain('aria-hidden="true" inert=""');
+    expect(html).toContain('data-tool-item="one"');
+    expect(html).toContain('data-tool-item="two"');
   });
 
   it("opens the live activity group while its latest tool is running", () => {

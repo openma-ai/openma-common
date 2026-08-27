@@ -65,14 +65,6 @@ export function preserveChatScrollAnchor({ scrollElement, anchorElement, content
         if (slackState)
             reconcileScrollAnchorSlack(slackState);
     };
-    if (contentElement && typeof ResizeObserver !== "undefined") {
-        const observer = new ResizeObserver(() => scheduleFrame(() => {
-            stopScroll();
-            reanchor();
-        }));
-        observer.observe(contentElement);
-        setTimeout(() => observer.disconnect(), 400);
-    }
     update();
     scheduleFrame(reanchor);
 }

@@ -517,6 +517,7 @@ export const ChatReasoningContent = memo(function ChatReasoningContent({
   const CollapsibleContent = collapsible.Content;
   return (
     <CollapsibleContent
+      forceMount
       aria-hidden={isOpen ? undefined : true}
       inert={isOpen ? undefined : true}
       className="reasoning-collapse text-fg-muted outline-none"
@@ -616,15 +617,18 @@ function ChatCollapsibleEventSequenceGroup({
         </span>
         <ChatDisclosureChevron open={open} />
       </button>
-      {open && (
-        <div className="ml-4 mt-1 border-l border-border/40 pl-2">
-          <div className="space-y-1">
-            {nodes.map((node) => (
-              <div key={node.key}>{node.content}</div>
-            ))}
-          </div>
+      <div
+        hidden={!open}
+        aria-hidden={open ? undefined : true}
+        inert={open ? undefined : true}
+        className="ml-4 mt-1 border-l border-border/40 pl-2"
+      >
+        <div className="space-y-1">
+          {nodes.map((node) => (
+            <div key={node.key}>{node.content}</div>
+          ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
