@@ -547,13 +547,15 @@ export interface ChatCollapsibleEventNode {
 export function ChatCollapsibleEventSequence({
   nodes,
   active,
+  forceGroup = false,
   completedProjection,
 }: {
   nodes: ChatCollapsibleEventNode[];
   active: boolean;
+  forceGroup?: boolean;
   completedProjection: ChatCollapsibleEventNode["projection"];
 }) {
-  if (nodes.length === 1) return nodes[0]?.content ?? null;
+  if (nodes.length === 1 && !forceGroup) return nodes[0]?.content ?? null;
   return (
     <ChatCollapsibleEventSequenceGroup
       nodes={nodes}
@@ -945,6 +947,19 @@ export function AgentUITurnView({
     hasSupplementalProcess ||
     (isStreaming && answerItems.length === 0);
   const finalItem = items.at(-1);
+  let finalActivityItem: AgentUITimelineItem | undefined;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (
+      item &&
+      (item.kind === "message" ||
+        item.kind === "thinking" ||
+        item.kind === "tool")
+    ) {
+      finalActivityItem = item;
+      break;
+    }
+  }
 
   return (
     <>
@@ -1016,11 +1031,17 @@ export function AgentUITurnView({
                 const groupTools = group.flatMap((child) =>
                   "tool" in child ? [child.tool] : [],
                 );
-                let active = false;
+                const lastGroupChild = group.at(-1);
+                const active =
+                  isStreaming && lastGroupChild?.item === finalActivityItem;
+                const forceGroup =
+                  active &&
+                  lastGroupChild !== undefined &&
+                  "tool" in lastGroupChild &&
+                  !isAgentUIToolRunning(lastGroupChild.tool.status);
                 const nodes: ChatCollapsibleEventNode[] = group.map((child) => {
                   if (!("tool" in child)) {
-                    const live = isStreaming && child.item === finalItem;
-                    active ||= live;
+                    const live = active && child === lastGroupChild;
                     const prefixSkip = thoughtPrefixes.get(child.item.id) ?? 0;
                     return {
                       key: child.item.id,
@@ -1049,17 +1070,15 @@ export function AgentUITurnView({
                       }) ?? child.item.text,
                     };
                   }
-                  const live =
-                    isStreaming &&
-                    child.item === finalItem &&
-                    isAgentUIToolRunning(child.tool.status);
-                  active ||= live;
+                  const projectionLive = active && child === lastGroupChild;
+                  const contentLive =
+                    projectionLive && isAgentUIToolRunning(child.tool.status);
                   return {
                     key: child.tool.id,
                     projection: slots.projectToolActivity?.({
                       tool: child.tool,
                       turn,
-                      live,
+                      live: projectionLive,
                       prefixSkip: 0,
                     }) ?? {
                       summary: labels.toolActivity(child.tool),
@@ -1067,7 +1086,7 @@ export function AgentUITurnView({
                     content: slots.renderTool({
                       tool: child.tool,
                       turn,
-                      live,
+                      live: contentLive,
                       prefixSkip: 0,
                     }),
                   };
@@ -1077,6 +1096,7 @@ export function AgentUITurnView({
                     key={`event-sequence-${index}`}
                     nodes={nodes}
                     active={active}
+                    forceGroup={forceGroup}
                     completedProjection={slots.projectToolRun?.({
                       turn,
                       tools: groupTools,

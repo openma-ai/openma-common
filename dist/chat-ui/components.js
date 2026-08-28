@@ -185,8 +185,8 @@ export const ChatReasoningContent = memo(function ChatReasoningContent({ classNa
     const CollapsibleContent = collapsible.Content;
     return (_jsx(CollapsibleContent, { forceMount: true, "aria-hidden": isOpen ? undefined : true, inert: isOpen ? undefined : true, className: "reasoning-collapse text-fg-muted outline-none", ...props, children: _jsx("div", { className: "reasoning-collapse-inner", children: _jsx("div", { className: chatClassNames("pt-2 text-[13px] leading-6", className), children: children }) }) }));
 });
-export function ChatCollapsibleEventSequence({ nodes, active, completedProjection, }) {
-    if (nodes.length === 1)
+export function ChatCollapsibleEventSequence({ nodes, active, forceGroup = false, completedProjection, }) {
+    if (nodes.length === 1 && !forceGroup)
         return nodes[0]?.content ?? null;
     return (_jsx(ChatCollapsibleEventSequenceGroup, { nodes: nodes, active: active, completedProjection: completedProjection }));
 }
@@ -264,6 +264,17 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         hasSupplementalProcess ||
         (isStreaming && answerItems.length === 0);
     const finalItem = items.at(-1);
+    let finalActivityItem;
+    for (let index = items.length - 1; index >= 0; index -= 1) {
+        const item = items[index];
+        if (item &&
+            (item.kind === "message" ||
+                item.kind === "thinking" ||
+                item.kind === "tool")) {
+            finalActivityItem = item;
+            break;
+        }
+    }
     return (_jsxs(_Fragment, { children: [slots.renderBeforeTurn?.({ turn }), _jsxs(SessionTurnFrame, { turnId: turn.id, sessionId: sessionId, status: frameStatus ?? sessionTurnStatus(turn), errorMessage: turn.error, className: chatClassNames("!mb-8 !space-y-4 [&_[data-session-turn-prompt]>div]:!px-3 [&_[data-session-turn-prompt]>div]:!py-2", className), promptNode: prompt && slots.renderPrompt
                     ? slots.renderPrompt({ item: prompt, turn })
                     : undefined, promptText: prompt && !slots.renderPrompt ? prompt.text : undefined, errorNotice: turn.status === "failed" && slots.renderError
@@ -289,11 +300,15 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                             if (!group)
                                                 return null;
                                             const groupTools = group.flatMap((child) => "tool" in child ? [child.tool] : []);
-                                            let active = false;
+                                            const lastGroupChild = group.at(-1);
+                                            const active = isStreaming && lastGroupChild?.item === finalActivityItem;
+                                            const forceGroup = active &&
+                                                lastGroupChild !== undefined &&
+                                                "tool" in lastGroupChild &&
+                                                !isAgentUIToolRunning(lastGroupChild.tool.status);
                                             const nodes = group.map((child) => {
                                                 if (!("tool" in child)) {
-                                                    const live = isStreaming && child.item === finalItem;
-                                                    active ||= live;
+                                                    const live = active && child === lastGroupChild;
                                                     const prefixSkip = thoughtPrefixes.get(child.item.id) ?? 0;
                                                     return {
                                                         key: child.item.id,
@@ -317,16 +332,14 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                                         }) ?? child.item.text,
                                                     };
                                                 }
-                                                const live = isStreaming &&
-                                                    child.item === finalItem &&
-                                                    isAgentUIToolRunning(child.tool.status);
-                                                active ||= live;
+                                                const projectionLive = active && child === lastGroupChild;
+                                                const contentLive = projectionLive && isAgentUIToolRunning(child.tool.status);
                                                 return {
                                                     key: child.tool.id,
                                                     projection: slots.projectToolActivity?.({
                                                         tool: child.tool,
                                                         turn,
-                                                        live,
+                                                        live: projectionLive,
                                                         prefixSkip: 0,
                                                     }) ?? {
                                                         summary: labels.toolActivity(child.tool),
@@ -334,12 +347,12 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                                     content: slots.renderTool({
                                                         tool: child.tool,
                                                         turn,
-                                                        live,
+                                                        live: contentLive,
                                                         prefixSkip: 0,
                                                     }),
                                                 };
                                             });
-                                            return (_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, completedProjection: slots.projectToolRun?.({
+                                            return (_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, forceGroup: forceGroup, completedProjection: slots.projectToolRun?.({
                                                     turn,
                                                     tools: groupTools,
                                                     active,

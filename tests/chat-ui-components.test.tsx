@@ -96,6 +96,19 @@ describe("Backchat main chat disclosures", () => {
     expect(html).not.toContain("data-collapsible-event-count");
   });
 
+  it("keeps a live single atomic event out of an unnecessary second disclosure", () => {
+    const html = renderToStaticMarkup(
+      <ChatCollapsibleEventSequence
+        nodes={[nodes[0]!]}
+        active
+        completedProjection={{ summary: "Read files" }}
+      />,
+    );
+
+    expect(html).toContain("Read files body");
+    expect(html).not.toContain("data-collapsible-event-count");
+  });
+
   it("puts process and event chevrons in the same trailing slot", () => {
     const processHtml = renderToStaticMarkup(
       <ChatReasoning isStreaming={false} open={false}>
@@ -291,6 +304,58 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).toContain('data-session-process-state="running"');
     expect(html).toContain('data-tool-item="one"');
     expect(html).toContain('data-tool-item="two"');
+  });
+
+  it("keeps a completed tail tool live until assistant text breaks its activity stretch", () => {
+    const render = (items: AgentUITurnState["items"]) =>
+      renderToStaticMarkup(
+        <AgentUITurnView
+          sessionId="session-tool-gap"
+          turn={{
+            id: "turn-tool-gap",
+            status: "running",
+            startedAt: "2026-08-26T10:00:00.000Z",
+            items,
+          }}
+          thoughts="history"
+          now={Date.parse("2026-08-26T10:00:01.000Z")}
+          labels={{
+            workingFor: (seconds) => `Working ${seconds}s`,
+            workedFor: (seconds) => `Worked ${seconds}s`,
+            thinking: "Thinking",
+            toolRunSummary: () => "Ran commands",
+            toolActivity: (tool) => tool.title ?? "Tool",
+          }}
+          slots={{
+            ...slots,
+            projectToolActivity: ({ tool, live }) => ({
+              summary: `${live ? "Running" : "Ran"} ${tool.title}`,
+            }),
+            renderTool: ({ tool, live }) => (
+              <p data-tool-item={tool.id} data-tool-live={live}>
+                {`${tool.status === "completed" ? "Ran" : "Running"} ${tool.title}`}
+              </p>
+            ),
+          }}
+        />,
+      );
+
+    const uninterrupted = render([activityTool("one")]);
+    expect(uninterrupted).toContain('data-collapsible-event-count="1"');
+    expect(uninterrupted).toMatch(
+      /data-collapsible-event-count="1"[\s\S]*aria-expanded="true"/,
+    );
+    expect(uninterrupted).toContain("Running Command one");
+    expect(uninterrupted).toContain('data-tool-live="false"');
+    expect(uninterrupted).toContain("Ran Command one");
+    expect(uninterrupted).not.toContain('data-thinking-fallback="true"');
+
+    const interrupted = render([
+      activityTool("one"),
+      assistant("commentary", "Now explaining", "commentary"),
+    ]);
+    expect(interrupted).not.toContain("Running Command one");
+    expect(interrupted).toContain("Ran Command one");
   });
 
   it("keeps the final answer outside the process disclosure", () => {

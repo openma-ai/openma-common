@@ -17,9 +17,12 @@
 }
 
 .activity-disclosure-row {
+  --chat-activity-row-leading-space: 8px;
   display: flex;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
+  padding-inline-start: var(--chat-activity-row-leading-space);
   -webkit-user-select: none;
   user-select: none;
   align-items: center;
@@ -112,61 +115,35 @@
   background-clip: padding-box;
 }
 
-@keyframes reasoning-collapse-open {
-  from {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
-  to {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-}
-
-@keyframes reasoning-collapse-closed {
-  from {
-    grid-template-rows: 1fr;
-    opacity: 1;
-  }
-  to {
-    grid-template-rows: 0fr;
-    opacity: 0;
-  }
-}
-
 .reasoning-collapse {
-  display: grid;
+  display: block;
 }
 
-.reasoning-collapse[data-state="open"] {
-  animation: reasoning-collapse-open
-    var(
-      --chat-motion-disclosure-duration,
-      var(--motion-disclosure-duration, 220ms)
-    )
-    var(
-      --chat-motion-disclosure-easing,
-      var(--motion-disclosure-easing, cubic-bezier(0.25, 1, 0.5, 1))
-    )
-    both;
+.reasoning-collapse[data-state="open"] > .reasoning-collapse-inner {
+  height: auto;
+  opacity: 1;
 }
 
-.reasoning-collapse[data-state="closed"] {
-  animation: reasoning-collapse-closed
-    var(
-      --chat-motion-disclosure-duration,
-      var(--motion-disclosure-duration, 220ms)
-    )
-    var(
-      --chat-motion-disclosure-easing,
-      var(--motion-disclosure-easing, cubic-bezier(0.25, 1, 0.5, 1))
-    )
-    both;
+.reasoning-collapse[data-state="closed"] > .reasoning-collapse-inner {
+  height: 0;
+  opacity: 0;
 }
 
 .reasoning-collapse-inner {
+  height: 0;
+  interpolate-size: allow-keywords;
   min-height: 0;
+  opacity: 0;
   overflow: hidden;
+  transition-property: height, opacity;
+  transition-duration: var(
+    --chat-motion-disclosure-duration,
+    var(--motion-disclosure-duration, 220ms)
+  );
+  transition-timing-function: var(
+    --chat-motion-disclosure-easing,
+    var(--motion-disclosure-easing, cubic-bezier(0.25, 1, 0.5, 1))
+  );
 }
 
 /* The same settled/streaming block geometry prevents the final handoff jump. */

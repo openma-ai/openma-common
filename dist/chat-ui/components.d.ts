@@ -86,9 +86,10 @@ export interface ChatCollapsibleEventNode {
     };
     content: ReactNode;
 }
-export declare function ChatCollapsibleEventSequence({ nodes, active, completedProjection, }: {
+export declare function ChatCollapsibleEventSequence({ nodes, active, forceGroup, completedProjection, }: {
     nodes: ChatCollapsibleEventNode[];
     active: boolean;
+    forceGroup?: boolean;
     completedProjection: ChatCollapsibleEventNode["projection"];
 }): string | number | bigint | boolean | Iterable<ReactNode> | Promise<string | number | bigint | boolean | import("react").ReactPortal | import("react").ReactElement<unknown, string | import("react").JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | import("react").JSX.Element | null;
 export interface AgentUITurnLabels {
