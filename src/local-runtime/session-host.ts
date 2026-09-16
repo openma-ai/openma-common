@@ -192,15 +192,6 @@ export class ManagedAgentsSessionHost {
       });
       return;
     }
-    if (!session.supportsSteering) {
-      await session.dispose().catch(() => undefined);
-      this.#emit({
-        type: "session.error",
-        sessionId: input.sessionId,
-        message: "ACP agent does not support required session steering",
-      });
-      return;
-    }
     this.#sessions.set(input.sessionId, {
       acp: session,
       turns: new Map(),
@@ -355,6 +346,15 @@ export class ManagedAgentsSessionHost {
         sessionId: input.sessionId,
         turnId: input.eventId,
         text: input.text,
+      });
+      return;
+    }
+    if (!session.acp.supportsSteering) {
+      this.#emit({
+        type: "session.error",
+        sessionId: input.sessionId,
+        turnId: input.eventId,
+        message: "ACP agent does not support session steering",
       });
       return;
     }
