@@ -1,3 +1,6 @@
+/** Product-neutral runtime placement. Both Backchat and OpenManaged use the
+ * same cloud transport; only the host behind a local runtime differs. */
+export { SessionOrchestrator, sessionInheritance, } from "../session-orchestrator/index.js";
 function nonEmpty(value) {
     return typeof value === "string" && value.length > 0;
 }

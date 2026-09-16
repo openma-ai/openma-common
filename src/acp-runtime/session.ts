@@ -21,11 +21,14 @@ export interface AcpSessionConstructOptions {
   id: string;
 }
 
+type ChildExit = Awaited<ChildHandle["exited"]>;
+
 export class AcpSessionImpl implements AcpSession {
   readonly id: string;
   readonly options: SessionOptions;
 
   #child: ChildHandle;
+  #childExit: ChildExit | null = null;
   #agent!: Agent;
   #sessionId!: string;
   #disposed = false;
@@ -61,6 +64,9 @@ export class AcpSessionImpl implements AcpSession {
     this.id = deps.id;
     this.options = deps.options;
     this.#child = deps.child;
+    void deps.child.exited.then((result) => {
+      this.#childExit = result;
+    });
   }
 
   get acpSessionId(): string {
@@ -249,10 +255,23 @@ export class AcpSessionImpl implements AcpSession {
         ?.steering?.supported === true;
 
     const cwd = this.options.agent.cwd ?? process.cwd();
-    const mcpServers = this.options.mcpServers ?? [];
-    const additionalDirectories = this.#supportsAdditionalDirectories
-      ? this.options.additionalDirectories ?? []
-      : [];
+    const mcpCapabilities = this.#agentCapabilities.mcpCapabilities;
+    const mcpServers = (this.options.mcpServers ?? []).filter((server) => {
+      const transport = (server as { type?: unknown }).type;
+      if (transport === "http") return mcpCapabilities?.http === true;
+      if (transport === "sse") return mcpCapabilities?.sse === true;
+      return true;
+    });
+    const requestedAdditionalDirectories = this.options.additionalDirectories ?? [];
+    if (
+      requestedAdditionalDirectories.length > 0 &&
+      !this.#supportsAdditionalDirectories
+    ) {
+      throw new Error(
+        "ACP agent does not support additional workspace directories",
+      );
+    }
+    const additionalDirectories = requestedAdditionalDirectories;
     const requestMeta = this.options.sessionRequestMeta;
 
     if (this.options.forkFromAcpSessionId) {
@@ -539,6 +558,7 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   #receiveInboundEvent(event: unknown, allowedBeforeSessionReady = false): void {
+    this.#applySessionStateUpdate(event);
     if (this.#activePromptCount === 0) {
       if (!this.#acceptOutOfBandUpdates && !allowedBeforeSessionReady) return;
       if (this.#acceptOutOfBandUpdates && this.options.onOutOfBandSessionUpdate) {
@@ -551,6 +571,25 @@ export class AcpSessionImpl implements AcpSession {
       }
     }
     this.#pushEvent(event);
+  }
+
+  #applySessionStateUpdate(event: unknown): void {
+    if (!event || typeof event !== "object") return;
+    const update = event as Record<string, unknown>;
+    if (
+      update.sessionUpdate === "config_option_update"
+      && Array.isArray(update.configOptions)
+    ) {
+      this.#configOptions = update.configOptions as schema.SessionConfigOption[];
+      return;
+    }
+    if (
+      update.sessionUpdate === "current_mode_update"
+      && typeof update.currentModeId === "string"
+      && this.#modes
+    ) {
+      this.#modes = { ...this.#modes, currentModeId: update.currentModeId };
+    }
   }
 
   #logInit(mode: "new" | "load" | "fork" | "resume", startedAt: number, initializedAt: number): void {
@@ -758,7 +797,19 @@ export class AcpSessionImpl implements AcpSession {
     options?: { abortSignal?: AbortSignal },
   ): AsyncIterable<unknown> {
     if (this.#disposed) throw new Error(`AcpSession ${this.id} is disposed`);
-    return this.#prompt(input, options);
+    return this.#guardPrompt(this.#prompt(input, options));
+  }
+
+  async *#guardPrompt(stream: AsyncIterable<unknown>): AsyncIterable<unknown> {
+    try {
+      yield* stream;
+    } catch (error) {
+      const exit = this.#childExit ?? await settledChildExit(this.#child.exited);
+      if (exit || isBrokenPipe(error)) {
+        throw agentProcessExitError(this.options.agent.command, exit, error);
+      }
+      throw error;
+    }
   }
 
   async steer(input: string | readonly schema.ContentBlock[]): Promise<SteeringOutcome> {
@@ -860,7 +911,7 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   isAlive(): boolean {
-    return !this.#disposed;
+    return !this.#disposed && this.#childExit === null;
   }
 
   async dispose(): Promise<void> {
@@ -888,6 +939,53 @@ export class AcpSessionImpl implements AcpSession {
       this.#waiters.shift()?.({ value: undefined, done: true });
     }
   }
+}
+
+async function settledChildExit(
+  exited: ChildHandle["exited"],
+): Promise<ChildExit | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      exited,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 25);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function isBrokenPipe(error: unknown): boolean {
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? String((error as { code?: unknown }).code ?? "")
+      : "";
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    code === "EPIPE"
+    || code === "ERR_STREAM_DESTROYED"
+    || /\bEPIPE\b|broken pipe|stream (?:is )?(?:closed|destroyed)/i.test(message)
+  );
+}
+
+function agentProcessExitError(
+  command: string,
+  exit: ChildExit | null,
+  cause: unknown,
+): Error {
+  const status = exit?.signal
+    ? `signal ${exit.signal}`
+    : exit?.code != null
+      ? `exit code ${exit.code}`
+      : "no exit status";
+  return new Error(
+    `The agent process exited before it could accept the prompt (${command}, ${status}). `
+      + "Reopen the task to restart it, or check this agent's setup and sign-in.",
+    { cause },
+  );
 }
 
 function clientCallbackError(error: unknown): { message: string; code?: number } {

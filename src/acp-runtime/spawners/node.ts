@@ -41,6 +41,23 @@ export class NodeSpawner implements Spawner {
       child.once("error", () => settle(null, null));
     });
 
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        child.off("spawn", onSpawn);
+        child.off("error", onError);
+      };
+      const onSpawn = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      child.once("spawn", onSpawn);
+      child.once("error", onError);
+    });
+
     const kill = async (signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): Promise<void> => {
       if (child.exitCode !== null || child.signalCode !== null) return;
       child.kill(signal);

@@ -4,6 +4,7 @@ export class AcpSessionImpl {
     id;
     options;
     #child;
+    #childExit = null;
     #agent;
     #sessionId;
     #disposed = false;
@@ -38,6 +39,9 @@ export class AcpSessionImpl {
         this.id = deps.id;
         this.options = deps.options;
         this.#child = deps.child;
+        void deps.child.exited.then((result) => {
+            this.#childExit = result;
+        });
     }
     get acpSessionId() {
         return this.#sessionId ?? "";
@@ -191,10 +195,21 @@ export class AcpSessionImpl {
             initialized._meta
                 ?.steering?.supported === true;
         const cwd = this.options.agent.cwd ?? process.cwd();
-        const mcpServers = this.options.mcpServers ?? [];
-        const additionalDirectories = this.#supportsAdditionalDirectories
-            ? this.options.additionalDirectories ?? []
-            : [];
+        const mcpCapabilities = this.#agentCapabilities.mcpCapabilities;
+        const mcpServers = (this.options.mcpServers ?? []).filter((server) => {
+            const transport = server.type;
+            if (transport === "http")
+                return mcpCapabilities?.http === true;
+            if (transport === "sse")
+                return mcpCapabilities?.sse === true;
+            return true;
+        });
+        const requestedAdditionalDirectories = this.options.additionalDirectories ?? [];
+        if (requestedAdditionalDirectories.length > 0 &&
+            !this.#supportsAdditionalDirectories) {
+            throw new Error("ACP agent does not support additional workspace directories");
+        }
+        const additionalDirectories = requestedAdditionalDirectories;
         const requestMeta = this.options.sessionRequestMeta;
         if (this.options.forkFromAcpSessionId) {
             if (!this.#supportsSessionFork || !this.#agent.unstable_forkSession) {
@@ -420,6 +435,7 @@ export class AcpSessionImpl {
         });
     }
     #receiveInboundEvent(event, allowedBeforeSessionReady = false) {
+        this.#applySessionStateUpdate(event);
         if (this.#activePromptCount === 0) {
             if (!this.#acceptOutOfBandUpdates && !allowedBeforeSessionReady)
                 return;
@@ -434,6 +450,21 @@ export class AcpSessionImpl {
             }
         }
         this.#pushEvent(event);
+    }
+    #applySessionStateUpdate(event) {
+        if (!event || typeof event !== "object")
+            return;
+        const update = event;
+        if (update.sessionUpdate === "config_option_update"
+            && Array.isArray(update.configOptions)) {
+            this.#configOptions = update.configOptions;
+            return;
+        }
+        if (update.sessionUpdate === "current_mode_update"
+            && typeof update.currentModeId === "string"
+            && this.#modes) {
+            this.#modes = { ...this.#modes, currentModeId: update.currentModeId };
+        }
     }
     #logInit(mode, startedAt, initializedAt) {
         if (process.env.NODE_ENV === "test")
@@ -578,7 +609,19 @@ export class AcpSessionImpl {
     prompt(input, options) {
         if (this.#disposed)
             throw new Error(`AcpSession ${this.id} is disposed`);
-        return this.#prompt(input, options);
+        return this.#guardPrompt(this.#prompt(input, options));
+    }
+    async *#guardPrompt(stream) {
+        try {
+            yield* stream;
+        }
+        catch (error) {
+            const exit = this.#childExit ?? await settledChildExit(this.#child.exited);
+            if (exit || isBrokenPipe(error)) {
+                throw agentProcessExitError(this.options.agent.command, exit, error);
+            }
+            throw error;
+        }
     }
     async steer(input) {
         if (!this.#agent || !this.#sessionId)
@@ -667,7 +710,7 @@ export class AcpSessionImpl {
         await done;
     }
     isAlive() {
-        return !this.#disposed;
+        return !this.#disposed && this.#childExit === null;
     }
     async dispose() {
         if (this.#disposed)
@@ -694,6 +737,40 @@ export class AcpSessionImpl {
             this.#waiters.shift()?.({ value: undefined, done: true });
         }
     }
+}
+async function settledChildExit(exited) {
+    let timer;
+    try {
+        return await Promise.race([
+            exited,
+            new Promise((resolve) => {
+                timer = setTimeout(() => resolve(null), 25);
+                timer.unref?.();
+            }),
+        ]);
+    }
+    finally {
+        if (timer)
+            clearTimeout(timer);
+    }
+}
+function isBrokenPipe(error) {
+    const code = error && typeof error === "object" && "code" in error
+        ? String(error.code ?? "")
+        : "";
+    const message = error instanceof Error ? error.message : String(error);
+    return (code === "EPIPE"
+        || code === "ERR_STREAM_DESTROYED"
+        || /\bEPIPE\b|broken pipe|stream (?:is )?(?:closed|destroyed)/i.test(message));
+}
+function agentProcessExitError(command, exit, cause) {
+    const status = exit?.signal
+        ? `signal ${exit.signal}`
+        : exit?.code != null
+            ? `exit code ${exit.code}`
+            : "no exit status";
+    return new Error(`The agent process exited before it could accept the prompt (${command}, ${status}). `
+        + "Reopen the task to restart it, or check this agent's setup and sign-in.", { cause });
 }
 function clientCallbackError(error) {
     const code = error !== null

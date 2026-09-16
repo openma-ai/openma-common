@@ -79,6 +79,10 @@
     "./chat-ui/presentation": {
       "types": "./dist/chat-ui/presentation.d.ts",
       "import": "./dist/chat-ui/presentation.js"
+    },
+    "./session-orchestrator": {
+      "types": "./dist/session-orchestrator/index.d.ts",
+      "import": "./dist/session-orchestrator/index.js"
     }
   },
   "scripts": {

@@ -11,6 +11,9 @@ export interface AgentUIMessageItem {
     text: string;
     status: "streaming" | "complete";
     content?: unknown;
+    /** Event-clock boundaries for a thought segment, preserved through replay. */
+    startedAt?: string;
+    endedAt?: string;
     phase?: "commentary" | "final_answer";
 }
 export interface AgentUIToolItem {

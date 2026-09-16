@@ -318,6 +318,7 @@ function upsertMessage(turn, event, input) {
         id: segmentId,
         ...(segmentId !== id ? { messageId: id } : {}),
         kind: input.kind,
+        ...(input.kind === "thinking" ? { startedAt: event.occurred_at } : {}),
         role: input.role,
         text,
         status: input.streaming ? "streaming" : "complete",
@@ -436,6 +437,39 @@ function stopReasonType(event) {
     const type = stopReason.type;
     return typeof type === "string" ? type : undefined;
 }
+/** Match ACP chat projection: first thought chunk through the following
+ * activity (or turn termination), rounded up to whole seconds. Metadata and
+ * unrelated turns must not stop a thought's clock. */
+function settleThoughtTiming(turn, event) {
+    if (!turn)
+        return;
+    const thought = [...turn.items].reverse().find((item) => item.kind === "thinking" && !item.endedAt);
+    if (!thought?.startedAt)
+        return;
+    const data = eventData(event);
+    const continuesThought = event.type === "agent.thinking"
+        && turn.items.at(-1) === thought
+        && (data.message_id === undefined || data.message_id === (thought.messageId ?? thought.id));
+    if (continuesThought)
+        return;
+    const boundary = event.type === "agent.thinking"
+        || event.type === "agent.message_chunk"
+        || event.type === "agent.message"
+        || event.type.startsWith("tool.")
+        || ["turn.completed", "turn.failed", "turn.cancelled", "session.error", "session.terminated"].includes(event.type)
+        || (event.type === "session.idle" && stopReasonType(event) === "end_turn");
+    if (!boundary)
+        return;
+    const elapsed = Date.parse(event.occurred_at) - Date.parse(thought.startedAt);
+    if (!Number.isFinite(elapsed))
+        return;
+    thought.endedAt = event.occurred_at;
+    thought.content = {
+        ...(thought.content && typeof thought.content === "object" && !Array.isArray(thought.content)
+            ? thought.content : {}),
+        durationSeconds: Math.max(1, Math.ceil(elapsed / 1_000)),
+    };
+}
 export function reduceAgentUIEvent(state, event) {
     if (event.session_id !== state.sessionId || state.seenEventIds[event.event_id]) {
         return state;
@@ -447,6 +481,7 @@ export function reduceAgentUIEvent(state, event) {
     applyOutcomeProjection(next, event);
     next.seenEventIds[event.event_id] = true;
     const turn = requireTurn(next, event);
+    settleThoughtTiming(turn ?? (event.type.startsWith("session.") && next.activeTurnId ? next.turns[next.activeTurnId] : undefined), event);
     switch (event.type) {
         case "session.updated": {
             const data = event.data;
