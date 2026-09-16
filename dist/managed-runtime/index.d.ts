@@ -84,4 +84,5 @@ export interface ManagedAcpSupervisorHarnessOptions {
 export declare function createManagedAcpSupervisorHarness(options: ManagedAcpSupervisorHarnessOptions): HarnessSupervisorHarness;
 export * from "./claimed-environment-work.js";
 export type { RuntimeResourceScope, HarnessSupervisorHarness, HarnessSupervisorRun } from "./contracts.js";
+export * from "./acp-subagents.js";
 //# sourceMappingURL=index.d.ts.map

@@ -315,3 +315,5 @@ function assertNonNegativeInteger(value: number, name: string): void {
 
 export * from "./claimed-environment-work.js";
 export type { RuntimeResourceScope, HarnessSupervisorHarness, HarnessSupervisorRun } from "./contracts.js";
+
+export * from "./acp-subagents.js";
