@@ -1,0 +1,477 @@
+export const systemRuntimeScheduler = {
+    now: () => Date.now(),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+export class ManagedAgentsSessionHost {
+    #runtime;
+    #emit;
+    #scheduler;
+    #cancelGraceMs;
+    #checkpointStore;
+    #hostInstanceId;
+    #sessions = new Map();
+    #resumeSessionIds = new Map();
+    #draining = false;
+    constructor(dependencies) {
+        this.#runtime = dependencies.runtime;
+        this.#emit = dependencies.emit;
+        this.#scheduler = dependencies.scheduler ?? systemRuntimeScheduler;
+        this.#cancelGraceMs = dependencies.cancelGraceMs;
+        this.#checkpointStore = dependencies.checkpointStore;
+        this.#hostInstanceId = dependencies.hostInstanceId;
+        if (this.#checkpointStore && !this.#hostInstanceId) {
+            throw new Error("hostInstanceId is required when checkpointStore is configured");
+        }
+    }
+    has(sessionId) {
+        return this.#liveSession(sessionId) !== undefined;
+    }
+    sessionCount() {
+        this.#pruneDeadSessions();
+        return this.#sessions.size;
+    }
+    announce(sessionId) {
+        const session = this.#liveSession(sessionId);
+        if (!session)
+            return false;
+        this.#emit({
+            type: "session.ready",
+            sessionId,
+            acpSessionId: session.acp.acpSessionId,
+        });
+        return true;
+    }
+    announceAll() {
+        for (const sessionId of [...this.#sessions.keys()]) {
+            const session = this.#liveSession(sessionId);
+            if (!session)
+                continue;
+            this.#emit({
+                type: "session.ready",
+                sessionId,
+                acpSessionId: session.acp.acpSessionId,
+            });
+        }
+    }
+    activeTurnCount() {
+        let count = 0;
+        for (const session of this.#sessions.values())
+            count += session.turns.size;
+        return count;
+    }
+    async start(input) {
+        if (this.#draining) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                message: "runtime is draining; retry on another runtime",
+            });
+            return;
+        }
+        if (this.announce(input.sessionId))
+            return;
+        let claimedCheckpoint;
+        let durableCheckpoint = null;
+        if (this.#checkpointStore) {
+            try {
+                durableCheckpoint = await this.#checkpointStore.load(input.sessionId);
+                const nextGeneration = (durableCheckpoint?.generation ?? 0) + 1;
+                claimedCheckpoint = {
+                    sessionId: input.sessionId,
+                    generation: nextGeneration,
+                    ownerId: this.#hostInstanceId,
+                    acpSessionId: durableCheckpoint?.acpSessionId ?? "",
+                    phase: "recovering",
+                    updatedAt: this.#scheduler.now(),
+                    ...(durableCheckpoint?.lastCompletedTurnId
+                        ? { lastCompletedTurnId: durableCheckpoint.lastCompletedTurnId }
+                        : {}),
+                };
+                const claimed = await this.#checkpointStore.compareAndSet({
+                    expectedGeneration: durableCheckpoint?.generation ?? null,
+                    checkpoint: claimedCheckpoint,
+                });
+                if (!claimed) {
+                    this.#emitLeaseLost(input.sessionId);
+                    return;
+                }
+            }
+            catch (error) {
+                this.#emit({
+                    type: "session.error",
+                    sessionId: input.sessionId,
+                    message: `session checkpoint failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+                return;
+            }
+        }
+        const recoverySessionId = this.#resumeSessionIds.get(input.sessionId)
+            ?? durableCheckpoint?.acpSessionId;
+        const options = recoverySessionId && !input.options.resumeAcpSessionId
+            ? { ...input.options, resumeAcpSessionId: recoverySessionId }
+            : input.options;
+        let session;
+        try {
+            session = await this.#runtime.start(options);
+        }
+        catch (error) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+            return;
+        }
+        if (!session.supportsSteering) {
+            await session.dispose().catch(() => undefined);
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                message: "ACP agent does not support required session steering",
+            });
+            return;
+        }
+        this.#sessions.set(input.sessionId, {
+            acp: session,
+            turns: new Map(),
+            completedTurns: new Set(durableCheckpoint?.lastCompletedTurnId
+                ? [durableCheckpoint.lastCompletedTurnId]
+                : []),
+            ...(claimedCheckpoint ? { checkpoint: claimedCheckpoint } : {}),
+        });
+        if (claimedCheckpoint && this.#checkpointStore) {
+            const readyCheckpoint = {
+                ...claimedCheckpoint,
+                acpSessionId: session.acpSessionId,
+                phase: "ready",
+                updatedAt: this.#scheduler.now(),
+            };
+            const retained = await this.#checkpointStore.compareAndSet({
+                expectedGeneration: claimedCheckpoint.generation,
+                checkpoint: readyCheckpoint,
+            }).catch(() => false);
+            if (!retained) {
+                this.#sessions.delete(input.sessionId);
+                await session.dispose().catch(() => undefined);
+                this.#emitLeaseLost(input.sessionId);
+                return;
+            }
+            this.#sessions.get(input.sessionId).checkpoint = readyCheckpoint;
+        }
+        this.#resumeSessionIds.delete(input.sessionId);
+        this.#emit({
+            type: "session.ready",
+            sessionId: input.sessionId,
+            acpSessionId: session.acpSessionId,
+        });
+    }
+    async prompt(input) {
+        const session = this.#liveSession(input.sessionId);
+        if (!session) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                turnId: input.turnId,
+                message: "no such session",
+            });
+            return;
+        }
+        if (session.completedTurns.has(input.turnId)) {
+            this.#emit({
+                type: "session.complete",
+                sessionId: input.sessionId,
+                turnId: input.turnId,
+            });
+            return;
+        }
+        if (session.turns.has(input.turnId))
+            return;
+        // Draining closes admission for new turns on retained sessions too.
+        // Existing in-flight/complete turn IDs above remain idempotent.
+        const rejectDuringDrain = () => {
+            if (!this.#draining)
+                return false;
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                turnId: input.turnId,
+                message: "runtime is draining; retry on another runtime",
+            });
+            return true;
+        };
+        if (rejectDuringDrain())
+            return;
+        if (!await this.#retainGenerationLease(input.sessionId, session))
+            return;
+        // Lease storage may yield while shutdown starts.
+        if (rejectDuringDrain())
+            return;
+        const controller = new AbortController();
+        session.turns.set(input.turnId, controller);
+        let promptError;
+        try {
+            for await (const event of session.acp.prompt(input.text, {
+                abortSignal: controller.signal,
+            })) {
+                if (controller.signal.aborted)
+                    break;
+                const sentinel = event;
+                if (sentinel?.type === "promptComplete") {
+                    this.#emit({
+                        type: "session.event",
+                        sessionId: input.sessionId,
+                        turnId: input.turnId,
+                        event,
+                    });
+                    continue;
+                }
+                if (sentinel?.type === "promptError") {
+                    promptError = typeof sentinel.error === "string"
+                        ? sentinel.error
+                        : "ACP prompt error (no message)";
+                    continue;
+                }
+                this.#emit({
+                    type: "session.event",
+                    sessionId: input.sessionId,
+                    turnId: input.turnId,
+                    event,
+                });
+            }
+            if (promptError) {
+                this.#emit({
+                    type: "session.error",
+                    sessionId: input.sessionId,
+                    turnId: input.turnId,
+                    message: promptError,
+                });
+            }
+            else {
+                if (!await this.#commitCompletedTurn(input.sessionId, session, input.turnId)) {
+                    return;
+                }
+                session.completedTurns.add(input.turnId);
+                this.#emit({
+                    type: "session.complete",
+                    sessionId: input.sessionId,
+                    turnId: input.turnId,
+                });
+            }
+        }
+        catch (error) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                turnId: input.turnId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+        finally {
+            session.turns.delete(input.turnId);
+        }
+    }
+    async steer(input) {
+        const session = this.#liveSession(input.sessionId);
+        if (!session) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                turnId: input.eventId,
+                message: "no such session",
+            });
+            return;
+        }
+        if (session.turns.size === 0) {
+            await this.prompt({
+                sessionId: input.sessionId,
+                turnId: input.eventId,
+                text: input.text,
+            });
+            return;
+        }
+        try {
+            const outcome = await session.acp.steer(input.text);
+            if (outcome === "failed") {
+                this.#emit({
+                    type: "session.error",
+                    sessionId: input.sessionId,
+                    turnId: input.eventId,
+                    message: "ACP agent rejected session steering",
+                });
+            }
+        }
+        catch (error) {
+            this.#emit({
+                type: "session.error",
+                sessionId: input.sessionId,
+                turnId: input.eventId,
+                message: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+    async dispose(sessionId) {
+        const session = this.#sessions.get(sessionId);
+        if (session) {
+            for (const controller of session.turns.values())
+                controller.abort();
+            await session.acp.dispose().catch(() => undefined);
+            this.#sessions.delete(sessionId);
+        }
+        this.#resumeSessionIds.delete(sessionId);
+        if (this.#checkpointStore) {
+            await this.#checkpointStore.delete({
+                sessionId,
+                ...(session?.checkpoint
+                    ? {
+                        expectedGeneration: session.checkpoint.generation,
+                        ownerId: session.checkpoint.ownerId,
+                    }
+                    : {}),
+            }).catch(() => undefined);
+        }
+        this.#emit({ type: "session.disposed", sessionId });
+    }
+    async disposeAll() {
+        const sessions = [...this.#sessions.entries()];
+        await Promise.all(sessions.map(async ([sessionId, session]) => {
+            for (const controller of session.turns.values())
+                controller.abort();
+            await session.acp.dispose().catch(() => undefined);
+            this.#sessions.delete(sessionId);
+        }));
+    }
+    async drain(options) {
+        this.#draining = true;
+        const initialTurns = this.activeTurnCount();
+        const sessions = this.sessionCount();
+        const startedAt = this.#scheduler.now();
+        const pollIntervalMs = options.pollIntervalMs ?? 200;
+        while (this.activeTurnCount() > 0) {
+            const elapsed = this.#scheduler.now() - startedAt;
+            if (elapsed >= options.deadlineMs)
+                break;
+            const msLeft = options.deadlineMs - elapsed;
+            options.onProgress?.(this.activeTurnCount(), msLeft);
+            await this.#scheduler.sleep(Math.min(pollIntervalMs, msLeft));
+        }
+        let abortedTurns = 0;
+        for (const session of this.#sessions.values()) {
+            for (const controller of session.turns.values()) {
+                if (!controller.signal.aborted) {
+                    controller.abort();
+                    abortedTurns += 1;
+                }
+            }
+        }
+        if (abortedTurns > 0 && (options.abortGraceMs ?? 2_000) > 0) {
+            await this.#scheduler.sleep(options.abortGraceMs ?? 2_000);
+        }
+        await this.disposeAll();
+        return { initialTurns, abortedTurns, sessions };
+    }
+    async cancel(sessionId, turnId) {
+        const session = this.#sessions.get(sessionId);
+        const controller = session?.turns.get(turnId);
+        if (!session || !controller)
+            return;
+        controller.abort();
+        if (this.#cancelGraceMs === undefined)
+            return;
+        await this.#scheduler.sleep(this.#cancelGraceMs);
+        if (this.#sessions.get(sessionId) !== session || !session.turns.has(turnId)) {
+            return;
+        }
+        this.#rememberForRecovery(sessionId, session);
+        this.#sessions.delete(sessionId);
+        await session.acp.dispose().catch(() => undefined);
+    }
+    #liveSession(sessionId) {
+        const session = this.#sessions.get(sessionId);
+        if (!session)
+            return undefined;
+        if (session.acp.isAlive())
+            return session;
+        this.#rememberForRecovery(sessionId, session);
+        this.#sessions.delete(sessionId);
+        void session.acp.dispose().catch(() => undefined);
+        return undefined;
+    }
+    #pruneDeadSessions() {
+        for (const sessionId of [...this.#sessions.keys()]) {
+            this.#liveSession(sessionId);
+        }
+    }
+    #rememberForRecovery(sessionId, session) {
+        if (session.acp.acpSessionId) {
+            this.#resumeSessionIds.set(sessionId, session.acp.acpSessionId);
+        }
+        if (session.checkpoint && this.#checkpointStore) {
+            const recovering = {
+                ...session.checkpoint,
+                acpSessionId: session.acp.acpSessionId,
+                phase: "recovering",
+                updatedAt: this.#scheduler.now(),
+            };
+            void this.#checkpointStore.compareAndSet({
+                expectedGeneration: session.checkpoint.generation,
+                checkpoint: recovering,
+            }).then((saved) => {
+                if (saved)
+                    session.checkpoint = recovering;
+            }).catch(() => undefined);
+        }
+    }
+    async #retainGenerationLease(sessionId, session) {
+        if (!session.checkpoint || !this.#checkpointStore)
+            return true;
+        const retainedCheckpoint = {
+            ...session.checkpoint,
+            updatedAt: this.#scheduler.now(),
+        };
+        const retained = await this.#checkpointStore.compareAndSet({
+            expectedGeneration: session.checkpoint.generation,
+            checkpoint: retainedCheckpoint,
+        }).catch(() => false);
+        if (retained) {
+            session.checkpoint = retainedCheckpoint;
+            return true;
+        }
+        if (this.#sessions.get(sessionId) === session) {
+            this.#sessions.delete(sessionId);
+        }
+        await session.acp.dispose().catch(() => undefined);
+        this.#emitLeaseLost(sessionId);
+        return false;
+    }
+    async #commitCompletedTurn(sessionId, session, turnId) {
+        if (!session.checkpoint || !this.#checkpointStore)
+            return true;
+        const completedCheckpoint = {
+            ...session.checkpoint,
+            lastCompletedTurnId: turnId,
+            updatedAt: this.#scheduler.now(),
+        };
+        const committed = await this.#checkpointStore.compareAndSet({
+            expectedGeneration: session.checkpoint.generation,
+            checkpoint: completedCheckpoint,
+        }).catch(() => false);
+        if (committed) {
+            session.checkpoint = completedCheckpoint;
+            return true;
+        }
+        if (this.#sessions.get(sessionId) === session) {
+            this.#sessions.delete(sessionId);
+        }
+        await session.acp.dispose().catch(() => undefined);
+        this.#emitLeaseLost(sessionId);
+        return false;
+    }
+    #emitLeaseLost(sessionId) {
+        this.#emit({
+            type: "session.error",
+            sessionId,
+            message: "runtime lost the session generation lease",
+        });
+    }
+}
+//# sourceMappingURL=session-host.js.map
