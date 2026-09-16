@@ -66,6 +66,26 @@ describe("Agent UI React streaming elements", () => {
     expect(html).toContain("A third paragraph.");
   });
 
+  it("renders thought summary Markdown across chunks and skips earlier thoughts", async () => {
+    const store = createAgentUIStore("session-thinking");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const send = (id: string, text: string) => store.dispatch({
+      event_id: id, type: "agent.thinking", session_id: "session-thinking", turn_id: "turn-1",
+      source: { kind: "harness", harness: "codex-acp" }, occurred_at: "2026-09-09T00:00:00.000Z",
+      data: { message_id: "thought", text },
+    } as Parameters<typeof store.dispatch>[0]);
+    send("first", "Earlier **Searching ALL_");
+    await act(async () => root.render(<AgentUIStreamingThoughtProjection store={store} turnId="turn-1" prefixSkip={8} fallback="Thinking" mode="body" />));
+    act(() => { send("last", "TOOLS** with `code`"); });
+    expect(container.querySelector("strong")?.textContent).toBe("Searching ALL_TOOLS");
+    expect(container.querySelector("code")?.textContent).toBe("code");
+    expect(container.textContent).not.toContain("Earlier");
+    expect(container.textContent).not.toContain("**");
+    act(() => root.unmount());
+  });
+
   it("exposes an inert markdown host for the direct turn stream", () => {
     const html = renderToStaticMarkup(
       <AgentUIStreamingMarkdown

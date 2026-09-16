@@ -10,6 +10,51 @@ import { AcpSessionImpl } from "../src/acp-runtime/session.js";
 import type { ChildHandle } from "../src/acp-runtime/types.js";
 
 describe("shared ACP session runtime", () => {
+  it("filters HTTP and SSE MCP servers by the agent's advertised transports", async () => {
+    let sentMcpServers: unknown;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: {
+            mcpCapabilities: { http: true, sse: false },
+          },
+        };
+      },
+      async newSession(params) {
+        sentMcpServers = params.mcpServers;
+        return { sessionId: "mcp-capabilities-session" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "mcp-capabilities-session",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        mcpServers: [
+          { type: "stdio", name: "filesystem", command: "fs", args: [], env: [] },
+          { type: "http", name: "browser", url: "http://127.0.0.1:1234/mcp", headers: [] },
+          { type: "sse", name: "legacy", url: "http://127.0.0.1:1235/sse", headers: [] },
+        ] as never,
+      },
+    });
+
+    await session.init();
+    await session.dispose();
+
+    expect(sentMcpServers).toEqual([
+      { name: "filesystem", command: "fs", args: [], env: [] },
+      { type: "http", name: "browser", url: "http://127.0.0.1:1234/mcp", headers: [] },
+    ]);
+  });
+
   it("forwards adapter request metadata through session/new", async () => {
     let newSessionRequest:
       | { _meta?: Record<string, unknown> | null }
@@ -101,16 +146,14 @@ describe("shared ACP session runtime", () => {
     });
   });
 
-  it("does not send additionalDirectories when the agent has not advertised support", async () => {
-    let newSessionRequest:
-      | { cwd: string; additionalDirectories?: string[] }
-      | undefined;
+  it("rejects additionalDirectories before session/new when support was not advertised", async () => {
+    let newSessionCalled = false;
     const harness = createHarness(() => ({
       async initialize() {
         return { protocolVersion: PROTOCOL_VERSION };
       },
-      async newSession(params) {
-        newSessionRequest = params;
+      async newSession() {
+        newSessionCalled = true;
         return { sessionId: "single-root-session" };
       },
       async prompt() {
@@ -130,14 +173,12 @@ describe("shared ACP session runtime", () => {
       },
     });
 
-    await session.init();
+    await expect(session.init()).rejects.toThrow(
+      "ACP agent does not support additional workspace directories",
+    );
     expect(session.supportsAdditionalDirectories).toBe(false);
     await session.dispose();
-
-    expect(newSessionRequest).toEqual({
-      cwd: "/work/main",
-      mcpServers: [],
-    });
+    expect(newSessionCalled).toBe(false);
   });
 
   it("exposes the legacy-compatible mode state returned by session/new", async () => {
@@ -657,7 +698,20 @@ describe("shared ACP session runtime", () => {
         };
       },
       async newSession() {
-        return { sessionId: "out-of-band-session" };
+        return {
+          sessionId: "out-of-band-session",
+          configOptions: [{
+            id: "model",
+            name: "Model",
+            category: "model",
+            type: "select",
+            currentValue: "gpt-5.5",
+            options: [
+              { value: "gpt-5.5", name: "GPT-5.5" },
+              { value: "gpt-5.6", name: "GPT-5.6" },
+            ],
+          }],
+        };
       },
       async prompt() {
         return { stopReason: "end_turn" };
@@ -681,6 +735,23 @@ describe("shared ACP session runtime", () => {
             _meta: { codex: { threadStatus: { type: "idle" } } },
           },
         });
+        await conn.sessionUpdate({
+          sessionId: "out-of-band-session",
+          update: {
+            sessionUpdate: "config_option_update",
+            configOptions: [{
+              id: "model",
+              name: "Model",
+              category: "model",
+              type: "select",
+              currentValue: "gpt-5.6",
+              options: [
+                { value: "gpt-5.5", name: "GPT-5.5" },
+                { value: "gpt-5.6", name: "GPT-5.6" },
+              ],
+            }],
+          },
+        });
         return { outcome: "startedNewTurn" };
       },
     }));
@@ -698,6 +769,9 @@ describe("shared ACP session runtime", () => {
     await expect(session.steer("continue after the race")).resolves.toBe(
       "startedNewTurn",
     );
+    expect(session.configOptions).toEqual([
+      expect.objectContaining({ id: "model", currentValue: "gpt-5.6" }),
+    ]);
     await session.dispose();
 
     expect(outOfBandUpdates).toEqual([
@@ -708,6 +782,12 @@ describe("shared ACP session runtime", () => {
       {
         sessionUpdate: "session_info_update",
         _meta: { codex: { threadStatus: { type: "idle" } } },
+      },
+      {
+        sessionUpdate: "config_option_update",
+        configOptions: [
+          expect.objectContaining({ id: "model", currentValue: "gpt-5.6" }),
+        ],
       },
     ]);
   });

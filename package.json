@@ -79,6 +79,18 @@
     "./chat-ui/presentation": {
       "types": "./dist/chat-ui/presentation.d.ts",
       "import": "./dist/chat-ui/presentation.js"
+    },
+    "./session-orchestrator": {
+      "types": "./dist/session-orchestrator/index.d.ts",
+      "import": "./dist/session-orchestrator/index.js"
+    },
+    "./local-runtime": {
+      "types": "./dist/local-runtime/index.d.ts",
+      "import": "./dist/local-runtime/index.js"
+    },
+    "./managed-runtime": {
+      "types": "./dist/managed-runtime/index.d.ts",
+      "import": "./dist/managed-runtime/index.js"
     }
   },
   "scripts": {

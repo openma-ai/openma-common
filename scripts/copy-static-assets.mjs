@@ -1,9 +1,9 @@
-import { cp, mkdir } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 
 await mkdir("dist/brand", { recursive: true });
 await mkdir("dist/chat-ui", { recursive: true });
 await Promise.all([
-  cp("src/brand/tokens.css", "dist/brand/tokens.css"),
-  cp("src/brand/openma-logo-mark.svg", "dist/brand/openma-logo-mark.svg"),
-  cp("src/chat-ui/styles.css", "dist/chat-ui/styles.css"),
+  copyFile("src/brand/tokens.css", "dist/brand/tokens.css"),
+  copyFile("src/brand/openma-logo-mark.svg", "dist/brand/openma-logo-mark.svg"),
+  copyFile("src/chat-ui/styles.css", "dist/chat-ui/styles.css"),
 ]);

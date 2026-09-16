@@ -1,5 +1,17 @@
 /** Product-neutral runtime placement. Both Backchat and OpenManaged use the
  * same cloud transport; only the host behind a local runtime differs. */
+export {
+  SessionOrchestrator,
+  sessionInheritance,
+  type QueuedSessionTurn,
+  type SessionForkSource,
+  type SessionInheritance,
+  type SessionInheritanceInput,
+  type SessionOrchestratorOptions,
+  type SessionRestartDisposition,
+  type SessionRestartMode,
+} from "../session-orchestrator/index.js";
+
 export type SessionRuntime = "local" | "cloud";
 
 export interface SessionStartCommand {

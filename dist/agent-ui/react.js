@@ -179,6 +179,7 @@ export function thoughtHeadline(text) {
     }
     return headline;
 }
+const projectionLineText = new WeakMap();
 function syncProjectionLines(host, lines) {
     while (host.children.length > lines.length) {
         host.lastElementChild?.remove();
@@ -191,8 +192,20 @@ function syncProjectionLines(host, lines) {
             row.className = "block min-w-0 truncate leading-6";
             host.append(row);
         }
-        if (row.textContent !== line)
-            row.textContent = line;
+        if (projectionLineText.get(row) !== line) {
+            row.replaceChildren();
+            const parser = smd.parser(smd.default_renderer(row));
+            smd.parser_write(parser, line);
+            smd.parser_end(parser);
+            // A summary lives inside a disclosure button: keep inline formatting,
+            // but leave navigation and block layout to the expanded thought body.
+            for (const block of row.querySelectorAll("p, h1, h2, h3, h4, h5, h6, a")) {
+                const span = document.createElement("span");
+                span.append(...block.childNodes);
+                block.replaceWith(span);
+            }
+            projectionLineText.set(row, line);
+        }
     });
 }
 export function AgentUIStreamingThoughtProjection({ store, turnId, prefixSkip, fallback, mode, }) {

@@ -39,6 +39,22 @@ export class NodeSpawner {
             child.once("close", settle);
             child.once("error", () => settle(null, null));
         });
+        await new Promise((resolve, reject) => {
+            const cleanup = () => {
+                child.off("spawn", onSpawn);
+                child.off("error", onError);
+            };
+            const onSpawn = () => {
+                cleanup();
+                resolve();
+            };
+            const onError = (error) => {
+                cleanup();
+                reject(error);
+            };
+            child.once("spawn", onSpawn);
+            child.once("error", onError);
+        });
         const kill = async (signal = "SIGTERM") => {
             if (child.exitCode !== null || child.signalCode !== null)
                 return;

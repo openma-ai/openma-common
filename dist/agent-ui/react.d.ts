@@ -39,7 +39,7 @@ export declare function AgentUIStreamingMarkdown({ store, turnId, kind, classNam
 export declare function thoughtProjectionLines(text: string, fallback: string): string[];
 export declare function thoughtHeadline(text: string): string;
 export declare function AgentUIStreamingThoughtProjection({ store, turnId, prefixSkip, fallback, mode, }: {
-    store: AgentUIStore;
+    store: AgentUIStreamSource;
     turnId: string;
     prefixSkip: number;
     fallback: string;

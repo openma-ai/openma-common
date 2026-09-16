@@ -31,6 +31,30 @@ function event(
 }
 
 describe("OpenMA headless Agent UI state", () => {
+  it("times thought spans from events identically during streaming and replay", () => {
+    const events = [
+      event("start", "session.running", 1, {}, "turn-1"),
+      event("thought-a", "agent.thinking", 2, { message_id: "thought", text: "Plan" }, "turn-1"),
+      event("thought-b", "agent.thinking", 4, { message_id: "thought", text: " more" }, "turn-1"),
+      event("tool", "tool.started", 6, { tool_call_id: "tool" }, "turn-1"),
+      event("done", "turn.completed", 9, {}, "turn-1"),
+    ];
+    const store = createAgentUIStore("session-1");
+    for (const item of events) store.dispatch(item);
+    const thought = store.getState().turns["turn-1"]!.items.find((item) => item.kind === "thinking");
+    expect(thought).toMatchObject({ content: { durationSeconds: 4 } });
+    expect(replayAgentUIEvents("session-1", events).turns["turn-1"]!.items).toEqual(store.getState().turns["turn-1"]!.items);
+  });
+
+  it.each(["turn.completed", "turn.cancelled", "turn.failed", "session.error"])("closes the last thought on %s", (terminal) => {
+    const state = replayAgentUIEvents("session-1", [
+      event("start", "session.running", 1, {}, "turn-1"),
+      event("thought", "agent.thinking", 2, { text: "Plan" }, "turn-1"),
+      event("end", terminal, 7, {}, "turn-1"),
+    ]);
+    expect(state.turns["turn-1"]!.items[0]).toMatchObject({ content: { durationSeconds: 5 } });
+  });
+
   it("projects protocol-neutral session metadata, commands, and capabilities", () => {
     const state = replayAgentUIEvents("session-1", [
       event("session-info", "session.updated", 1, {
@@ -509,7 +533,7 @@ describe("OpenMA headless Agent UI state", () => {
       }, "turn-8"),
     ]);
 
-    expect(state.turns["turn-8"]?.items).toEqual([
+    expect(state.turns["turn-8"]?.items).toMatchObject([
       {
         id: "thinking-1",
         kind: "thinking",

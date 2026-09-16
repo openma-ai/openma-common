@@ -112,3 +112,21 @@ Compatibility policy:
 - major: removed/renamed tokens, exports, types, or changed reducer semantics.
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for the release checklist.
+
+## Shared local runtime
+
+`@openma/common/local-runtime` owns the host-neutral ACP session execution loop,
+checkpoints, daemon connection state and graceful shutdown. CLI and desktop
+adapters provide process spawning, persistence, directory authorization, logging
+and UI. Sharing this code does not give an observer ownership of another process.
+
+`@openma/common/managed-runtime` owns the Managed Agents Work lease lifecycle,
+Session HTTP control channel, ACP event projection and semantic recovery. These
+modules use scoped Work credentials and the canonical `/v1/sessions` API. The
+legacy reverse-WebSocket connection remains separate for existing installations;
+importing this package alone does not migrate a daemon to the Work protocol.
+
+The runtime modules were extracted from open-managed-agents `af45e233` with their
+behavioral tests. Product adapters must depend on these exports rather than copy
+source snapshots. The package does not install services, select a tenant, or
+start a daemon on import.
