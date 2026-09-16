@@ -19,7 +19,6 @@
   --site-line-strong: rgba(23, 23, 22, 0.2);
   --site-line-inverse: rgba(255, 255, 255, 0.09);
   --site-brand: #f84f32;
-  --site-brand-text: #c7351f;
   --site-brand-hover: #e7462b;
   --site-brand-ink: #141414;
   --site-shadow: 0 22px 70px rgba(29, 27, 23, 0.1), 0 3px 12px rgba(29, 27, 23, 0.06);
@@ -47,7 +46,6 @@
   --site-line: rgba(245, 245, 240, 0.11);
   --site-line-strong: rgba(245, 245, 240, 0.2);
   --site-brand-hover: #ff6249;
-  --site-brand-text: #ff765f;
   --site-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), 0 3px 18px rgba(0, 0, 0, 0.28);
   }
 }
@@ -65,6 +63,5 @@
   --site-line: rgba(245, 245, 240, 0.11);
   --site-line-strong: rgba(245, 245, 240, 0.2);
   --site-brand-hover: #ff6249;
-  --site-brand-text: #ff765f;
   --site-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), 0 3px 18px rgba(0, 0, 0, 0.28);
 }
