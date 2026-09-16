@@ -642,4 +642,5 @@ export function encodeManagedSessionInput(event) {
         },
     };
 }
+export { sessionInputIdentityPrefix } from "./input-identity.js";
 //# sourceMappingURL=index.js.map

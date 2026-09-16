@@ -28,4 +28,5 @@ export interface ManagedEventEncodeResult {
 export declare function decodeManagedSessionEvent(event: ManagedSessionEvent, context: ManagedEventDecodeContext): ManagedEventDecodeResult;
 export declare function decodeManagedStreamEvent(event: ManagedStreamEvent, context: ManagedEventDecodeContext): ManagedEventDecodeResult;
 export declare function encodeManagedSessionInput(event: OpenMAEvent): ManagedEventEncodeResult;
+export { sessionInputIdentityPrefix } from "./input-identity.js";
 //# sourceMappingURL=index.d.ts.map

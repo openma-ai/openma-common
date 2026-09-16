@@ -783,3 +783,5 @@ export function encodeManagedSessionInput(
     },
   };
 }
+
+export { sessionInputIdentityPrefix } from "./input-identity.js";
