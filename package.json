@@ -91,7 +91,8 @@
     "./managed-runtime": {
       "types": "./dist/managed-runtime/index.d.ts",
       "import": "./dist/managed-runtime/index.js"
-    }
+    },
+    "./brand/website.css": "./dist/brand/website.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static-assets.mjs",

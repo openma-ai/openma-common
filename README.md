@@ -130,3 +130,15 @@ The runtime modules were extracted from open-managed-agents `af45e233` with thei
 behavioral tests. Product adapters must depend on these exports rather than copy
 source snapshots. The package does not install services, select a tenant, or
 start a daemon on import.
+
+## Public website design
+
+Import `@openma/common/brand/website.css` for the Backchat-led marketing theme.
+It supplies `--site-*` colors, Geist/monospace stacks, 1180px content width,
+10px controls, 14px panels and 160ms transitions. Both public websites consume
+these values; app and Console themes continue using `brand/tokens.css`.
+
+Use `data-site-theme="light"` or `"dark"` for explicit selection; otherwise
+the palette follows the OS. Keep editorial content and product components in
+the consuming site. Use coral for the primary action, neutral bordered
+secondary actions, sans-serif headings, thin separators and generous sections.

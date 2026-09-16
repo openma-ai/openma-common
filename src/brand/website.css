@@ -1,0 +1,70 @@
+/* Marketing theme: Backchat is the visual source of truth.
+ * Import only on public websites; Console and desktop tokens are independent.
+ * Default follows the OS. Set data-site-theme="light" or "dark" to override.
+ */
+:root {
+  color-scheme: light;
+  --site-page: #f7f7f5;
+  --site-surface: #ffffff;
+  --site-surface-raised: #fbfbfa;
+  --site-surface-muted: #ececea;
+  --site-surface-inverse: #10100f;
+  --site-ink: #171716;
+  --site-ink-soft: #42423f;
+  --site-ink-inverse: #e8e8e4;
+  --site-muted: #696965;
+  --site-muted-2: #696965;
+  --site-muted-inverse: #91918c;
+  --site-line: rgba(23, 23, 22, 0.11);
+  --site-line-strong: rgba(23, 23, 22, 0.2);
+  --site-line-inverse: rgba(255, 255, 255, 0.09);
+  --site-brand: #f84f32;
+  --site-brand-text: #c7351f;
+  --site-brand-hover: #e7462b;
+  --site-brand-ink: #141414;
+  --site-shadow: 0 22px 70px rgba(29, 27, 23, 0.1), 0 3px 12px rgba(29, 27, 23, 0.06);
+  --site-mono: "JetBrains Mono Variable", "SFMono-Regular", Consolas, monospace;
+  --site-max: 1180px;
+  --site-font-sans: "Geist Variable", "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --site-radius-control: 10px;
+  --site-radius-panel: 14px;
+  --site-section-space: 96px;
+  --site-duration: 160ms;
+  --site-ease: cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-site-theme]) {
+    color-scheme: dark;
+  --site-page: #0e0e0d;
+  --site-surface: #181817;
+  --site-surface-raised: #1d1d1c;
+  --site-surface-muted: #242422;
+  --site-ink: #f2f2ef;
+  --site-ink-soft: #d0d0cb;
+  --site-muted: #9c9c96;
+  --site-muted-2: #74746f;
+  --site-line: rgba(245, 245, 240, 0.11);
+  --site-line-strong: rgba(245, 245, 240, 0.2);
+  --site-brand-hover: #ff6249;
+  --site-brand-text: #ff765f;
+  --site-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), 0 3px 18px rgba(0, 0, 0, 0.28);
+  }
+}
+
+:root[data-site-theme="dark"] {
+  color-scheme: dark;
+  --site-page: #0e0e0d;
+  --site-surface: #181817;
+  --site-surface-raised: #1d1d1c;
+  --site-surface-muted: #242422;
+  --site-ink: #f2f2ef;
+  --site-ink-soft: #d0d0cb;
+  --site-muted: #9c9c96;
+  --site-muted-2: #74746f;
+  --site-line: rgba(245, 245, 240, 0.11);
+  --site-line-strong: rgba(245, 245, 240, 0.2);
+  --site-brand-hover: #ff6249;
+  --site-brand-text: #ff765f;
+  --site-shadow: 0 24px 80px rgba(0, 0, 0, 0.34), 0 3px 18px rgba(0, 0, 0, 0.28);
+}
