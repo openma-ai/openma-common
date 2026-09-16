@@ -211,4 +211,5 @@ function assertNonNegativeInteger(value, name) {
 }
 export * from "./claimed-environment-work.js";
 export * from "./acp-subagents.js";
+export * from "./input-identity.js";
 //# sourceMappingURL=index.js.map

@@ -317,3 +317,4 @@ export * from "./claimed-environment-work.js";
 export type { RuntimeResourceScope, HarnessSupervisorHarness, HarnessSupervisorRun } from "./contracts.js";
 
 export * from "./acp-subagents.js";
+export * from "./input-identity.js";
