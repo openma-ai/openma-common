@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
 import { resolveNpmAcpRelease, prepareNpmAcpRelease } from '../src/acp-artifacts/index.js';
@@ -90,8 +90,8 @@ it('does not pass host Work or model credentials to npm lifecycle scripts', asyn
   try {
     const release = await resolveNpmAcpRelease(f.selection, { fetch: f.fetcher });
     const root = join(f.root, 'installed');
-    await prepareNpmAcpRelease(release, { root, fetch: f.fetcher });
-    expect(JSON.parse(await readFile(join(root, release.digest, 'node_modules/@test/harness/env.json'), 'utf8'))).toEqual({});
+    const prepared = await prepareNpmAcpRelease(release, { root, fetch: f.fetcher });
+    expect(JSON.parse(await readFile(join(dirname(dirname(prepared.command)), '@test/harness/env.json'), 'utf8'))).toEqual({});
   } finally {
     if (previousWork === undefined) delete process.env.ANTHROPIC_WORK_SECRET; else process.env.ANTHROPIC_WORK_SECRET = previousWork;
     if (previousModel === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousModel;

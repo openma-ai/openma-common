@@ -70,7 +70,7 @@ function signalWithTimeout(signal, ms) {
 export async function prepareNpmAcpRelease(input, options) {
     const release = validateNpmAcpRelease(input);
     options.signal?.throwIfAborted();
-    const root = resolve(options.root);
+    const root = join(resolve(options.root), `${process.platform}-${process.arch}-node${process.versions.modules}`);
     const destination = join(root, release.digest);
     const cached = await readPrepared(destination, release);
     if (cached)
@@ -130,6 +130,8 @@ async function verifyInstalled(directory, release) {
         throw new Error("ACP release executable escapes its package");
     const command = join(directory, "node_modules", ".bin", process.platform === "win32" ? `${release.bin}.cmd` : release.bin);
     await access(command, constants.X_OK);
+    if (process.platform !== "win32" && await realpath(command) !== target)
+        throw new Error("ACP release executable link mismatch");
     return command;
 }
 async function readPrepared(directory, release) {

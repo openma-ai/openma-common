@@ -158,7 +158,8 @@ const prepared = await prepareNpmAcpRelease(release, { root: "/tmp/acp-artifacts
 ```
 
 Resolution rejects tags/ranges and verifies the package's published identity.
-The release records its SHA-512 tarball integrity and a SHA-256 manifest digest.
+The release records its SHA-512 tarball integrity and a SHA-256 manifest digest. The install cache is separated by OS, CPU architecture and
+Node ABI.
 Preparation verifies the archive before npm runs, checks the installed package
 identity and executable, and atomically publishes a digest-specific directory.
 Different versions coexist; retries reuse a complete install without consulting
