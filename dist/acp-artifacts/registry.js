@@ -155,7 +155,7 @@ export async function resolveAcpRelease(selection, input = { type: "registry" },
                 artifact = await resolveNpmAcpRelease({ ...selection, package: name }, options);
             }
             else {
-                const parts = entry.package.split("==");
+                const parts = entry.package.split(/==|@/);
                 if (parts.length > 2 || parts.length === 2 && parts[1] !== selection.version)
                     throw new Error("Registry uvx package version does not match release");
                 artifact = await resolveUvxAcpRelease({ ...selection, package: parts[0] }, options);

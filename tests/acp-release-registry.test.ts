@@ -39,10 +39,10 @@ it("uses a compatible npx distribution when no binary matches this platform", as
   expect(validateAcpRelease(release)).toEqual(release);
   expect(() => validateAcpRelease({ ...release, args: ['--different'] })).toThrow(/digest/);
 });
-it("resolves uvx from the registry using the exact Python release", async () => {
+it.each(["python-agent==1.0.0", "python-agent@1.0.0"])("resolves uvx from the registry using the exact Python release: %s", async packageSpec => {
   const release = await resolveAcpRelease({ id: 'fixture', version: '1.0.0' }, { type: 'registry' }, { fetch: async input =>
     String(input).includes('raw.githubusercontent.com')
-      ? Response.json({ id: 'fixture', version: '1.0.0', distribution: { uvx: { package: 'python-agent==1.0.0', args: ['acp'] } } })
+      ? Response.json({ id: 'fixture', version: '1.0.0', distribution: { uvx: { package: packageSpec, args: ['acp'] } } })
       : Response.json({ info: { name: 'python-agent', version: '1.0.0' }, urls: [{ digests: { sha256: 'a'.repeat(64) } }] }),
   });
   expect(release).toMatchObject({ artifact: { schema: 'openma.acp.uvx.v1', package: 'python-agent', version: '1.0.0' }, args: ['acp'] });
