@@ -21,6 +21,7 @@ describe("static asset build", () => {
       }
       const assets = [
         ["brand/tokens.css", "new tokens"],
+        ["brand/website.css", "new website theme"],
         ["brand/openma-logo-mark.svg", "new mark"],
         ["chat-ui/styles.css", "new chat styles"],
       ] as const;

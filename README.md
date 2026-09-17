@@ -142,3 +142,35 @@ Use `data-site-theme="light"` or `"dark"` for explicit selection; otherwise
 the palette follows the OS. Keep editorial content and product components in
 the consuming site. Use coral for the primary action, neutral bordered
 secondary actions, sans-serif headings, thin separators and generous sections.
+
+## Versioned ACP artifacts
+
+`@openma/common/acp-artifacts` is the Node preparation layer for npm-published
+ACP harnesses. The existing ACP runtime still owns process/session execution.
+
+```ts
+const release = await resolveNpmAcpRelease({
+  id: "codex-acp", package: "@agentclientprotocol/codex-acp", version: "1.8.0",
+});
+// Persist this release with the Session before preparing or launching it.
+const prepared = await prepareNpmAcpRelease(release, { root: "/tmp/acp-artifacts", signal });
+// Pass prepared.command to the existing Node ACP runtime.
+```
+
+Resolution rejects tags/ranges and verifies the package's published identity.
+The release records its SHA-512 tarball integrity and a SHA-256 manifest digest.
+Preparation verifies the archive before npm runs, checks the installed package
+identity and executable, and atomically publishes a digest-specific directory.
+Different versions coexist; retries reuse a complete install without consulting
+the registry. Failed installs never publish a completion record. Package scripts
+receive only PATH, HOME and temporary-directory/platform variables, never the
+host's model or Work credentials from its environment.
+
+This first distribution supports npm packages on Node-capable POSIX hosts.
+Binary archives and Python/uv releases are not implemented here. npm resolves
+transitive dependencies during first installation and preserves its lockfile
+with the cached tree; the release digest pins the top-level artifact, not every
+transitive dependency across independently prepared sandboxes. Hosts requiring
+that stronger guarantee should publish a bundled or shrinkwrapped release.
+Hosts own the allowlist of packages and the persistent Session release record;
+there is no global install, automatic upgrade, or latest-version fallback.

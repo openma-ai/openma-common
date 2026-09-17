@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Shared OpenMA brand assets, design tokens, and session event adapters.",
   "repository": {
@@ -92,7 +92,11 @@
       "types": "./dist/managed-runtime/index.d.ts",
       "import": "./dist/managed-runtime/index.js"
     },
-    "./brand/website.css": "./dist/brand/website.css"
+    "./brand/website.css": "./dist/brand/website.css",
+    "./acp-artifacts": {
+      "types": "./dist/acp-artifacts/index.d.ts",
+      "import": "./dist/acp-artifacts/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static-assets.mjs",
