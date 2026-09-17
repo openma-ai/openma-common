@@ -206,4 +206,9 @@ prepared sandboxes require bundled/shrinkwrapped or otherwise locked releases.
 A native package may additionally require system libraries from its environment.
 
 Artifact integration tests use actual npm/uv processes and local fixture
-registries. Running `pnpm verify` requires uv, Python 3, tar, gzip, bzip2 and xz.
+registries. Running `pnpm verify` requires uv, Python 3, tar, gzip, bzip2, xz and OpenSSL.
+
+Artifact installers retain `SSL_CERT_FILE`, `SSL_CERT_DIR` and
+`NODE_EXTRA_CA_CERTS` from the sandbox so its trusted outbound-proxy CA remains
+available. uv uses native TLS trust. Certificate verification stays enabled;
+Work/model credentials and arbitrary host environment variables remain excluded.

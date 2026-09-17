@@ -5,6 +5,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } fro
 import { constants } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { childEnvironment } from "./shared.js";
 const exec = promisify(execFile);
 const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const packageName = /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/;
@@ -88,11 +89,7 @@ export async function prepareNpmAcpRelease(input, options) {
         const archive = join(staging, "release.tgz");
         await writeFile(archive, bytes);
         // Deliberately exclude Work tokens and model credentials from package scripts.
-        const env = {};
-        for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot"]) {
-            if (process.env[key] !== undefined)
-                env[key] = process.env[key];
-        }
+        const env = childEnvironment();
         await exec("npm", ["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
             env, timeout: 600_000, maxBuffer: 1024 * 1024, signal: options.signal,
         });

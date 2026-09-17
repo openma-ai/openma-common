@@ -56,7 +56,7 @@ export async function prepareUvxAcpRelease(input, options) {
         await exec("uv", ["venv", "--no-config", "--no-project", "--relocatable", "--python", interpreter, venv], runOptions);
         const requirements = join(directory, "requirements.txt");
         await writeFile(requirements, `${release.package}==${release.version} ${release.hashes.map(hash => `--hash=sha256:${hash}`).join(" ")}\n`);
-        await exec("uv", ["pip", "install", "--no-config", "--python", join(venv, "bin/python"), "--index-url", release.indexUrl, "-r", requirements], runOptions);
+        await exec("uv", ["pip", "install", "--no-config", "--native-tls", "--python", join(venv, "bin/python"), "--index-url", release.indexUrl, "-r", requirements], runOptions);
     }, async (directory) => {
         const venv = join(directory, "venv");
         const command = join(venv, "bin", release.command);

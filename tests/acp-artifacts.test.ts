@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { rootCertificates } from 'node:tls';
 import { afterEach, expect, it } from 'vitest';
 import { resolveNpmAcpRelease, prepareNpmAcpRelease } from '../src/acp-artifacts/index.js';
 
@@ -82,7 +83,11 @@ it('rejects a cancelled preparation before downloading or spawning npm', async (
 });
 
 it('does not pass host Work or model credentials to npm lifecycle scripts', async () => {
-  const f = await fixture('1.8.0', { postinstall: `node -e "require('fs').writeFileSync('env.json', JSON.stringify({work:process.env.ANTHROPIC_WORK_SECRET,model:process.env.OPENAI_API_KEY}))"` });
+  const f = await fixture('1.8.0', { postinstall: `node -e "require('fs').writeFileSync('env.json', JSON.stringify({work:process.env.ANTHROPIC_WORK_SECRET,model:process.env.OPENAI_API_KEY,ca:process.env.NODE_EXTRA_CA_CERTS}))"` });
+  const previousCa = process.env.NODE_EXTRA_CA_CERTS;
+  const certPath = join(f.root, "trusted-ca.pem");
+  await writeFile(certPath, rootCertificates[0]!);
+  process.env.NODE_EXTRA_CA_CERTS = certPath;
   const previousWork = process.env.ANTHROPIC_WORK_SECRET;
   const previousModel = process.env.OPENAI_API_KEY;
   process.env.ANTHROPIC_WORK_SECRET = 'test-work-secret';
@@ -91,8 +96,9 @@ it('does not pass host Work or model credentials to npm lifecycle scripts', asyn
     const release = await resolveNpmAcpRelease(f.selection, { fetch: f.fetcher });
     const root = join(f.root, 'installed');
     const prepared = await prepareNpmAcpRelease(release, { root, fetch: f.fetcher });
-    expect(JSON.parse(await readFile(join(dirname(dirname(prepared.command)), '@test/harness/env.json'), 'utf8'))).toEqual({});
+    expect(JSON.parse(await readFile(join(dirname(dirname(prepared.command)), '@test/harness/env.json'), 'utf8'))).toEqual({ ca: certPath });
   } finally {
+    if (previousCa === undefined) delete process.env.NODE_EXTRA_CA_CERTS; else process.env.NODE_EXTRA_CA_CERTS = previousCa;
     if (previousWork === undefined) delete process.env.ANTHROPIC_WORK_SECRET; else process.env.ANTHROPIC_WORK_SECRET = previousWork;
     if (previousModel === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previousModel;
   }

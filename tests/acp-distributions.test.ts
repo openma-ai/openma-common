@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type RequestListener } from "node:http";
+import { createServer as createSecureServer } from "node:https";
 import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { zipSync, strToU8 } from "fflate";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { resolveBinaryAcpRelease, prepareBinaryAcpRelease, resolveUvxAcpRelease, prepareUvxAcpRelease } from "../src/acp-artifacts/index.js";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
 const servers: Server[] = [];
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve, reject) => server.close(e => e ? reject(e) : resolve()))));
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -88,28 +90,32 @@ function wheel(name: string, version: string, dependency = false, native = false
     ? `${path},,` : `${path},sha256=${createHash("sha256").update(bytes).digest("base64url")},${bytes.byteLength}`).join("\n"));
   return zipSync(files);
 }
-async function pythonFixture(version = "1.0.0", native = false) {
+async function pythonFixture(version = "1.0.0", native = false, tls = false) {
   const root = await temp();
   const main = wheel("tiny_harness", version, true, native);
   const dep = wheel("tiny_dependency", "1.0.0");
   const mainName = `tiny_harness-${version}-py3-none-any.whl`;
   const depName = "tiny_dependency-1.0.0-py3-none-any.whl";
-  const server = createServer((req, res) => {
+  const handler: RequestListener = (req, res) => {
     if (req.url === `/files/${mainName}`) { res.end(main); return; }
     if (req.url === `/files/${depName}`) { res.end(dep); return; }
     res.setHeader("Content-Type", "text/html");
     if (req.url === "/simple/tiny-harness/") { res.end(`<a href="/files/${mainName}#sha256=${sha(main)}">${mainName}</a>`); return; }
     if (req.url === "/simple/tiny-dependency/") { res.end(`<a href="/files/${depName}#sha256=${sha(dep)}">${depName}</a>`); return; }
     res.writeHead(404); res.end();
-  });
+  };
+  const cert = join(root, "ca.pem");
+  const key = join(root, "key.pem");
+  if (tls) await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1"]);
+  const server = tls ? createSecureServer({ key: await readFile(key), cert: await readFile(cert) }, handler) : createServer(handler);
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const indexUrl = `http://127.0.0.1:${(server.address() as { port: number }).port}/simple`;
+  const indexUrl = `${tls ? "https" : "http"}://127.0.0.1:${(server.address() as { port: number }).port}/simple`;
   const metadata = { info: { name: "tiny-harness", version }, urls: [{ digests: { sha256: sha(main) }, yanked: false }] };
   const release = await resolveUvxAcpRelease({ id: "python-agent", package: "tiny-harness", version, command: "tiny-harness", indexUrl }, {
     fetch: async () => Response.json(metadata),
   });
-  return { root, release, metadata, indexUrl };
+  return { root, release, metadata, indexUrl, cert };
 }
 
 it("installs a hash-pinned uvx tool with dependencies and keeps its launcher valid after publication", async () => {
@@ -153,3 +159,10 @@ it("rejects tar symlinks instead of extracting through them", async () => {
   const release = resolveBinaryAcpRelease({ ...f.release, sha256: sha(bytes) });
   await expect(prepareBinaryAcpRelease(release, { root: join(f.root, "cache"), fetch: async () => new Response(bytes) })).rejects.toThrow(/links/);
 });
+
+it("uses the sandbox CA bundle for uvx HTTPS without disabling certificate verification", async () => {
+  const f = await pythonFixture("1.0.0", false, true);
+  vi.stubEnv("SSL_CERT_FILE", f.cert);
+  const prepared = await prepareUvxAcpRelease(f.release, { root: f.root });
+  expect((await exec(prepared.command, [])).stdout).toContain("1.0.0:dependency-ready");
+}, 30_000);

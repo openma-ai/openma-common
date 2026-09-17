@@ -32,7 +32,7 @@ export function launchOptions(value: { args?: unknown; env?: unknown }): { args:
   return { args: [...(value.args as string[] ?? [])], env: Object.fromEntries(Object.entries((value.env ?? {}) as Record<string, string>).sort(([a], [b]) => a.localeCompare(b))) };
 }
 export function childEnvironment(): NodeJS.ProcessEnv {
-  return Object.fromEntries(["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  return Object.fromEntries(["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 export function timeout(signal?: AbortSignal, ms = 120_000): AbortSignal { return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms); }
 export async function download(address: string, options: ArtifactOptions): Promise<Buffer> {
