@@ -142,3 +142,73 @@ Use `data-site-theme="light"` or `"dark"` for explicit selection; otherwise
 the palette follows the OS. Keep editorial content and product components in
 the consuming site. Use coral for the primary action, neutral bordered
 secondary actions, sans-serif headings, thin separators and generous sections.
+
+## Versioned ACP artifacts
+
+`@openma/common/acp-artifacts` prepares published ACP harnesses independently of
+the environment image. Execution still uses the existing shared ACP runtime.
+
+```ts
+const release = await resolveAcpRelease(
+  { id: "goose", version: "1.50.0" },
+  { type: "registry" },
+);
+// Persist the complete release with the Session before preparing/launching it.
+const prepared = await prepareAcpRelease(release, { root: "/tmp/acp-artifacts", signal });
+// Give command, args and env to the existing ACP runtime.
+```
+
+Supported sources:
+
+| Source | Resolution and preparation |
+| --- | --- |
+| `npm` / `npx` | Exact npm version and SHA-512 tarball integrity; isolated local install |
+| `uvx` | Exact PyPI version and artifact SHA-256 hashes; relocatable uv virtual environment |
+| `registry` | Official ACP `agent.json`, including exact historical/preview releases; binary → npx → uvx preference |
+| Binary manifest | Platform-specific archive/command from an ACP manifest; SHA-256 verified before extraction |
+
+`parseAcpReleaseSource()` accepts npm package strings for compatibility, or typed
+sources such as `{ type: "uvx", package: "python-agent", command: "agent", python: "3.12" }`.
+A registry source can set `preference: ["uvx", "npx", "binary"]`, or an operator's
+HTTPS `manifestUrl` with `{id}` / `{version}` placeholders. Custom manifests must
+identify the exact requested release. The public registry resolves historical
+versions through GitHub file history; it never substitutes the current version.
+The low-level `resolveNpmAcpRelease`, `resolveUvxAcpRelease` and
+`resolveBinaryAcpRelease` APIs remain available for hosts with their own catalogs.
+
+Binary formats: raw executable, zip, tar, tar.gz/tgz, tar.bz2/tbz2 and tar.xz/txz.
+Platform selection follows ACP's OS/architecture keys. Paths are checked before
+extraction; tar links and special files are rejected. Installer formats such as
+dmg, pkg, deb, rpm and msi are not executable distributions. Published checksums
+are verified. For an older registry entry without a checksum, the first HTTPS
+download's SHA-256 is recorded and subsequent preparation verifies that digest;
+this records content identity, rather than claiming publisher attestation.
+
+All release records have a digest. `validateAcpRelease()` validates restored
+records, and `acpReleaseMatchesSource()` checks that a Session's catalog binding
+has not changed. Publication is atomic, failed preparation remains unlaunchable,
+and different versions coexist. Caches are separated by OS/CPU; npm adds Node
+ABI and uvx adds Python runtime/interpreter identity. Already-prepared artifacts
+can be used offline. Registry-provided arguments and environment are preserved;
+hosts must still remove their own control-plane secrets from the final agent
+environment. Installer subprocesses receive only the minimal system environment.
+
+The host environment needs Node/npm for npm sources, uv plus a compatible Python
+interpreter for uvx, and bzip2/xz when those archive formats are used. Python
+interpreters may be provisioned with `uv python install`. These APIs target
+POSIX sandboxes. uvx handles console entry points and wheel-packaged native
+executables, verifies package ownership of the selected executable, and keeps
+entry points valid when a completed virtual environment is published.
+
+The release pins the top-level package/artifact. npm/uv resolve transitive
+packages on first installation; identical dependency trees across independently
+prepared sandboxes require bundled/shrinkwrapped or otherwise locked releases.
+A native package may additionally require system libraries from its environment.
+
+Artifact integration tests use actual npm/uv processes and local fixture
+registries. Running `pnpm verify` requires uv, Python 3, tar, gzip, bzip2, xz and OpenSSL.
+
+Artifact installers retain `SSL_CERT_FILE`, `SSL_CERT_DIR` and
+`NODE_EXTRA_CA_CERTS` from the sandbox so its trusted outbound-proxy CA remains
+available. uv uses native TLS trust. Certificate verification stays enabled;
+Work/model credentials and arbitrary host environment variables remain excluded.
