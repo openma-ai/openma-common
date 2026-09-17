@@ -145,33 +145,65 @@ secondary actions, sans-serif headings, thin separators and generous sections.
 
 ## Versioned ACP artifacts
 
-`@openma/common/acp-artifacts` is the Node preparation layer for npm-published
-ACP harnesses. The existing ACP runtime still owns process/session execution.
+`@openma/common/acp-artifacts` prepares published ACP harnesses independently of
+the environment image. Execution still uses the existing shared ACP runtime.
 
 ```ts
-const release = await resolveNpmAcpRelease({
-  id: "codex-acp", package: "@agentclientprotocol/codex-acp", version: "1.8.0",
-});
-// Persist this release with the Session before preparing or launching it.
-const prepared = await prepareNpmAcpRelease(release, { root: "/tmp/acp-artifacts", signal });
-// Pass prepared.command to the existing Node ACP runtime.
+const release = await resolveAcpRelease(
+  { id: "goose", version: "1.50.0" },
+  { type: "registry" },
+);
+// Persist the complete release with the Session before preparing/launching it.
+const prepared = await prepareAcpRelease(release, { root: "/tmp/acp-artifacts", signal });
+// Give command, args and env to the existing ACP runtime.
 ```
 
-Resolution rejects tags/ranges and verifies the package's published identity.
-The release records its SHA-512 tarball integrity and a SHA-256 manifest digest. The install cache is separated by OS, CPU architecture and
-Node ABI.
-Preparation verifies the archive before npm runs, checks the installed package
-identity and executable, and atomically publishes a digest-specific directory.
-Different versions coexist; retries reuse a complete install without consulting
-the registry. Failed installs never publish a completion record. Package scripts
-receive only PATH, HOME and temporary-directory/platform variables, never the
-host's model or Work credentials from its environment.
+Supported sources:
 
-This first distribution supports npm packages on Node-capable POSIX hosts.
-Binary archives and Python/uv releases are not implemented here. npm resolves
-transitive dependencies during first installation and preserves its lockfile
-with the cached tree; the release digest pins the top-level artifact, not every
-transitive dependency across independently prepared sandboxes. Hosts requiring
-that stronger guarantee should publish a bundled or shrinkwrapped release.
-Hosts own the allowlist of packages and the persistent Session release record;
-there is no global install, automatic upgrade, or latest-version fallback.
+| Source | Resolution and preparation |
+| --- | --- |
+| `npm` / `npx` | Exact npm version and SHA-512 tarball integrity; isolated local install |
+| `uvx` | Exact PyPI version and artifact SHA-256 hashes; relocatable uv virtual environment |
+| `registry` | Official ACP `agent.json`, including exact historical/preview releases; binary → npx → uvx preference |
+| Binary manifest | Platform-specific archive/command from an ACP manifest; SHA-256 verified before extraction |
+
+`parseAcpReleaseSource()` accepts npm package strings for compatibility, or typed
+sources such as `{ type: "uvx", package: "python-agent", command: "agent", python: "3.12" }`.
+A registry source can set `preference: ["uvx", "npx", "binary"]`, or an operator's
+HTTPS `manifestUrl` with `{id}` / `{version}` placeholders. Custom manifests must
+identify the exact requested release. The public registry resolves historical
+versions through GitHub file history; it never substitutes the current version.
+The low-level `resolveNpmAcpRelease`, `resolveUvxAcpRelease` and
+`resolveBinaryAcpRelease` APIs remain available for hosts with their own catalogs.
+
+Binary formats: raw executable, zip, tar, tar.gz/tgz, tar.bz2/tbz2 and tar.xz/txz.
+Platform selection follows ACP's OS/architecture keys. Paths are checked before
+extraction; tar links and special files are rejected. Installer formats such as
+dmg, pkg, deb, rpm and msi are not executable distributions. Published checksums
+are verified. For an older registry entry without a checksum, the first HTTPS
+download's SHA-256 is recorded and subsequent preparation verifies that digest;
+this records content identity, rather than claiming publisher attestation.
+
+All release records have a digest. `validateAcpRelease()` validates restored
+records, and `acpReleaseMatchesSource()` checks that a Session's catalog binding
+has not changed. Publication is atomic, failed preparation remains unlaunchable,
+and different versions coexist. Caches are separated by OS/CPU; npm adds Node
+ABI and uvx adds Python runtime/interpreter identity. Already-prepared artifacts
+can be used offline. Registry-provided arguments and environment are preserved;
+hosts must still remove their own control-plane secrets from the final agent
+environment. Installer subprocesses receive only the minimal system environment.
+
+The host environment needs Node/npm for npm sources, uv plus a compatible Python
+interpreter for uvx, and bzip2/xz when those archive formats are used. Python
+interpreters may be provisioned with `uv python install`. These APIs target
+POSIX sandboxes. uvx handles console entry points and wheel-packaged native
+executables, verifies package ownership of the selected executable, and keeps
+entry points valid when a completed virtual environment is published.
+
+The release pins the top-level package/artifact. npm/uv resolve transitive
+packages on first installation; identical dependency trees across independently
+prepared sandboxes require bundled/shrinkwrapped or otherwise locked releases.
+A native package may additionally require system libraries from its environment.
+
+Artifact integration tests use actual npm/uv processes and local fixture
+registries. Running `pnpm verify` requires uv, Python 3, tar, gzip, bzip2 and xz.
