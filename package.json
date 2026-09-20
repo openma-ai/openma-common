@@ -67,6 +67,14 @@
       "types": "./dist/acp-runtime/errors.d.ts",
       "import": "./dist/acp-runtime/errors.js"
     },
+    "./acp-runtime/probe": {
+      "types": "./dist/acp-runtime/probe.d.ts",
+      "import": "./dist/acp-runtime/probe.js"
+    },
+    "./acp-harnesses": {
+      "types": "./dist/acp-harnesses/index.d.ts",
+      "import": "./dist/acp-harnesses/index.js"
+    },
     "./session-ui": {
       "types": "./dist/session-ui/index.d.ts",
       "import": "./dist/session-ui/index.js"
@@ -123,6 +131,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.3.0",
     "@radix-ui/react-collapsible": "^1.1.12",
+    "@tanstack/react-virtual": "^3.14.11",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
     "lucide-react": "^1.17.0",

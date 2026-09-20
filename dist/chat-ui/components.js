@@ -1,8 +1,9 @@
 "use client";
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { ArrowDownIcon, BrainIcon, ChevronRightIcon } from "lucide-react";
-import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { agentUIProcessEndIndex, agentUITurnElapsedSeconds, projectAgentUITurnItems, } from "../agent-ui/presentation.js";
 import { SessionTurnFrame, } from "../session-ui/index.js";
@@ -28,9 +29,7 @@ function useChatControllableState({ prop, defaultProp, onChange, }) {
     const controlled = prop !== undefined;
     const value = controlled ? prop : uncontrolled;
     const setValue = useCallback((next) => {
-        const resolved = typeof next === "function"
-            ? next(value)
-            : next;
+        const resolved = typeof next === "function" ? next(value) : next;
         if (!controlled)
             setUncontrolled(resolved);
         if (!Object.is(resolved, value))
@@ -48,8 +47,32 @@ export const defaultChatCollapsiblePrimitives = {
 };
 export const CHAT_COMPOSER_FRAME_CLASS = "chat-composer-frame mx-auto w-full max-w-3xl min-w-0";
 export const CHAT_TURN_FRAME_CLASS = "chat-turn-frame mx-auto w-full max-w-3xl min-w-0";
-export function ChatConversation({ className, children, ...props }) {
-    return (_jsx(StickToBottom, { className: chatClassNames("relative flex-1 overflow-y-hidden", className), initial: false, resize: "smooth", role: "log", ...props, children: _jsx(ChatScrollAnchorBridge, { children: children }) }));
+function useChatScrollbarActivity() {
+    const timers = useRef(new Map());
+    useEffect(() => () => {
+        for (const [element, timer] of timers.current) {
+            clearTimeout(timer);
+            delete element.dataset.chatScrolling;
+        }
+        timers.current.clear();
+    }, []);
+    return useCallback((event) => {
+        const element = event.target;
+        if (!(element instanceof HTMLElement) || !element.classList.contains("chat-scrollbar"))
+            return;
+        const previous = timers.current.get(element);
+        if (previous !== undefined)
+            clearTimeout(previous);
+        element.dataset.chatScrolling = "true";
+        timers.current.set(element, setTimeout(() => {
+            delete element.dataset.chatScrolling;
+            timers.current.delete(element);
+        }, 450));
+    }, []);
+}
+export function ChatConversation({ className, children, onScrollCapture, ...props }) {
+    const markScrolling = useChatScrollbarActivity();
+    return (_jsx(StickToBottom, { className: chatClassNames("relative flex-1 overflow-y-hidden", className), initial: false, resize: "smooth", role: "log", onScrollCapture: (event) => { markScrolling(event); onScrollCapture?.(event); }, ...props, children: _jsx(ChatScrollAnchorBridge, { children: children }) }));
 }
 export function ChatConversationContent({ className, ...props }) {
     return (_jsx(StickToBottom.Content, { className: chatClassNames("flex flex-col gap-8 p-4", className), scrollClassName: "chat-scrollbar", ...props }));
@@ -178,7 +201,7 @@ const defaultThinkingMessage = (isStreaming, duration) => {
 export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({ className, children, getThinkingMessage = defaultThinkingMessage, showIcon = true, ...props }) {
     const { collapsible, isStreaming, isOpen, duration, triggerRef } = useChatReasoning();
     const CollapsibleTrigger = collapsible.Trigger;
-    return (_jsx(CollapsibleTrigger, { ref: triggerRef, className: chatClassNames("flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", className), ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
+    return (_jsx(CollapsibleTrigger, { ref: triggerRef, className: chatClassNames("chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", className), "data-chat-reasoning-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
 });
 export const ChatReasoningContent = memo(function ChatReasoningContent({ className, children, ...props }) {
     const { collapsible, isOpen } = useChatReasoning();
@@ -209,27 +232,99 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
     };
     return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "activity-disclosure-row min-h-6 text-[13px]", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
 }
+const COMPACT_AGENT_CHAT_STYLE = {
+    "--chat-message-padding-inline": "16px",
+    "--composer-card-padding-block": "8px",
+    "--composer-section-gap": "4px",
+    "--composer-body-min-height": "48px",
+    "--chat-user-message-max-width": "88%",
+};
+/** Shared density boundary for product-owned chat/composer shells. */
+export function agentChatDensityAttributes(density = "comfortable") {
+    return {
+        "data-chat-density": density,
+        ...(density === "compact" ? { style: COMPACT_AGENT_CHAT_STYLE } : {}),
+    };
+}
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
-export function AgentChatView({ sessionId, phase = "active", surface = "main", turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, }) {
+export function AgentChatView({ sessionId, phase = "active", surface = "main", turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density = "comfortable", }) {
     const transcriptTurns = turns.filter((turn) => turn.status !== "queued");
     const isEmpty = phase !== "active" || turns.length === 0;
-    return (_jsx("div", { className: chatClassNames("flex h-full min-h-0 flex-col", className), "data-chat-surface": surface, children: isEmpty ? (_jsxs("div", { className: "home-empty-stage flex h-full min-h-0 flex-col", style: homeStyle, children: [_jsx("div", { className: "home-empty-content flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-4", children: _jsx("div", { className: "home-empty-stack flex w-full max-w-[1120px] flex-col items-center gap-6", children: slots.empty }) }), _jsx(ChatComposerFrame, { slots: slots, home: true, style: homeComposerStyle }), slots.emptyAfter] })) : (_jsxs(_Fragment, { children: [_jsxs(ChatConversation, { className: "flex-1 min-h-0", children: [_jsx(ChatConversationContent, { className: "w-full px-0 py-6 flex min-h-full flex-col", children: wrapAgentChatConversationContent(slots, (_jsxs(_Fragment, { children: [_jsx("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: transcriptTurns.map((turn, index) => renderTurn ? (_jsx("div", { className: "contents", children: renderTurn({
-                                                turn,
-                                                index,
-                                                last: index === transcriptTurns.length - 1,
-                                            }) }, turn.id)) : (_jsx(AgentUITurnView, { sessionId: sessionId, turn: turn, thoughts: thoughts, labels: labels, slots: turnSlots, collapsiblePrimitives: collapsiblePrimitives, activityTools: activityTools }, turn.id))) }), slots.conversationContentAfter] }))) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }, sessionId ?? "none"), _jsx(ChatComposerFrame, { slots: slots })] })) }));
+    const densityAttributes = agentChatDensityAttributes(density);
+    const renderTranscriptTurn = (turn, index) => (renderTurn ? (_jsx("div", { className: "contents", children: renderTurn({
+            turn,
+            index,
+            last: index === transcriptTurns.length - 1,
+            density,
+        }) }, turn.id)) : (_jsx(AgentUITurnView, { sessionId: sessionId, turn: turn, thoughts: thoughts, labels: labels, slots: turnSlots, collapsiblePrimitives: collapsiblePrimitives, activityTools: activityTools, density: density }, turn.id)));
+    return (_jsx("div", { className: chatClassNames("flex h-full min-h-0 flex-col", className), "data-chat-surface": surface, ...densityAttributes, children: isEmpty ? (_jsxs("div", { className: "home-empty-stage flex h-full min-h-0 flex-col", style: homeStyle, children: [_jsx("div", { className: "home-empty-content flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-4", children: _jsx("div", { className: "home-empty-stack flex w-full max-w-[1120px] flex-col items-center gap-6", children: slots.empty }) }), _jsx(ChatComposerFrame, { slots: slots, home: true, style: homeComposerStyle }), slots.emptyAfter] })) : (_jsxs(_Fragment, { children: [transcriptTurns.length > 16 ? (_jsx(ChatVirtualConversation, { turns: transcriptTurns, renderTurn: renderTranscriptTurn, slots: slots, transcriptRef: transcriptRef }, sessionId ?? "none")) : (_jsxs(ChatConversation, { className: "flex-1 min-h-0", children: [_jsx(ChatConversationContent, { className: "w-full px-0 py-6 flex min-h-full flex-col", children: wrapAgentChatConversationContent(slots, _jsxs(_Fragment, { children: [_jsxs("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: [_jsx(ChatTranscriptInitialScroll, { tailTurnId: transcriptTurns.at(-1)?.id }), transcriptTurns.map(renderTranscriptTurn)] }), slots.conversationContentAfter] })) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }, sessionId ?? "none")), _jsx(ChatComposerFrame, { slots: slots })] })) }));
+}
+/** Start at the tail after history hydration and once per new turn.
+ * Same-turn streaming updates must preserve a reader's scroll position. */
+function ChatTranscriptInitialScroll({ tailTurnId }) {
+    const stick = useOptionalChatStickToBottom();
+    useLayoutEffect(() => {
+        const scroller = stick.scrollRef.current;
+        if (scroller)
+            scroller.scrollTop = scroller.scrollHeight;
+        void stick.scrollToBottom({ animation: "instant" });
+    }, [tailTurnId]);
+    return null;
+}
+/** Long transcripts have one scroll owner. TanStack keeps dynamic rows and
+ * end anchoring stable; StickToBottom is used only by the small-list path. */
+function ChatVirtualConversation({ turns, renderTurn, slots, transcriptRef }) {
+    const markScrolling = useChatScrollbarActivity();
+    const scrollRef = useRef(null);
+    const contentRef = useRef(null);
+    const getItemKey = useCallback((index) => turns[index].id, [turns]);
+    const virtualizer = useVirtualizer({
+        count: turns.length,
+        getScrollElement: () => scrollRef.current,
+        getItemKey,
+        estimateSize: () => 240,
+        initialRect: { width: 0, height: 600 },
+        initialOffset: () => Math.max(0, turns.length * 240 + 48 - 600),
+        paddingStart: 24,
+        paddingEnd: 24,
+        overscan: 3,
+        anchorTo: "end",
+        followOnAppend: "auto",
+        scrollEndThreshold: 48,
+    });
+    const anchor = {
+        scrollRef,
+        contentRef,
+        isAtBottom: virtualizer.isAtEnd(),
+        scrollToBottom: async () => {
+            virtualizer.scrollToEnd({ behavior: "auto" });
+            return true;
+        },
+        stopScroll: () => virtualizer.scrollToOffset(scrollRef.current?.scrollTop ?? 0, { behavior: "auto" }),
+    };
+    return (_jsx(ChatScrollAnchorContext.Provider, { value: anchor, children: _jsxs("div", { className: "relative flex-1 min-h-0 overflow-y-hidden", role: "log", onScrollCapture: markScrolling, children: [_jsx("div", { ref: scrollRef, className: "chat-scrollbar h-full overflow-y-auto", style: { overflowAnchor: "none" }, children: _jsx("div", { ref: contentRef, className: "w-full min-h-full", children: wrapAgentChatConversationContent(slots, _jsxs(_Fragment, { children: [_jsx("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: _jsxs("div", { "data-virtual-transcript": "true", style: { height: virtualizer.getTotalSize(), position: "relative" }, children: [_jsx(ChatTranscriptInitialScroll, { tailTurnId: turns.at(-1)?.id }), virtualizer.getVirtualItems().map((row) => (_jsx("div", { "data-index": row.index, ref: virtualizer.measureElement, style: { position: "absolute", top: 0, left: 0, width: "100%", display: "flow-root", transform: `translateY(${row.start}px)` }, children: renderTurn(turns[row.index], row.index) }, row.key)))] }) }), slots.conversationContentAfter] })) }) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }) }));
 }
 function wrapAgentChatConversationContent(slots, children) {
     return slots.wrapConversationContent?.(children) ?? children;
 }
 function ChatComposerFrame({ slots, home = false, style, }) {
-    return (_jsxs("div", { "data-chat-column": "composer", className: chatClassNames(CHAT_COMPOSER_FRAME_CLASS, "space-y-2", home && "relative home-composer-stack"), style: style, children: [home ? slots.homeBeforeComposer : null, slots.beforeComposer, slots.composer, slots.afterComposer] }));
+    const hasComposerFooter = slots.afterComposer !== null &&
+        slots.afterComposer !== undefined &&
+        slots.afterComposer !== false;
+    return (_jsxs("div", { "data-chat-column": "composer", className: chatClassNames(CHAT_COMPOSER_FRAME_CLASS, "space-y-2", home && "relative home-composer-stack"), style: hasComposerFooter
+            ? style
+            : {
+                ...style,
+                "--composer-card-footer-gap": "0px",
+                paddingBlockEnd: "var(--composer-frame-padding-bottom, var(--composer-frame-padding-inline, 12px))",
+            }, children: [home ? slots.homeBeforeComposer : null, slots.beforeComposer, slots.composer, slots.afterComposer] }));
 }
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
-export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", now, }) {
+export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, }) {
     const isStreaming = turn.status === "running";
+    const isCancelled = turn.status === "cancelled";
     const [processOpen, setProcessOpen] = useState(isStreaming);
     const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
     useEffect(() => {
@@ -240,6 +335,11 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
     const processEndIndex = agentUIProcessEndIndex(items);
     const rawProcessItems = items.filter((_, index) => index <= processEndIndex);
     const answerItems = items.filter((_, index) => index > processEndIndex);
+    const answerText = answerItems
+        .filter((item) => item.kind === "message" && item.role === "assistant")
+        .map((item) => item.text)
+        .join("")
+        .trim();
     const assistantPrefixes = streamPrefixes(items, "assistant");
     const thoughtPrefixes = streamPrefixes(items, "thought");
     const toolProjection = activityTools === "latest"
@@ -258,6 +358,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         turn,
         live: isStreaming,
         prefixSkip: 0,
+        answerText,
     };
     const hasSupplementalProcess = slots.hasSupplementalProcess?.(renderContext) ?? false;
     const hasProcess = processItems.length > 0 ||
@@ -275,22 +376,30 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
             break;
         }
     }
-    return (_jsxs(_Fragment, { children: [slots.renderBeforeTurn?.({ turn }), _jsxs(SessionTurnFrame, { turnId: turn.id, sessionId: sessionId, status: frameStatus ?? sessionTurnStatus(turn), errorMessage: turn.error, className: chatClassNames("!mb-8 !space-y-4 [&_[data-session-turn-prompt]>div]:!px-3 [&_[data-session-turn-prompt]>div]:!py-2", className), promptNode: prompt && slots.renderPrompt
+    const hasLiveTail = finalActivityItem && ((finalActivityItem.kind === "message" || finalActivityItem.kind === "thinking")
+        ? finalActivityItem.status === "streaming" && finalActivityItem.text.trim().length > 0
+        : finalActivityItem.kind === "tool" && isAgentUIToolRunning(finalActivityItem.status));
+    const showThinkingFallback = isStreaming && !hasLiveTail;
+    return (_jsxs(_Fragment, { children: [slots.renderBeforeTurn?.({ turn }), _jsxs(SessionTurnFrame, { turnId: turn.id, sessionId: sessionId, status: frameStatus ?? sessionTurnStatus(turn), errorMessage: turn.error, labels: labels.cancelled === undefined
+                    ? undefined
+                    : { cancelled: labels.cancelled }, hideStatusMessage: hasProcess && isCancelled, className: chatClassNames(density === "compact"
+                    ? "!mb-6 !space-y-3 [&_[data-session-turn-prompt]>div]:!px-3 [&_[data-session-turn-prompt]>div]:!py-2"
+                    : "!mb-8 !space-y-4 [&_[data-session-turn-prompt]>div]:!px-3 [&_[data-session-turn-prompt]>div]:!py-2", className), promptNode: prompt && slots.renderPrompt
                     ? slots.renderPrompt({ item: prompt, turn })
                     : undefined, promptText: prompt && !slots.renderPrompt ? prompt.text : undefined, errorNotice: turn.status === "failed" && slots.renderError
                     ? slots.renderError({ turn, message: turn.error })
                     : undefined, children: [slots.renderResponseBeforeProcess?.(renderContext), hasProcess ? (_jsxs(ChatReasoning, { isStreaming: isStreaming, open: processOpen, onOpenChange: (open) => {
                             if (!isStreaming)
                                 setProcessOpen(open);
-                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsx("span", { className: "min-w-0 flex-1 truncate text-left text-fg-muted", children: isStreaming
-                                        ? labels.workingFor(elapsedSeconds)
-                                        : labels.workedFor(elapsedSeconds) })) }), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
+                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "min-w-0 flex-1 truncate text-left text-fg-muted", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
+                                                    ? labels.workingFor(elapsedSeconds)
+                                                    : labels.workedFor(elapsedSeconds)] })] })) }), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
                                             if (item.kind === "message") {
                                                 if (item.role !== "assistant")
                                                     return null;
                                                 return (_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
+                                                        ...renderContext,
                                                         item,
-                                                        turn,
                                                         section: "process",
                                                         live: isStreaming && item === finalItem,
                                                         prefixSkip: assistantPrefixes.get(item.id) ?? 0,
@@ -313,8 +422,8 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                                     return {
                                                         key: child.item.id,
                                                         projection: slots.projectThoughtActivity?.({
+                                                            ...renderContext,
                                                             item: child.item,
-                                                            turn,
                                                             live,
                                                             prefixSkip,
                                                         }) ?? {
@@ -325,28 +434,29 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                                                 : (labels.thoughtFor?.(0) ?? labels.thinking),
                                                         },
                                                         content: slots.renderThought?.({
+                                                            ...renderContext,
                                                             item: child.item,
-                                                            turn,
                                                             live,
                                                             prefixSkip,
                                                         }) ?? child.item.text,
                                                     };
                                                 }
                                                 const projectionLive = active && child === lastGroupChild;
-                                                const contentLive = projectionLive && isAgentUIToolRunning(child.tool.status);
+                                                const contentLive = projectionLive &&
+                                                    isAgentUIToolRunning(child.tool.status);
                                                 return {
                                                     key: child.tool.id,
                                                     projection: slots.projectToolActivity?.({
+                                                        ...renderContext,
                                                         tool: child.tool,
-                                                        turn,
                                                         live: projectionLive,
                                                         prefixSkip: 0,
                                                     }) ?? {
                                                         summary: labels.toolActivity(child.tool),
                                                     },
                                                     content: slots.renderTool({
+                                                        ...renderContext,
                                                         tool: child.tool,
-                                                        turn,
                                                         live: contentLive,
                                                         prefixSkip: 0,
                                                     }),
@@ -359,12 +469,12 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                                 }) ?? {
                                                     summary: labels.toolRunSummary(groupTools),
                                                 } }, `event-sequence-${index}`));
-                                        }), isStreaming && processItems.length === 0 ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
+                                        }), slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
                         const live = isStreaming && item === finalItem;
                         if (item.kind === "message" && item.role === "assistant") {
                             return (_jsx("div", { className: "min-w-0", "data-session-turn-answer": "true", children: slots.renderAssistant({
+                                    ...renderContext,
                                     item,
-                                    turn,
                                     section: "answer",
                                     live,
                                     prefixSkip: assistantPrefixes.get(item.id) ?? 0,
@@ -372,14 +482,14 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                         }
                         if (item.kind === "raw" && slots.renderRaw) {
                             return slots.renderRaw({
+                                ...renderContext,
                                 item,
-                                turn,
                                 live,
                                 prefixSkip: 0,
                             });
                         }
                         return null;
-                    }), slots.renderAfterAnswer?.(renderContext), slots.renderFooter?.(renderContext)] })] }));
+                    }), showThinkingFallback ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderAfterAnswer?.(renderContext), slots.renderFooter?.(renderContext)] })] }));
 }
 function useAgentUITurnElapsedSeconds(turn, isStreaming, fixedNow) {
     const [clock, setClock] = useState(() => fixedNow ?? Date.now());
