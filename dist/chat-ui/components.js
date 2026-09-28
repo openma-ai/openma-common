@@ -217,7 +217,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
     const [manualOpen, setManualOpen] = useState(null);
     const stick = useOptionalChatStickToBottom();
     const triggerRef = useRef(null);
-    const open = manualOpen ?? active;
+    const open = manualOpen ?? false;
     const projected = active ? nodes.at(-1)?.projection : completedProjection;
     if (!projected)
         return null;
@@ -226,7 +226,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
             scrollElement: stick.scrollRef.current,
             anchorElement: triggerRef.current,
             contentElement: stick.contentRef.current,
-            update: () => setManualOpen((value) => !(value ?? active)),
+            update: () => setManualOpen((value) => !(value ?? false)),
             stopScroll: stick.stopScroll,
         });
     };
@@ -249,6 +249,9 @@ export function agentChatDensityAttributes(density = "comfortable") {
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
 export function AgentChatView({ sessionId, phase = "active", surface = "main", turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density = "comfortable", }) {
+    // Preserve selection/disclosure DOM; only skip settled offscreen layout.
+    // Active and recent turns stay fully rendered, with measured heights cached
+    // by the browser for older turns.
     const transcriptTurns = turns.filter((turn) => turn.status !== "queued");
     const isEmpty = phase !== "active" || turns.length === 0;
     const densityAttributes = agentChatDensityAttributes(density);

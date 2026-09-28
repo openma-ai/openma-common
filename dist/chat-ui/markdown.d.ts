@@ -1,4 +1,5 @@
-import { type ComponentType } from "react";
+import { Streamdown } from "streamdown";
+import { type ComponentType, type ComponentProps } from "react";
 /**
  * Backchat's one block rhythm for both streaming-markdown and settled
  * Streamdown output. The semantic class is also styled by styles.css so a
@@ -17,11 +18,12 @@ export interface ChatMarkdownProps {
         mermaid?: boolean;
     };
     linkSafety?: boolean;
+    rehypePlugins?: ComponentProps<typeof Streamdown>["rehypePlugins"];
     /** Product behavior such as link activation is injected by the host. */
     components?: Record<string, ComponentType<any>>;
 }
 /** The settled half of Backchat's dual-track Markdown renderer. */
-export declare function ChatMarkdown({ text, className, controls, linkSafety, components, }: ChatMarkdownProps): import("react").ReactElement<{
+export declare function ChatMarkdown({ text, className, controls, linkSafety, components, rehypePlugins, }: ChatMarkdownProps): import("react").ReactElement<{
     children: string;
     className?: string;
     controls?: {

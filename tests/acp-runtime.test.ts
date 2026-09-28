@@ -1,6 +1,7 @@
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
+  RequestError,
   ndJsonStream,
   type Agent,
   type ContentBlock,
@@ -10,6 +11,82 @@ import { AcpSessionImpl } from "../src/acp-runtime/session.js";
 import type { ChildHandle } from "../src/acp-runtime/types.js";
 
 describe("shared ACP session runtime", () => {
+  // Replacing the RPC rejection with only String(error) loses the machine-
+  // readable reason that hosts need to distinguish authentication from failure.
+  it.each([
+    {
+      name: "authentication-required RPC code",
+      error: new RequestError(-32000, "Authentication required"),
+      want: {
+        message: "Authentication required",
+        code: -32000,
+      },
+    },
+    {
+      name: "provider data carried by an internal-error RPC response",
+      error: new RequestError(-32603, "Internal error", {
+        codexErrorInfo: "unauthorized",
+        message: "Please sign in again.",
+      }),
+      want: {
+        message: "Internal error",
+        code: -32603,
+        data: {
+          codexErrorInfo: "unauthorized",
+          message: "Please sign in again.",
+        },
+      },
+    },
+    {
+      name: "ordinary agent errors without inventing authentication",
+      error: new Error("Temporary backend failure"),
+      want: {
+        message: "Internal error",
+        code: -32603,
+        data: { details: expect.stringContaining("Temporary backend failure") },
+      },
+    },
+  ])("preserves $name in the prompt failure stream", async ({ error, want }) => {
+    const harness = createHarness(() => ({
+      async initialize() {
+        return { protocolVersion: PROTOCOL_VERSION };
+      },
+      async newSession() {
+        return { sessionId: "prompt-error-session" };
+      },
+      async prompt() {
+        throw error;
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "prompt-error-session",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    const events: unknown[] = [];
+    try {
+      await session.init();
+      const drain = async () => {
+        for await (const event of session.prompt("hello")) events.push(event);
+      };
+      await expect(drain()).rejects.toMatchObject({
+        cause: { code: want.code, message: want.message },
+      });
+    } finally {
+      await session.dispose();
+    }
+
+    expect(events).toEqual([{
+      type: "promptError",
+      error: `RequestError: ${want.message}`,
+      errorDetails: want,
+    }]);
+  });
+
   it("filters HTTP and SSE MCP servers by the agent's advertised transports", async () => {
     let sentMcpServers: unknown;
     const harness = createHarness(() => ({

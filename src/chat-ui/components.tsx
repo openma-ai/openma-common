@@ -601,7 +601,7 @@ function ChatCollapsibleEventSequenceGroup({
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const stick = useOptionalChatStickToBottom();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const open = manualOpen ?? active;
+  const open = manualOpen ?? false;
   const projected = active ? nodes.at(-1)?.projection : completedProjection;
   if (!projected) return null;
 
@@ -610,7 +610,7 @@ function ChatCollapsibleEventSequenceGroup({
       scrollElement: stick.scrollRef.current,
       anchorElement: triggerRef.current,
       contentElement: stick.contentRef.current,
-      update: () => setManualOpen((value) => !(value ?? active)),
+      update: () => setManualOpen((value) => !(value ?? false)),
       stopScroll: stick.stopScroll,
     });
   };
@@ -835,8 +835,12 @@ export function AgentChatView({
   activityTools,
   density = "comfortable",
 }: AgentChatViewProps) {
+  // Preserve selection/disclosure DOM; only skip settled offscreen layout.
+  // Active and recent turns stay fully rendered, with measured heights cached
+  // by the browser for older turns.
   const transcriptTurns = turns.filter((turn) => turn.status !== "queued");
   const isEmpty = phase !== "active" || turns.length === 0;
+
   const densityAttributes = agentChatDensityAttributes(density);
   const renderTranscriptTurn = (turn: AgentUITurnState, index: number) => (
                       renderTurn ? (
@@ -862,11 +866,14 @@ export function AgentChatView({
                         />
                       )
   );
+
   return (
     <div
       className={chatClassNames("flex h-full min-h-0 flex-col", className)}
       data-chat-surface={surface}
+
       {...densityAttributes}
+
     >
       {isEmpty ? (
         <div
@@ -878,11 +885,14 @@ export function AgentChatView({
               {slots.empty}
             </div>
           </div>
+
           <ChatComposerFrame slots={slots} home style={homeComposerStyle} />
+
           {slots.emptyAfter}
         </div>
       ) : (
         <>
+
           {transcriptTurns.length > 16 ? (
             <ChatVirtualConversation
               key={sessionId ?? "none"}
@@ -899,14 +909,17 @@ export function AgentChatView({
             <ChatConversationContent className="w-full px-0 py-6 flex min-h-full flex-col">
               {wrapAgentChatConversationContent(
                 slots,
+
                 <>
                   <div
                     ref={transcriptRef}
                     className={CHAT_TURN_FRAME_CLASS}
                     data-chat-column="turns"
                   >
+
                     <ChatTranscriptInitialScroll tailTurnId={transcriptTurns.at(-1)?.id} />
                     {transcriptTurns.map(renderTranscriptTurn)}
+
                   </div>
                   {slots.conversationContentAfter}
                 </>,

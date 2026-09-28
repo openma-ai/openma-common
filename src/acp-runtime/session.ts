@@ -891,7 +891,22 @@ export class AcpSessionImpl implements AcpSession {
       },
       (error) => {
         ended = true;
-        this.#pushEvent({ type: "promptError", error: String(error) });
+        // Keep the legacy display string, but retain the JSON-RPC evidence
+        // so hosts can classify failures without interpreting message text.
+        const rpcError = error !== null && typeof error === "object"
+          ? error as { message?: unknown; code?: unknown; data?: unknown }
+          : undefined;
+        this.#pushEvent({
+          type: "promptError",
+          error: String(error),
+          errorDetails: {
+            message: typeof rpcError?.message === "string"
+              ? rpcError.message
+              : String(error),
+            ...(typeof rpcError?.code === "number" ? { code: rpcError.code } : {}),
+            ...(rpcError?.data !== undefined ? { data: rpcError.data } : {}),
+          },
+        });
         this.#endStream();
       },
     );

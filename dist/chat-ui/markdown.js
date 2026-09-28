@@ -18,7 +18,7 @@ const baseComponents = {
     code: ({ className, children, ...rest }) => className?.startsWith("language-") ? (_jsx("code", { ...rest, className: className, children: children })) : (_jsx("code", { ...rest, className: "rounded bg-bg-surface/70 px-[0.35em] py-[0.1em] font-mono text-[0.9em] text-fg", children: children })),
 };
 /** The settled half of Backchat's dual-track Markdown renderer. */
-export function ChatMarkdown({ text, className = CHAT_ASSISTANT_MARKDOWN_CLASS, controls = { code: false, table: false, mermaid: false }, linkSafety = false, components, }) {
+export function ChatMarkdown({ text, className = CHAT_ASSISTANT_MARKDOWN_CLASS, controls = { code: false, table: false, mermaid: false }, linkSafety = false, components, rehypePlugins, }) {
     const Component = Streamdown;
     return createElement(Component, {
         className,
@@ -26,6 +26,7 @@ export function ChatMarkdown({ text, className = CHAT_ASSISTANT_MARKDOWN_CLASS, 
         controls,
         linkSafety,
         components: { ...baseComponents, ...components },
+        ...(rehypePlugins ? { rehypePlugins } : {}),
         "data-chat-markdown": "settled",
     });
 }

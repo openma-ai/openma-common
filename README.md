@@ -4,6 +4,19 @@ Shared, product-agnostic contracts used by OpenMA Desktop and Open Managed Agent
 This repository is consumed directly from Git; it is intentionally not published
 to npm.
 
+The Agent-facing architecture is additive and vendor-neutral:
+
+```text
+OpenMA Agent Contract
+├── commands, capabilities, session handles, and canonical OpenMA events
+├── ACP wire adapter + existing ACP runtime
+└── Claude Managed Agents wire adapter
+```
+
+ACP and Managed Agents remain bindings. Consumers orchestrate against the
+OpenMA Agent Contract instead of leaking either provider's session identifiers
+or wire-event shapes into product state.
+
 ## Exports
 
 - `@openma/common/brand` — canonical token names, light/dark values, and brand RGB.
@@ -14,6 +27,9 @@ to npm.
 - `@openma/common/session-events/managed` — deprecated legacy Managed event projector plus a compatibility re-export of the v2 codec.
 - `@openma/common/session-events/acp` — deprecated ACP parser/turn projector plus a compatibility re-export of the SDK codec.
 - `@openma/common/session-events/openma` — OpenMA canonical event envelope, Vendor/raw records, and WorkItem lifecycle reducer.
+- `@openma/common/agent-contract` — immutable Agent facts, connector commands, and lifecycle helpers.
+- `@openma/common/agent-contract/acp` — ACP wire events translated into Agent facts.
+- `@openma/common/agent-contract/managed` — Claude Managed wire events translated into Agent facts.
 - `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
@@ -67,7 +83,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.5.0"
+    "@openma/common": "github:openma-ai/openma-common#v0.6.0"
   }
 }
 ```
