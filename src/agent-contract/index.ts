@@ -1,5 +1,7 @@
 import {
+  createOpenMAEvent as createLegacyOpenMAEvent,
   immutableJson,
+  type DeepReadonly,
   type CallbackCategory,
   type CallbackRequestedData,
   type CallbackRequestedEvent,
@@ -11,6 +13,14 @@ import {
 } from "../session-events/openma.js";
 
 export * from "../session-events/openma.js";
+
+/** Agent Contract facts cross a strict, immutable JSON boundary. Legacy
+ * session-events callers retain their existing event constructor behavior. */
+export function createOpenMAEvent<TType extends string, TData>(
+  input: Parameters<typeof createLegacyOpenMAEvent<TType, TData>>[0],
+): DeepReadonly<ReturnType<typeof createLegacyOpenMAEvent<TType, TData>>> {
+  return immutableJson(createLegacyOpenMAEvent(input));
+}
 
 export type AgentPlacement = "local" | "remote" | "managed";
 

@@ -524,12 +524,12 @@ type OpenMAEventInput<TType extends string, TData> = Omit<
 
 export function createOpenMAEvent<TType extends string, TData>(
   input: OpenMAEventInput<TType, TData>,
-): DeepReadonly<OpenMAEventEnvelope<TType, TData>> {
-  return immutableJson({
+): OpenMAEventEnvelope<TType, TData> {
+  return {
     schema: OPENMA_EVENT_SCHEMA_VERSION,
     schema_version: OPENMA_EVENT_SCHEMA_VERSION,
     ...input,
-  }) as DeepReadonly<OpenMAEventEnvelope<TType, TData>>;
+  };
 }
 
 export interface CreateVendorEventInput

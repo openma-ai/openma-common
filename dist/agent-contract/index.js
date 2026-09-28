@@ -1,5 +1,10 @@
-import { immutableJson, } from "../session-events/openma.js";
+import { createOpenMAEvent as createLegacyOpenMAEvent, immutableJson, } from "../session-events/openma.js";
 export * from "../session-events/openma.js";
+/** Agent Contract facts cross a strict, immutable JSON boundary. Legacy
+ * session-events callers retain their existing event constructor behavior. */
+export function createOpenMAEvent(input) {
+    return immutableJson(createLegacyOpenMAEvent(input));
+}
 export function createAgentSessionHandle(input) {
     if (!input.connectorId.trim())
         throw new Error("connectorId must not be empty");

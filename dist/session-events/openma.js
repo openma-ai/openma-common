@@ -236,11 +236,11 @@ export function isOpenMAEvent(input) {
     }
 }
 export function createOpenMAEvent(input) {
-    return immutableJson({
+    return {
         schema: OPENMA_EVENT_SCHEMA_VERSION,
         schema_version: OPENMA_EVENT_SCHEMA_VERSION,
         ...input,
-    });
+    };
 }
 export function createVendorEvent(input) {
     const { harness, namespace, name, version, correlation, data, ...envelope } = input;

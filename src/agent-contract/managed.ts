@@ -4,7 +4,6 @@ import {
   type WireSessionEvent,
 } from "../session-events/managed.js";
 import {
-  createOpenMAEvent,
   createVendorEvent,
   type CallbackLifecycleData,
   type OpenMAEvent,
@@ -13,6 +12,7 @@ import {
 import {
   agentEventEnvelope,
   callbackFingerprint,
+  createOpenMAEvent,
   type AgentEventContext,
 } from "./index.js";
 

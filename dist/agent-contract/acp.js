@@ -1,6 +1,6 @@
 import { parseAcpEvent, sessionUpdateInner, sessionUpdateType, } from "../session-events/acp.js";
-import { OPENMA_EVENT_SCHEMA_VERSION, createOpenMAEvent, createRawEvent, immutableJson, } from "../session-events/openma.js";
-import { agentEventEnvelope, callbackFingerprint, } from "./index.js";
+import { OPENMA_EVENT_SCHEMA_VERSION, createRawEvent, immutableJson, } from "../session-events/openma.js";
+import { agentEventEnvelope, callbackFingerprint, createOpenMAEvent, } from "./index.js";
 const ACP_SOURCE = {
     kind: "harness",
     harness: "acp",

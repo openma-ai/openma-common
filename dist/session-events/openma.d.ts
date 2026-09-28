@@ -215,7 +215,7 @@ type OpenMAEventInput<TType extends string, TData> = Omit<OpenMAEventEnvelope<TT
     readonly data: TData;
     readonly raw?: RawEventRecord;
 };
-export declare function createOpenMAEvent<TType extends string, TData>(input: OpenMAEventInput<TType, TData>): DeepReadonly<OpenMAEventEnvelope<TType, TData>>;
+export declare function createOpenMAEvent<TType extends string, TData>(input: OpenMAEventInput<TType, TData>): OpenMAEventEnvelope<TType, TData>;
 export interface CreateVendorEventInput extends Omit<OpenMAEventInput<"vendor.event", VendorEventRecord>, "type" | "data"> {
     harness: string;
     namespace: string;

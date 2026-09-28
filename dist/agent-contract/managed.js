@@ -1,6 +1,6 @@
 import { eventThreadId, normalizeSessionEvent, } from "../session-events/managed.js";
-import { createOpenMAEvent, createVendorEvent, } from "../session-events/openma.js";
-import { agentEventEnvelope, callbackFingerprint, } from "./index.js";
+import { createVendorEvent, } from "../session-events/openma.js";
+import { agentEventEnvelope, callbackFingerprint, createOpenMAEvent, } from "./index.js";
 const MANAGED_SOURCE = {
     kind: "harness",
     harness: "claude-managed",

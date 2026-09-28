@@ -5,7 +5,6 @@ import {
 } from "../session-events/acp.js";
 import {
   OPENMA_EVENT_SCHEMA_VERSION,
-  createOpenMAEvent,
   createRawEvent,
   immutableJson,
   type OpenMAEvent,
@@ -16,6 +15,7 @@ import {
 import {
   agentEventEnvelope,
   callbackFingerprint,
+  createOpenMAEvent,
   type AgentEventContext,
 } from "./index.js";
 
