@@ -10,8 +10,8 @@ export interface StreamTextPacerOptions {
     cancel(handle: unknown): void;
     onDrain?(): void;
 }
-/** Backchat main's Unicode-aware stream pacer. */
-export declare function createStreamTextPacer({ write, schedule, cancel, onDrain, }: StreamTextPacerOptions): StreamTextPacer;
+/** Frame batches driven by a jerk-limited velocity controller. */
+export declare function createStreamTextPacer({ write, schedule, cancel, onDrain }: StreamTextPacerOptions): StreamTextPacer;
 /** React binding for the framework-neutral Agent UI store. */
 export declare function useAgentUIState(store: AgentUIStore): AgentUIState;
 export interface AgentUIStreamingMarkdownProps {
@@ -23,6 +23,8 @@ export interface AgentUIStreamingMarkdownProps {
     paceReplay?: boolean;
     onLinkActivate?: (url: string) => void;
     decorate?: (host: HTMLDivElement) => void;
+    /** Incremental alternative: new elements and elements whose href changed. */
+    decorateNodes?: (nodes: readonly Element[]) => void;
 }
 /** Minimal AI-SDK-like stream contract. A host can feed the shared renderer
  * from the canonical Agent UI store or from an existing product transport
@@ -35,7 +37,7 @@ export interface AgentUIStreamSource {
  * one inert host node; the per-turn stream writes markdown directly until the
  * parent swaps this element for its settled renderer.
  */
-export declare function AgentUIStreamingMarkdown({ store, turnId, kind, className, prefixSkip, paceReplay, onLinkActivate, decorate, }: AgentUIStreamingMarkdownProps): import("react").JSX.Element;
+export declare function AgentUIStreamingMarkdown({ store, turnId, kind, className, prefixSkip, paceReplay, onLinkActivate, decorate, decorateNodes, }: AgentUIStreamingMarkdownProps): import("react").JSX.Element;
 export declare function thoughtProjectionLines(text: string, fallback: string): string[];
 export declare function thoughtHeadline(text: string): string;
 export declare function AgentUIStreamingThoughtProjection({ store, turnId, prefixSkip, fallback, mode, }: {

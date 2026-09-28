@@ -21,7 +21,33 @@ afterEach(() => {
 });
 
 describe("Agent UI React streaming elements", () => {
-  it("reveals one Unicode character per scheduled tick", () => {
+  it("decorates only newly created markup, not the accumulated transcript", async () => {
+    vi.useFakeTimers();
+    let listener: AgentUIStreamSubscriber | undefined;
+    const source = { subscribeTurnStream(_id: string, next: AgentUIStreamSubscriber) {
+      listener = next;
+      next({ kind: "assistant", text: "[old](https://old.example)\n\n".repeat(100) + "tail" });
+      return () => { listener = undefined; };
+    } };
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const decorateNodes = vi.fn();
+    await act(async () => root.render(<AgentUIStreamingMarkdown store={source} turnId="incremental" kind="assistant" decorateNodes={decorateNodes} />));
+    expect(decorateNodes).toHaveBeenCalled();
+    decorateNodes.mockClear();
+    act(() => { listener?.({ kind: "assistant", text: " more" }); vi.runAllTimers(); });
+    expect(decorateNodes).not.toHaveBeenCalled();
+    act(() => { listener?.({ kind: "assistant", text: "\n\n[new](https://new.example) done " }); vi.runAllTimers(); });
+    const changed = decorateNodes.mock.calls.flatMap(call => call[0] as Element[]);
+    expect(changed.length).toBeGreaterThan(0);
+    expect(changed.some(node => node.matches('a[href="https://new.example"]') || node.querySelector('a[href="https://new.example"]'))).toBe(true);
+    expect(changed.every(node => !node.querySelector('a[href="https://old.example"]'))).toBe(true);
+    expect(container.querySelectorAll('a[href="https://old.example"]')).toHaveLength(100);
+    act(() => root.unmount());
+  });
+
+  it("reveals a short Unicode chunk immediately without splitting it", () => {
     const scheduled: Array<() => void> = [];
     const write = vi.fn();
     const pacer = createStreamTextPacer({
@@ -34,15 +60,9 @@ describe("Agent UI React streaming elements", () => {
     });
 
     pacer.enqueue("你🙂好");
-    expect(write).not.toHaveBeenCalled();
-
-    scheduled.shift()?.();
-    expect(write).toHaveBeenNthCalledWith(1, "你");
-    scheduled.shift()?.();
-    expect(write).toHaveBeenNthCalledWith(2, "🙂");
-    scheduled.shift()?.();
-    expect(write).toHaveBeenNthCalledWith(3, "好");
-    expect(write).toHaveBeenCalledTimes(3);
+    expect(write).toHaveBeenCalledExactlyOnceWith("你🙂好");
+    expect(scheduled).toHaveLength(0);
+    pacer.dispose();
   });
 
   it("keeps one ellipsized header row for each explicit thinking line", () => {

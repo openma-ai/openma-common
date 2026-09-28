@@ -309,7 +309,12 @@ function parsedAcpEvent(
             : "items",
         ...(parsed.planId ? { plan_id: parsed.planId } : {}),
         update_mode: parsed.updateMode ?? "replace",
-        entries: parsed.plan,
+        entries: parsed.plan.map((entry) => ({
+          ...(entry.id !== undefined ? { id: entry.id } : {}),
+          content: entry.content,
+          ...(entry.priority !== undefined ? { priority: entry.priority } : {}),
+          ...(entry.status !== undefined ? { status: entry.status } : {}),
+        })),
         ...(parsed.document
           ? {
               document: {

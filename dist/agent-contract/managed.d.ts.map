@@ -1,0 +1,1 @@
+{"version":3,"file":"managed.d.ts","sourceRoot":"","sources":["../../src/agent-contract/managed.ts"],"names":[],"mappings":"AAAA,OAAO,EAGL,KAAK,gBAAgB,EACtB,MAAM,8BAA8B,CAAC;AACtC,OAAO,EAIL,KAAK,WAAW,EAEjB,MAAM,6BAA6B,CAAC;AACrC,OAAO,EAGL,KAAK,iBAAiB,EACvB,MAAM,YAAY,CAAC;AAgCpB,wBAAgB,oBAAoB,CAClC,KAAK,EAAE,gBAAgB,EACvB,OAAO,EAAE,iBAAiB,GACzB,WAAW,CAiPb"}

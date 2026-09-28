@@ -577,7 +577,7 @@ function ChatCollapsibleEventSequenceGroup({
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const stick = useOptionalChatStickToBottom();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const open = manualOpen ?? active;
+  const open = manualOpen ?? false;
   const projected = active ? nodes.at(-1)?.projection : completedProjection;
   if (!projected) return null;
 
@@ -586,7 +586,7 @@ function ChatCollapsibleEventSequenceGroup({
       scrollElement: stick.scrollRef.current,
       anchorElement: triggerRef.current,
       contentElement: stick.contentRef.current,
-      update: () => setManualOpen((value) => !(value ?? active)),
+      update: () => setManualOpen((value) => !(value ?? false)),
       stopScroll: stick.stopScroll,
     });
   };
@@ -775,6 +775,9 @@ export function AgentChatView({
   collapsiblePrimitives,
   activityTools,
 }: AgentChatViewProps) {
+  // Preserve selection/disclosure DOM; only skip settled offscreen layout.
+  // Active and recent turns stay fully rendered, with measured heights cached
+  // by the browser for older turns.
   const transcriptTurns = turns.filter((turn) => turn.status !== "queued");
   const isEmpty = phase !== "active" || turns.length === 0;
   return (
@@ -810,28 +813,30 @@ export function AgentChatView({
                     className={CHAT_TURN_FRAME_CLASS}
                     data-chat-column="turns"
                   >
-                    {transcriptTurns.map((turn, index) =>
-                      renderTurn ? (
-                        <div key={turn.id} className="contents">
-                          {renderTurn({
-                            turn,
-                            index,
-                            last: index === transcriptTurns.length - 1,
-                          })}
-                        </div>
-                      ) : (
-                        <AgentUITurnView
-                          key={turn.id}
-                          sessionId={sessionId}
-                          turn={turn}
-                          thoughts={thoughts!}
-                          labels={labels!}
-                          slots={turnSlots!}
-                          collapsiblePrimitives={collapsiblePrimitives}
-                          activityTools={activityTools}
-                        />
-                      ),
-                    )}
+                    {transcriptTurns.map((turn, index) => (
+                      <div
+                        key={turn.id}
+                        data-chat-render-turn={turn.id}
+                        style={transcriptTurns.length > 20 && index < transcriptTurns.length - 2
+                          && ["completed", "failed", "cancelled"].includes(turn.status)
+                          ? { contentVisibility: "auto", containIntrinsicSize: "auto 400px" }
+                          : undefined}
+                      >
+                        {renderTurn ? renderTurn({
+                          turn, index, last: index === transcriptTurns.length - 1,
+                        }) : (
+                          <AgentUITurnView
+                            sessionId={sessionId}
+                            turn={turn}
+                            thoughts={thoughts!}
+                            labels={labels!}
+                            slots={turnSlots!}
+                            collapsiblePrimitives={collapsiblePrimitives}
+                            activityTools={activityTools}
+                          />
+                        )}
+                      </div>
+                    ))}
                   </div>
                   {slots.conversationContentAfter}
                 </>

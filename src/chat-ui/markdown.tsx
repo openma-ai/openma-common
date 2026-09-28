@@ -4,6 +4,7 @@ import { Streamdown } from "streamdown";
 import {
   createElement,
   type ComponentType,
+  type ComponentProps,
   type HTMLAttributes,
 } from "react";
 
@@ -55,6 +56,7 @@ export interface ChatMarkdownProps {
   className?: string;
   controls?: { code?: boolean; table?: boolean; mermaid?: boolean };
   linkSafety?: boolean;
+  rehypePlugins?: ComponentProps<typeof Streamdown>["rehypePlugins"];
   /** Product behavior such as link activation is injected by the host. */
   components?: Record<string, ComponentType<any>>;
 }
@@ -103,6 +105,7 @@ export function ChatMarkdown({
   controls = { code: false, table: false, mermaid: false },
   linkSafety = false,
   components,
+  rehypePlugins,
 }: ChatMarkdownProps) {
   const Component = Streamdown as unknown as ComponentType<{
     children: string;
@@ -117,6 +120,7 @@ export function ChatMarkdown({
     controls,
     linkSafety,
     components: { ...baseComponents, ...components },
+    ...(rehypePlugins ? { rehypePlugins } : {}),
     "data-chat-markdown": "settled",
   } as any);
 }

@@ -54,7 +54,7 @@ describe("Backchat main chat disclosures", () => {
     },
   ];
 
-  it("opens a running event sequence so its timeline is immediately visible", () => {
+  it("keeps running event details collapsed until explicitly expanded", () => {
     const html = renderToStaticMarkup(
       <ChatCollapsibleEventSequence
         nodes={nodes}
@@ -63,7 +63,7 @@ describe("Backchat main chat disclosures", () => {
       />,
     );
 
-    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("Read files body");
     expect(html).toContain("Run tests body");
   });
@@ -343,7 +343,7 @@ describe("Backchat main AgentUITurnView", () => {
     const uninterrupted = render([activityTool("one")]);
     expect(uninterrupted).toContain('data-collapsible-event-count="1"');
     expect(uninterrupted).toMatch(
-      /data-collapsible-event-count="1"[\s\S]*aria-expanded="true"/,
+      /data-collapsible-event-count="1"[\s\S]*aria-expanded="false"/,
     );
     expect(uninterrupted).toContain("Running Command one");
     expect(uninterrupted).toContain('data-tool-live="false"');

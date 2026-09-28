@@ -194,7 +194,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
     const [manualOpen, setManualOpen] = useState(null);
     const stick = useOptionalChatStickToBottom();
     const triggerRef = useRef(null);
-    const open = manualOpen ?? active;
+    const open = manualOpen ?? false;
     const projected = active ? nodes.at(-1)?.projection : completedProjection;
     if (!projected)
         return null;
@@ -203,7 +203,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
             scrollElement: stick.scrollRef.current,
             anchorElement: triggerRef.current,
             contentElement: stick.contentRef.current,
-            update: () => setManualOpen((value) => !(value ?? active)),
+            update: () => setManualOpen((value) => !(value ?? false)),
             stopScroll: stick.stopScroll,
         });
     };
@@ -212,13 +212,17 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
 export function AgentChatView({ sessionId, phase = "active", surface = "main", turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, }) {
+    // Preserve selection/disclosure DOM; only skip settled offscreen layout.
+    // Active and recent turns stay fully rendered, with measured heights cached
+    // by the browser for older turns.
     const transcriptTurns = turns.filter((turn) => turn.status !== "queued");
     const isEmpty = phase !== "active" || turns.length === 0;
-    return (_jsx("div", { className: chatClassNames("flex h-full min-h-0 flex-col", className), "data-chat-surface": surface, children: isEmpty ? (_jsxs("div", { className: "home-empty-stage flex h-full min-h-0 flex-col", style: homeStyle, children: [_jsx("div", { className: "home-empty-content flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-4", children: _jsx("div", { className: "home-empty-stack flex w-full max-w-[1120px] flex-col items-center gap-6", children: slots.empty }) }), _jsx(ChatComposerFrame, { slots: slots, home: true, style: homeComposerStyle }), slots.emptyAfter] })) : (_jsxs(_Fragment, { children: [_jsxs(ChatConversation, { className: "flex-1 min-h-0", children: [_jsx(ChatConversationContent, { className: "w-full px-0 py-6 flex min-h-full flex-col", children: wrapAgentChatConversationContent(slots, (_jsxs(_Fragment, { children: [_jsx("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: transcriptTurns.map((turn, index) => renderTurn ? (_jsx("div", { className: "contents", children: renderTurn({
-                                                turn,
-                                                index,
-                                                last: index === transcriptTurns.length - 1,
-                                            }) }, turn.id)) : (_jsx(AgentUITurnView, { sessionId: sessionId, turn: turn, thoughts: thoughts, labels: labels, slots: turnSlots, collapsiblePrimitives: collapsiblePrimitives, activityTools: activityTools }, turn.id))) }), slots.conversationContentAfter] }))) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }, sessionId ?? "none"), _jsx(ChatComposerFrame, { slots: slots })] })) }));
+    return (_jsx("div", { className: chatClassNames("flex h-full min-h-0 flex-col", className), "data-chat-surface": surface, children: isEmpty ? (_jsxs("div", { className: "home-empty-stage flex h-full min-h-0 flex-col", style: homeStyle, children: [_jsx("div", { className: "home-empty-content flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-4", children: _jsx("div", { className: "home-empty-stack flex w-full max-w-[1120px] flex-col items-center gap-6", children: slots.empty }) }), _jsx(ChatComposerFrame, { slots: slots, home: true, style: homeComposerStyle }), slots.emptyAfter] })) : (_jsxs(_Fragment, { children: [_jsxs(ChatConversation, { className: "flex-1 min-h-0", children: [_jsx(ChatConversationContent, { className: "w-full px-0 py-6 flex min-h-full flex-col", children: wrapAgentChatConversationContent(slots, (_jsxs(_Fragment, { children: [_jsx("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: transcriptTurns.map((turn, index) => (_jsx("div", { "data-chat-render-turn": turn.id, style: transcriptTurns.length > 20 && index < transcriptTurns.length - 2
+                                                && ["completed", "failed", "cancelled"].includes(turn.status)
+                                                ? { contentVisibility: "auto", containIntrinsicSize: "auto 400px" }
+                                                : undefined, children: renderTurn ? renderTurn({
+                                                turn, index, last: index === transcriptTurns.length - 1,
+                                            }) : (_jsx(AgentUITurnView, { sessionId: sessionId, turn: turn, thoughts: thoughts, labels: labels, slots: turnSlots, collapsiblePrimitives: collapsiblePrimitives, activityTools: activityTools })) }, turn.id))) }), slots.conversationContentAfter] }))) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }, sessionId ?? "none"), _jsx(ChatComposerFrame, { slots: slots })] })) }));
 }
 function wrapAgentChatConversationContent(slots, children) {
     return slots.wrapConversationContent?.(children) ?? children;

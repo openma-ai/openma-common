@@ -26,62 +26,98 @@ export interface StreamTextPacerOptions {
   onDrain?(): void;
 }
 
-function nextDelayMs(backlog: number): number {
-  if (backlog > 160) return 4;
-  if (backlog > 60) return 8;
-  return 12;
-}
-
-/** Backchat main's Unicode-aware stream pacer. */
-export function createStreamTextPacer({
-  write,
-  schedule,
-  cancel,
-  onDrain,
-}: StreamTextPacerOptions): StreamTextPacer {
-  const pending: string[] = [];
+/** Frame batches driven by a jerk-limited velocity controller. */
+export function createStreamTextPacer({ write, schedule, cancel, onDrain }: StreamTextPacerOptions): StreamTextPacer {
+  let pending = "";
   let scheduled: unknown = null;
   let disposed = false;
-
+  // Units: UTF-16 units / millisecond. Keep both velocity and acceleration
+  // continuous when backlog changes, including a second burst during a ramp.
+  const maxAcceleration = 0.24;
+  const maxJerk = 0.002;
+  let velocity = 1;
+  let acceleration = 0;
+  let credit = 0;
+  let lastStep = performance.now();
+  let lastWrite = -Infinity;
+  let renderCost = 0;
+  const now = () => performance.now();
+  const emit = (count: number) => {
+    // Don't split UTF-16 surrogate pairs between parser writes.
+    if (count < pending.length && /[\uD800-\uDBFF]/.test(pending[count - 1]!)) count++;
+    const text = pending.slice(0, count);
+    pending = pending.slice(count);
+    const start = now();
+    write(text);
+    renderCost = renderCost * 0.75 + (now() - start) * 0.25;
+    lastWrite = now();
+    if (!pending) onDrain?.();
+  };
   const requestTick = () => {
-    if (disposed || scheduled !== null || pending.length === 0) return;
-    scheduled = schedule(tick, nextDelayMs(pending.length));
+    if (disposed || scheduled !== null || !pending) return;
+    // Expensive parsing coalesces frames instead of doing extra DOM writes.
+    const interval = Math.min(32, Math.max(16, renderCost * 2));
+    scheduled = schedule(tick, interval);
   };
   const tick = () => {
     scheduled = null;
-    const character = pending.shift();
-    if (character !== undefined) write(character);
-    if (pending.length === 0) onDrain?.();
+    if (disposed || !pending) return;
+    // Integrate in small steps so dropped frames don't change the controller
+    // or dump the whole queue. Integer credit keeps slow output lossless.
+    let elapsed = Math.min(32, Math.max(0, now() - lastStep));
+    lastStep = now();
+    while (elapsed > 0) {
+      const dt = Math.min(4, elapsed);
+      const targetVelocity = Math.max(0.25, (pending.length - credit) / 64);
+      const desiredAcceleration = Math.max(-maxAcceleration,
+        Math.min(maxAcceleration, (targetVelocity - velocity) / 48));
+      const previousAcceleration = acceleration;
+      acceleration += Math.max(-maxJerk * dt,
+        Math.min(maxJerk * dt, desiredAcceleration - acceleration));
+      const previousVelocity = velocity;
+      velocity = Math.max(0, velocity + (previousAcceleration + acceleration) * dt / 2);
+      credit += (previousVelocity + velocity) * dt / 2;
+      elapsed -= dt;
+    }
+    const count = Math.min(pending.length, Math.floor(credit));
+    if (count > 0) {
+      const before = pending.length;
+      emit(count);
+      credit = Math.max(0, credit - (before - pending.length));
+    }
     requestTick();
   };
-
   return {
     enqueue(text) {
       if (disposed || !text) return;
-      pending.push(...Array.from(text));
+      if (!pending) {
+        // No controller can emit text that hasn't arrived. Start gently
+        // after a source pause rather than reusing a stale high speed.
+        lastStep = now();
+        credit = 0;
+        if (now() - lastWrite > 100) {
+          velocity = 1;
+          acceleration = 0;
+        }
+      }
+      pending += text;
+      // A small first slice is immediate; larger bursts ramp up by frame.
+      if (scheduled === null && now() - lastWrite >= 16) emit(Math.min(16, pending.length));
       requestTick();
     },
     flush() {
-      if (scheduled !== null) {
-        cancel(scheduled);
-        scheduled = null;
-      }
-      if (pending.length > 0) {
-        write(pending.join(""));
-        pending.length = 0;
-        onDrain?.();
-      }
-    },
-    dispose() {
-      if (disposed) return;
       if (scheduled !== null) cancel(scheduled);
       scheduled = null;
-      pending.length = 0;
+      if (pending && !disposed) emit(pending.length);
+    },
+    dispose() {
+      if (scheduled !== null) cancel(scheduled);
+      scheduled = null;
+      pending = "";
       disposed = true;
     },
   };
 }
-
 /** React binding for the framework-neutral Agent UI store. */
 export function useAgentUIState(store: AgentUIStore): AgentUIState {
   return useSyncExternalStore(
@@ -100,6 +136,8 @@ export interface AgentUIStreamingMarkdownProps {
   paceReplay?: boolean;
   onLinkActivate?: (url: string) => void;
   decorate?: (host: HTMLDivElement) => void;
+  /** Incremental alternative: new elements and elements whose href changed. */
+  decorateNodes?: (nodes: readonly Element[]) => void;
 }
 
 /** Minimal AI-SDK-like stream contract. A host can feed the shared renderer
@@ -126,6 +164,7 @@ export function AgentUIStreamingMarkdown({
   paceReplay = false,
   onLinkActivate,
   decorate,
+  decorateNodes,
 }: AgentUIStreamingMarkdownProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
 
@@ -134,6 +173,10 @@ export function AgentUIStreamingMarkdown({
     if (!host) return;
     host.replaceChildren();
     const parser = smd.parser(smd.default_renderer(host));
+    // Consume records synchronously after parser writes. Text-only deltas need
+    // no decoration; the callback never scans the accumulated transcript.
+    const mutations = decorateNodes ? new MutationObserver(() => {}) : null;
+    mutations?.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ["href"] });
     let heldTail: Text | null = null;
     let lastWritten = "";
 
@@ -161,12 +204,39 @@ export function AgentUIStreamingMarkdown({
       clearTail();
       lastWritten = text;
       smd.parser_write(parser, text);
+      if (mutations && decorateNodes) {
+        const changed = new Set<Element>();
+        for (const record of mutations.takeRecords()) {
+          if (record.type === "attributes") changed.add(record.target as Element);
+          else for (const node of record.addedNodes) if (node instanceof Element) changed.add(node);
+        }
+        // A new paragraph already contains its new links. Visit that subtree
+        // once instead of passing every descendant to the host separately.
+        const roots = [...changed].filter(node => {
+          if (!host.contains(node)) return false;
+          for (let parent = node.parentElement; parent && parent !== host; parent = parent.parentElement) {
+            if (changed.has(parent)) return false;
+          }
+          return true;
+        });
+        if (roots.length) decorateNodes(roots);
+        mutations.takeRecords(); // Decoration itself is not new parser output.
+      }
       decorate?.(host);
     };
     const pacer = createStreamTextPacer({
       write,
-      schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
-      cancel: (handle) => window.clearTimeout(handle as number),
+      schedule: (callback, delayMs) => {
+        const handle = { frame: 0 };
+        const due = performance.now() + delayMs;
+        const frame = () => {
+          if (performance.now() + 1 >= due) callback();
+          else handle.frame = requestAnimationFrame(frame);
+        };
+        handle.frame = requestAnimationFrame(frame);
+        return handle;
+      },
+      cancel: (handle) => cancelAnimationFrame((handle as { frame: number }).frame),
       onDrain: showTail,
     });
 
@@ -206,13 +276,14 @@ export function AgentUIStreamingMarkdown({
       unsubscribe();
       pacer.flush();
       pacer.dispose();
+      mutations?.disconnect();
       try {
         smd.parser_end(parser);
       } catch {
         // A partial inline token is discarded with the host during handoff.
       }
     };
-  }, [decorate, kind, onLinkActivate, paceReplay, prefixSkip, store, turnId]);
+  }, [decorate, decorateNodes, kind, onLinkActivate, paceReplay, prefixSkip, store, turnId]);
 
   return (
     <div
