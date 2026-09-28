@@ -34,7 +34,8 @@ or wire-event shapes into product state.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
-- `@openma/common/session-ui` — shared Session turn frame and status semantics with product-specific content slots.
+- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
+- `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
 model used by Backchat. This is the migration seam for a shared Session GUI;

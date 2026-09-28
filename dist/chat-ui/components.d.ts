@@ -19,7 +19,7 @@ export declare const CHAT_TURN_FRAME_CLASS = "chat-turn-frame mx-auto w-full max
 export type ChatConversationProps = Omit<ComponentProps<typeof StickToBottom>, "children"> & {
     children?: ReactNode;
 };
-export declare function ChatConversation({ className, children, ...props }: ChatConversationProps): import("react").JSX.Element;
+export declare function ChatConversation({ className, children, onScrollCapture, ...props }: ChatConversationProps): import("react").JSX.Element;
 export type ChatConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
 export declare function ChatConversationContent({ className, ...props }: ChatConversationContentProps): import("react").JSX.Element;
 export interface ChatConversationScrollButtonProps extends Omit<ComponentProps<"button">, "children"> {
@@ -30,7 +30,7 @@ export interface ChatConversationScrollButtonProps extends Omit<ComponentProps<"
         icon: ReactNode;
     }) => ReactNode;
 }
-export declare function ChatConversationScrollButton({ className, icon, renderButton, ...props }: ChatConversationScrollButtonProps): string | number | bigint | boolean | Iterable<ReactNode> | Promise<string | number | bigint | boolean | import("react").ReactPortal | import("react").ReactElement<unknown, string | import("react").JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | import("react").JSX.Element | null | undefined;
+export declare function ChatConversationScrollButton({ className, icon, renderButton, ...props }: ChatConversationScrollButtonProps): string | number | bigint | boolean | import("react").JSX.Element | Iterable<ReactNode> | Promise<string | number | bigint | boolean | import("react").ReactPortal | import("react").ReactElement<unknown, string | import("react").JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | null | undefined;
 export declare function ChatDisclosureChevron({ open, className, }: {
     open: boolean;
     className?: string;
@@ -91,10 +91,11 @@ export declare function ChatCollapsibleEventSequence({ nodes, active, forceGroup
     active: boolean;
     forceGroup?: boolean;
     completedProjection: ChatCollapsibleEventNode["projection"];
-}): string | number | bigint | boolean | Iterable<ReactNode> | Promise<string | number | bigint | boolean | import("react").ReactPortal | import("react").ReactElement<unknown, string | import("react").JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | import("react").JSX.Element | null;
+}): string | number | bigint | boolean | import("react").JSX.Element | Iterable<ReactNode> | Promise<string | number | bigint | boolean | import("react").ReactPortal | import("react").ReactElement<unknown, string | import("react").JSXElementConstructor<any>> | Iterable<ReactNode> | null | undefined> | null;
 export interface AgentUITurnLabels {
     workingFor: (seconds: number) => ReactNode;
     workedFor: (seconds: number) => ReactNode;
+    cancelled?: ReactNode;
     thinking: ReactNode;
     thoughtFor?: (seconds: number) => ReactNode;
     toolActivity: (tool: AgentUIToolItem) => ReactNode;
@@ -104,6 +105,8 @@ export interface AgentUITurnRenderContext {
     turn: AgentUITurnState;
     live: boolean;
     prefixSkip: number;
+    /** Final-answer text exactly as projected onto the answer surface. */
+    answerText: string;
 }
 export interface AgentUITurnSlots {
     renderBeforeTurn?: (input: {
@@ -142,12 +145,21 @@ export interface AgentUITurnSlots {
         active: boolean;
     }) => ChatCollapsibleEventNode["projection"];
     renderResponseBeforeProcess?: (input: AgentUITurnRenderContext) => ReactNode;
+    renderProcessLeading?: (input: AgentUITurnRenderContext) => ReactNode;
     hasSupplementalProcess?: (input: AgentUITurnRenderContext) => boolean;
     renderProcessBefore?: (input: AgentUITurnRenderContext) => ReactNode;
     renderProcessAfter?: (input: AgentUITurnRenderContext) => ReactNode;
     renderAfterAnswer?: (input: AgentUITurnRenderContext) => ReactNode;
     renderFooter?: (input: AgentUITurnRenderContext) => ReactNode;
 }
+export type AgentChatDensity = "comfortable" | "compact";
+export type AgentChatDensityStyle = CSSProperties & Record<`--${string}`, string>;
+export interface AgentChatDensityAttributes {
+    "data-chat-density": AgentChatDensity;
+    style?: AgentChatDensityStyle;
+}
+/** Shared density boundary for product-owned chat/composer shells. */
+export declare function agentChatDensityAttributes(density?: AgentChatDensity): AgentChatDensityAttributes;
 export interface AgentUITurnViewProps {
     sessionId?: string;
     turn: AgentUITurnState;
@@ -158,6 +170,7 @@ export interface AgentUITurnViewProps {
     collapsiblePrimitives?: ChatCollapsiblePrimitives;
     frameStatus?: SessionTurnStatus;
     activityTools?: "all" | "latest";
+    density?: AgentChatDensity;
     /** Deterministic clock for tests and non-live projections. */
     now?: number;
 }
@@ -185,12 +198,14 @@ interface AgentChatViewBaseProps {
     className?: string;
     collapsiblePrimitives?: ChatCollapsiblePrimitives;
     activityTools?: "all" | "latest";
+    density?: AgentChatDensity;
 }
 type AgentChatViewHostTurnProps = {
     renderTurn: (input: {
         turn: AgentUITurnState;
         index: number;
         last: boolean;
+        density: AgentChatDensity;
     }) => ReactNode;
     thoughts?: AgentUIThoughtPresentation;
     labels?: AgentUITurnLabels;
@@ -205,9 +220,9 @@ type AgentChatViewCommonTurnProps = {
 export type AgentChatViewProps = AgentChatViewBaseProps & (AgentChatViewHostTurnProps | AgentChatViewCommonTurnProps);
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
-export declare function AgentChatView({ sessionId, phase, surface, turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, }: AgentChatViewProps): import("react").JSX.Element;
+export declare function AgentChatView({ sessionId, phase, surface, turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density, }: AgentChatViewProps): import("react").JSX.Element;
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
-export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, now, }: AgentUITurnViewProps): import("react").JSX.Element;
+export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, }: AgentUITurnViewProps): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=components.d.ts.map

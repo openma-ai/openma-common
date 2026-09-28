@@ -5,6 +5,8 @@ import { describe, expect, it } from "vitest";
 import {
   COMMON_THEME_TOKEN_NAMES,
   OPENMA_BRAND_RGB,
+  OPENMA_ICON_ID,
+  OPENMA_ICON_INNER_SVG,
   commonDarkTokens,
   commonLightTokens,
 } from "../src/brand/index.js";
@@ -33,5 +35,11 @@ describe("OpenMA brand contract", () => {
     expect(svg).toContain('viewBox="240 244 548 454"');
     expect(svg).toContain('<circle cx="535" cy="520" r="42"/>');
     expect(svg.match(/<path /g)).toHaveLength(3);
+  });
+
+  it("exports the canonical mark as Obsidian-compatible icon markup", () => {
+    expect(OPENMA_ICON_ID).toBe("openma");
+    expect(OPENMA_ICON_INNER_SVG).toContain('viewBox="240 244 548 454"');
+    expect(OPENMA_ICON_INNER_SVG).toContain('<circle cx="535" cy="520" r="42"');
   });
 });

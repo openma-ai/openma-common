@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import type { CSSProperties } from "react";
 import { describe, expect, it, vi } from "vitest";
+import * as chatUI from "../src/chat-ui/components.js";
 
 import {
   AgentChatView,
@@ -244,6 +245,71 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).not.toContain('data-thinking-fallback="true"');
   });
 
+  it.each(["commentary", "final_answer"] as const)("keeps a tail fallback after a completed %s while the turn is running", (phase) => {
+    const render = (status: AgentUITurnState["status"]) => renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{ id: "waiting-tail", status, items: [activityTool("done"), assistant("finished-message", "Finished paragraph", phase)] }}
+        thoughts="history"
+        labels={{ workingFor: () => "Working", workedFor: () => "Worked", thinking: "Thinking", toolRunSummary: () => "Ran commands", toolActivity: () => "Tool" }}
+        slots={slots}
+      />,
+    );
+    const html = render("running");
+    expect(html).toContain('data-thinking-fallback="true"');
+    expect(html.indexOf('data-thinking-fallback="true"')).toBeGreaterThan(html.indexOf("Finished paragraph"));
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      expect(render(status)).not.toContain('data-thinking-fallback="true"');
+    }
+  });
+
+  it("gives the footer only the rendered final answer text", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-footer-answer"
+        turn={{
+          id: "turn-footer-answer",
+          status: "completed",
+          startedAt: "2026-08-30T00:18:00.000Z",
+          endedAt: "2026-08-30T00:19:00.000Z",
+          items: [
+            assistant("commentary", "Process note", "commentary"),
+            activityTool("footer-tool"),
+            assistant("answer", "Final answer", "final_answer"),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={{
+          ...slots,
+          renderFooter: (input) => (
+            <footer data-answer-text>
+              {
+                (
+                  input as typeof input & {
+                    answerText?: string;
+                  }
+                ).answerText
+              }
+            </footer>
+          ),
+        }}
+      />,
+    );
+
+    expect(html).toContain(
+      '<footer data-answer-text="true">Final answer</footer>',
+    );
+    expect(html).not.toContain(
+      '<footer data-answer-text="true">Process noteFinal answer</footer>',
+    );
+  });
+
   it("hides the complete process while retaining nested disclosure state", () => {
     const turn: AgentUITurnState = {
       id: "turn-complete",
@@ -279,10 +345,7 @@ describe("Backchat main AgentUITurnView", () => {
       id: "turn-running",
       status: "running",
       startedAt: "2026-08-26T10:00:00.000Z",
-      items: [
-        activityTool("one"),
-        activityTool("two", "in_progress"),
-      ],
+      items: [activityTool("one"), activityTool("two", "in_progress")],
     };
     const html = renderToStaticMarkup(
       <AgentUITurnView
@@ -348,7 +411,7 @@ describe("Backchat main AgentUITurnView", () => {
     expect(uninterrupted).toContain("Running Command one");
     expect(uninterrupted).toContain('data-tool-live="false"');
     expect(uninterrupted).toContain("Ran Command one");
-    expect(uninterrupted).not.toContain('data-thinking-fallback="true"');
+    expect(uninterrupted).toContain('data-thinking-fallback="true"');
 
     const interrupted = render([
       activityTool("one"),
@@ -400,15 +463,69 @@ describe("Backchat main AgentChatView", () => {
     renderTool: ({ tool }: { tool: AgentUIToolItem }) => <p>{tool.title}</p>,
   };
 
+  it("offers a compact density contract while preserving the comfortable default", () => {
+    const renderDensity = (density?: "comfortable" | "compact") =>
+      renderToStaticMarkup(
+        <AgentChatView
+          density={density}
+          turns={[
+            {
+              id: "density-turn",
+              status: "completed",
+              items: [assistant("density-answer", "Compact answer")],
+            },
+          ]}
+          thoughts="history"
+          labels={labels}
+          turnSlots={turnSlots}
+          slots={{ composer: <form>Composer</form> }}
+        />,
+      );
+
+    const comfortable = renderDensity();
+    expect(comfortable).toContain('data-chat-density="comfortable"');
+    expect(comfortable).toContain("!mb-8 !space-y-4");
+
+    const compact = renderDensity("compact");
+    expect(compact).toContain('data-chat-density="compact"');
+    expect(compact).toContain("!mb-6 !space-y-3");
+    expect(compact).toContain("--composer-card-padding-block:8px");
+    expect(compact).toContain("--composer-section-gap:4px");
+    expect(compact).toContain("--composer-body-min-height:48px");
+    expect(compact).toContain("--chat-user-message-max-width:88%");
+  });
+
+  it("exposes the same density attributes to host-owned composer shells", () => {
+    const densityAttributes = (
+      chatUI as typeof chatUI & {
+        agentChatDensityAttributes?: (
+          density: "comfortable" | "compact",
+        ) => React.ComponentProps<"section">;
+      }
+    ).agentChatDensityAttributes;
+
+    expect(densityAttributes).toBeTypeOf("function");
+    if (!densityAttributes) return;
+
+    const compact = renderToStaticMarkup(
+      <section {...densityAttributes("compact")}>Composer</section>,
+    );
+    expect(compact).toContain('data-chat-density="compact"');
+    expect(compact).toContain("--composer-card-padding-block:8px");
+    expect(compact).toContain("--composer-body-min-height:48px");
+  });
+
   it("keeps a draft on the Backchat home surface even when stale turns exist", () => {
     const html = renderToStaticMarkup(
       <AgentChatView
         phase="draft"
-        turns={[{
-          id: "stale-turn",
-          status: "completed",
-          items: [assistant("answer", "Must stay hidden")],
-        }]}
+        turns={[
+          {
+            id: "stale-turn",
+            status: "completed",
+            items: [assistant("answer", "Must stay hidden")],
+          },
+        ]}
         thoughts="history"
         labels={labels}
         turnSlots={turnSlots}
@@ -425,11 +542,13 @@ describe("Backchat main AgentChatView", () => {
     const html = renderToStaticMarkup(
       <AgentChatView
         phase="active"
-        turns={[{
-          id: "turn-1",
-          status: "completed",
-          items: [assistant("answer", "Projected")],
-        }]}
+        turns={[
+          {
+            id: "turn-1",
+            status: "completed",
+            items: [assistant("answer", "Projected")],
+          },
+        ]}
         renderTurn={({ turn }) => (
           <article data-host-turn={turn.id}>Host turn</article>
         )}
@@ -478,12 +597,16 @@ describe("Backchat main AgentChatView", () => {
         thoughts="history"
         labels={labels}
         turnSlots={turnSlots}
-        homeStyle={{
-          "--home-composer-theme-width": "720px",
-        } as CSSProperties}
-        homeComposerStyle={{
-          "--home-composer-frame-width": "720px",
-        } as CSSProperties}
+        homeStyle={
+          {
+            "--home-composer-theme-width": "720px",
+          } as CSSProperties
+        }
+        homeComposerStyle={
+          {
+            "--home-composer-frame-width": "720px",
+          } as CSSProperties
+        }
         slots={{
           empty: <p>Home</p>,
           composer: <form>Composer</form>,
@@ -497,5 +620,45 @@ describe("Backchat main AgentChatView", () => {
     expect(homeHtml).toContain("--home-composer-frame-width:720px");
     expect(homeHtml).toContain("Suggestions");
     expect(homeHtml).toContain("Corner");
+  });
+
+  it("balances a footerless composer against its outer chat frame", () => {
+    const html = renderToStaticMarkup(
+      <AgentChatView
+        phase="missing"
+        turns={[]}
+        thoughts="history"
+        labels={labels}
+        turnSlots={turnSlots}
+        slots={{ empty: <p>Home</p>, composer: <form>Composer</form> }}
+      />,
+    );
+
+    expect(html).toContain("--composer-card-footer-gap:0px");
+    expect(html).toContain(
+      "padding-block-end:var(--composer-frame-padding-bottom, var(--composer-frame-padding-inline, 12px))",
+    );
+  });
+
+  it("keeps the footer-backed composer rhythm when a host provides the footer", () => {
+    const html = renderToStaticMarkup(
+      <AgentChatView
+        phase="missing"
+        turns={[]}
+        thoughts="history"
+        labels={labels}
+        turnSlots={turnSlots}
+        slots={{
+          empty: <p>Home</p>,
+          composer: <form>Composer</form>,
+          afterComposer: <footer>Runtime</footer>,
+        }}
+      />,
+    );
+
+    expect(html).not.toContain("--composer-card-footer-gap:0px");
+    expect(html).not.toContain(
+      "padding-block-end:var(--composer-frame-padding-bottom, var(--composer-frame-padding-inline, 12px))",
+    );
   });
 });

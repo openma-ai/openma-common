@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
@@ -10,6 +12,10 @@ import {
   ChatReasoningTrigger,
   ChatThoughtEventRow,
 } from "../src/chat-ui/components.js";
+
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("nested chat disclosure state", () => {
   afterEach(() => {
@@ -67,6 +73,52 @@ describe("nested chat disclosure state", () => {
     expect(container.textContent).toContain("Read body");
 
     act(() => root.unmount());
+  });
+
+  it("keeps the process trigger visually owned when a host styles native buttons", async () => {
+    const style = document.createElement("style");
+    style.textContent = `
+      button:not(.clickable-icon) {
+        background: white;
+        border: 2px solid red;
+        box-shadow: 0 0 0 4px blue;
+        padding: 10px 12px;
+        font-size: 18px;
+      }
+      ${readFileSync(resolve(import.meta.dirname, "../src/chat-ui/styles.css"), "utf8")}
+    `;
+    document.head.append(style);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ChatReasoning isStreaming>
+          <ChatReasoningTrigger aria-label="Working" />
+          <ChatReasoningContent>Thinking</ChatReasoningContent>
+        </ChatReasoning>,
+      );
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '[data-chat-reasoning-trigger="true"]',
+    );
+    expect(trigger).not.toBeNull();
+    if (trigger) {
+      const computed = getComputedStyle(trigger);
+      expect(computed.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+      expect(computed.borderTopWidth).toBe("0px");
+      expect(computed.boxShadow).toBe("none");
+      expect(computed.paddingTop).toBe("0px");
+      expect(computed.paddingRight).toBe("8px");
+      expect(computed.paddingLeft).toBe("8px");
+      expect(computed.fontSize).toBe("13px");
+      expect(computed.width).toBe("fit-content");
+    }
+
+    act(() => root.unmount());
+    style.remove();
   });
 
   it("preserves an expanded thought when its event group is closed and reopened", async () => {
