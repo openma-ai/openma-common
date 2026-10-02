@@ -19,6 +19,12 @@ jobs:
         with:
           node-version: "24"
           cache: pnpm
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: false
+      - name: Install a Python interpreter for uvx tests
+        run: uv python install 3.12
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
       - name: Verify committed build output is current
@@ -42,15 +48,18 @@ jobs:
           enable-cache: false
       - name: Install a Python interpreter for uvx tests
         run: uv python install 3.12
-      - name: Add Git gzip, bzip2, xz, and OpenSSL to PATH
+      - name: Add Git gzip, bzip2, and OpenSSL to PATH
         shell: pwsh
         run: |
           $gitUsr = "C:\Program Files\Git\usr\bin"
-          foreach ($tool in @("gzip.exe", "bzip2.exe", "xz.exe", "openssl.exe")) {
+          foreach ($tool in @("gzip.exe", "bzip2.exe", "openssl.exe")) {
             if (-not (Test-Path (Join-Path $gitUsr $tool))) {
               throw "Missing $tool in $gitUsr"
             }
           }
           Add-Content -Path $env:GITHUB_PATH -Value $gitUsr
+      - name: Install xz
+        shell: pwsh
+        run: choco install xz --no-progress -y
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
