@@ -1,11 +1,11 @@
 /** Immutable npm releases for ACP hosts. No product settings or global installs. */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { childEnvironment } from "./shared.js";
+import { childEnvironment, discardStaging, publishDirectory } from "./shared.js";
 const exec = promisify(execFile);
 function quoteWindowsArg(value) {
     if (value.length === 0)
@@ -110,21 +110,14 @@ export async function prepareNpmAcpRelease(input, options) {
         await verifyInstalled(staging, release);
         await writeFile(join(staging, "release.json"), JSON.stringify(release));
         options.signal?.throwIfAborted();
-        try {
-            await rename(staging, destination);
-        }
-        catch (error) {
-            if (!["EEXIST", "ENOTEMPTY"].includes(error.code ?? ""))
-                throw error;
-            // Another process published this same release; validate the winner below.
-        }
+        await publishDirectory(staging, destination);
         const prepared = await readPrepared(destination, release);
         if (!prepared)
             throw new Error("ACP release was not published");
         return prepared;
     }
     finally {
-        await rm(staging, { recursive: true, force: true });
+        await discardStaging(staging, destination);
     }
 }
 async function verifyInstalled(directory, release) {

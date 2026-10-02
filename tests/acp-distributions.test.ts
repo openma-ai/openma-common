@@ -99,7 +99,7 @@ function wheel(name: string, version: string, dependency = false, native = false
       [win
         ? `${name}-${version}.data/scripts/tiny-harness.cmd`
         : `${name}-${version}.data/scripts/tiny-harness`]: strToU8(win
-        ? `@echo off\r\necho|set /p=native-${version}\r\n`
+        ? `@echo off\r\necho native-${version}\r\n`
         : `#!/bin/sh\nprintf 'native-${version}'\n`),
     } : {}),
   };

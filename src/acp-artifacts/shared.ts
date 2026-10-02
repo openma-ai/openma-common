@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, posix, resolve } from "node:path";
 
 export interface ArtifactOptions { fetch?: typeof fetch; signal?: AbortSignal }
@@ -50,6 +50,44 @@ export async function download(address: string, options: ArtifactOptions): Promi
 export function platformKey(): string {
   return `${process.platform === "win32" ? "windows" : process.platform}-${process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch}`;
 }
+async function pathExists(path: string): Promise<boolean> {
+  try { await realpath(path); return true; } catch { return false; }
+}
+/** Move a finished install into place. Windows MoveFileEx returns EPERM when the
+ * destination directory already exists, and briefly while a scanner holds a new file. */
+export async function publishDirectory(staging: string, destination: string): Promise<void> {
+  const retries = process.platform === "win32" ? 8 : 1;
+  let last: unknown;
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try { await rename(staging, destination); return; }
+    catch (error) {
+      last = error;
+      const code = (error as NodeJS.ErrnoException).code ?? "";
+      if (code === "EEXIST" || code === "ENOTEMPTY") return;
+      if ((code === "EPERM" || code === "EBUSY") && await pathExists(destination)) return;
+      if (process.platform === "win32" && (code === "EPERM" || code === "EBUSY") && attempt < retries - 1) {
+        await new Promise(resolveDelay => setTimeout(resolveDelay, 50 * (attempt + 1)));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw last;
+}
+export async function discardStaging(staging: string, destination: string): Promise<void> {
+  if (await pathExists(staging) && await pathExists(destination)) {
+    const [stagingReal, destinationReal] = await Promise.all([realpath(staging), realpath(destination)]);
+    const same = process.platform === "win32"
+      ? stagingReal.toLowerCase() === destinationReal.toLowerCase()
+      : stagingReal === destinationReal;
+    if (same) return;
+  } else if (!await pathExists(staging)) return;
+  try { await rm(staging, { recursive: true, force: true }); }
+  catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "EPERM" && code !== "EBUSY") throw error;
+  }
+}
 export async function installAtomically<R extends { digest: string }>(
   root: string, release: R, build: (directory: string) => Promise<void>, inspect: (directory: string) => Promise<Launch>, signal?: AbortSignal,
 ): Promise<Launch & { release: R }> {
@@ -71,10 +109,9 @@ export async function installAtomically<R extends { digest: string }>(
     await inspect(staging);
     await writeFile(join(staging, "release.json"), JSON.stringify(release));
     signal?.throwIfAborted();
-    try { await rename(staging, destination); }
-    catch (error) { if (!["EEXIST", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error; }
+    await publishDirectory(staging, destination);
     const result = await cached();
     if (!result) throw new Error("Artifact installation was not published");
     return result;
-  } finally { await rm(staging, { recursive: true, force: true }); }
+  } finally { await discardStaging(staging, destination); }
 }
