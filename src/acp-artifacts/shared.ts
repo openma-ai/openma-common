@@ -32,7 +32,14 @@ export function launchOptions(value: { args?: unknown; env?: unknown }): { args:
   return { args: [...(value.args as string[] ?? [])], env: Object.fromEntries(Object.entries((value.env ?? {}) as Record<string, string>).sort(([a], [b]) => a.localeCompare(b))) };
 }
 export function childEnvironment(): NodeJS.ProcessEnv {
-  return Object.fromEntries(["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+  // Windows installers need cmd/PATHEXT and the profile npm uses for its cache.
+  // Work tokens, model credentials, and other host variables stay excluded.
+  const keys = [
+    "PATH", "PATHEXT", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "TMPDIR", "TEMP", "TMP", "SystemRoot", "SystemDrive", "ComSpec",
+    "APPDATA", "LOCALAPPDATA", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+  ];
+  return Object.fromEntries(keys.flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 export function timeout(signal?: AbortSignal, ms = 120_000): AbortSignal { return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms); }
 export async function download(address: string, options: ArtifactOptions): Promise<Buffer> {

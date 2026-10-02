@@ -212,10 +212,10 @@ environment. Installer subprocesses receive only the minimal system environment.
 
 The host environment needs Node/npm for npm sources, uv plus a compatible Python
 interpreter for uvx, and bzip2/xz when those archive formats are used. Python
-interpreters may be provisioned with `uv python install`. These APIs target
-POSIX sandboxes. uvx handles console entry points and wheel-packaged native
-executables, verifies package ownership of the selected executable, and keeps
-entry points valid when a completed virtual environment is published.
+interpreters may be provisioned with `uv python install`. uvx virtual environments
+use `bin/python` on POSIX and `Scripts\python.exe` on Windows. uvx handles console
+entry points and wheel-packaged scripts, verifies package ownership of the selected
+executable, and keeps entry points valid when a completed virtual environment is published.
 
 The release pins the top-level package/artifact. npm/uv resolve transitive
 packages on first installation; identical dependency trees across independently
@@ -223,7 +223,9 @@ prepared sandboxes require bundled/shrinkwrapped or otherwise locked releases.
 A native package may additionally require system libraries from its environment.
 
 Artifact integration tests use actual npm/uv processes and local fixture
-registries. Running `pnpm verify` requires uv, Python 3, tar, gzip, bzip2, xz and OpenSSL.
+registries. Running `pnpm verify` requires uv, Python 3, gzip, bzip2, xz and OpenSSL.
+Archive fixtures are built with the `tar` package. Product extraction uses that
+package as well; it does not shell out to system tar.
 
 Artifact installers retain `SSL_CERT_FILE`, `SSL_CERT_DIR` and
 `NODE_EXTRA_CA_CERTS` from the sandbox so its trusted outbound-proxy CA remains

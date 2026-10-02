@@ -7,8 +7,11 @@ import { mkdtemp, mkdir, readFile, writeFile, rm, symlink } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { zipSync, strToU8 } from "fflate";
+import * as tar from "tar";
 import { afterEach, expect, it, vi } from "vitest";
 import { resolveBinaryAcpRelease, prepareBinaryAcpRelease, resolveUvxAcpRelease, prepareUvxAcpRelease } from "../src/acp-artifacts/index.js";
+import { platformKey } from "../src/acp-artifacts/shared.js";
+import { runCaptured } from "./run-command.js";
 
 const exec = promisify(execFile);
 const roots: string[] = [];
@@ -20,22 +23,30 @@ afterEach(async () => {
 });
 async function temp() { const root = await mkdtemp(join(tmpdir(), "acp-distribution-")); roots.push(root); return root; }
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-const script = '#!/bin/sh\nprintf "release-1.0.0:%s\\n" "$*"\n';
+const win = process.platform === "win32";
+const agentCommand = win ? "bin/agent.cmd" : "bin/agent";
+const script = win
+  ? "@echo off\r\necho release-1.0.0:%*\r\n"
+  : '#!/bin/sh\nprintf "release-1.0.0:%s\\n" "$*"\n';
+async function packTar(root: string, file: string, paths: string[]) {
+  // node-tar, not system tar: GNU tar treats `C:\...` as a remote host, and bsdtar rejects `--force-local`.
+  await tar.c({ file, cwd: root, portable: true }, paths);
+}
 async function binaryFixture(format: string) {
   const root = await temp(); await mkdir(join(root, "bin"));
-  await writeFile(join(root, "bin/agent"), script);
+  await writeFile(join(root, agentCommand), script);
   let bytes: Buffer;
   if (format === "raw") bytes = Buffer.from(script);
-  else if (format === "zip") bytes = Buffer.from(zipSync({ "bin/agent": strToU8(script) }));
+  else if (format === "zip") bytes = Buffer.from(zipSync({ [agentCommand]: strToU8(script) }));
   else {
-    await exec("tar", ["-cf", join(root, "release.tar"), "-C", root, "bin/agent"]);
-    if (format === "tar") bytes = await readFile(join(root, "release.tar"));
-    else bytes = (await exec(format === "tar.gz" ? "gzip" : format === "tar.bz2" ? "bzip2" : "xz", ["-c", join(root, "release.tar")], { encoding: "buffer" })).stdout;
+    const archive = join(root, "release.tar");
+    await packTar(root, archive, [agentCommand]);
+    if (format === "tar") bytes = await readFile(archive);
+    else bytes = (await exec(format === "tar.gz" ? "gzip" : format === "tar.bz2" ? "bzip2" : "xz", ["-c", archive], { encoding: "buffer" })).stdout;
   }
-  const platform = `${process.platform}-${process.arch === "arm64" ? "aarch64" : "x86_64"}`;
-  const release = resolveBinaryAcpRelease({ id: "fixture", version: "1.0.0", platform,
+  const release = resolveBinaryAcpRelease({ id: "fixture", version: "1.0.0", platform: platformKey(),
     archive: `https://example.test/release.${format}`, format,
-    sha256: sha(bytes), command: "bin/agent", args: ["acp"], env: { MODE: "fixture" } });
+    sha256: sha(bytes), command: agentCommand, args: ["acp"], env: { MODE: "fixture" } });
   return { root, bytes, release };
 }
 
@@ -44,10 +55,10 @@ it.each(["raw", "zip", "tar", "tar.gz", "tar.bz2", "tar.xz"])("prepares and laun
   const options = { root: join(f.root, "cache"), fetch: async () => new Response(new Uint8Array(f.bytes)) };
   const [first, second] = await Promise.all([prepareBinaryAcpRelease(f.release, options), prepareBinaryAcpRelease(f.release, options)]);
   expect(first.command).toBe(second.command);
-  expect((await exec(first.command, first.args)).stdout.trim()).toBe("release-1.0.0:acp");
+  expect((await runCaptured(first.command, first.args ?? [])).stdout.trim()).toBe("release-1.0.0:acp");
   expect(first.env).toEqual({ MODE: "fixture" });
   const cached = await prepareBinaryAcpRelease(f.release, { root: options.root, fetch: async () => { throw new Error("offline"); } });
-  expect((await exec(cached.command, ["again"])).stdout.trim()).toBe("release-1.0.0:again");
+  expect((await runCaptured(cached.command, ["again"])).stdout.trim()).toBe("release-1.0.0:again");
 });
 
 it("rejects a corrupt binary download, then permits a clean retry", async () => {
@@ -55,7 +66,7 @@ it("rejects a corrupt binary download, then permits a clean retry", async () => 
   const root = join(f.root, "cache");
   await expect(prepareBinaryAcpRelease(f.release, { root, fetch: async () => new Response("corrupt") })).rejects.toThrow(/integrity/);
   const prepared = await prepareBinaryAcpRelease(f.release, { root, fetch: async () => new Response(new Uint8Array(f.bytes)) });
-  expect((await exec(prepared.command, [])).stdout).toContain("release-1.0.0");
+  expect((await runCaptured(prepared.command, [])).stdout).toContain("release-1.0.0");
 });
 
 it("rejects a binary for a different platform before downloading", async () => {
@@ -71,7 +82,7 @@ it.each(["../escape", "/tmp/escape", "bin/../../escape", "C:\\escape"])("rejects
 
 it("rejects archive traversal entries even when the requested executable is safe", async () => {
   const f = await binaryFixture("zip");
-  const bytes = zipSync({ "bin/agent": strToU8(script), "../escape": strToU8("unsafe") });
+  const bytes = zipSync({ [agentCommand]: strToU8(script), "../escape": strToU8("unsafe") });
   const release = resolveBinaryAcpRelease({ ...f.release, sha256: sha(bytes) });
   await expect(prepareBinaryAcpRelease(release, { root: f.root, fetch: async () => new Response(bytes) })).rejects.toThrow(/path/);
 });
@@ -84,7 +95,13 @@ function wheel(name: string, version: string, dependency = false, native = false
     [`${stem}/WHEEL`]: strToU8("Wheel-Version: 1.0\nGenerator: fixture\nRoot-Is-Purelib: true\nTag: py3-none-any\n"),
     [`${stem}/entry_points.txt`]: strToU8(name === "tiny_harness" && !native ? `[console_scripts]\ntiny-harness = ${name}:main\n` : ""),
     [`${stem}/RECORD`]: strToU8(""),
-    ...(native ? { [`${name}-${version}.data/scripts/tiny-harness`]: strToU8(`#!/bin/sh\nprintf 'native-${version}'\n`) } : {}),
+    ...(native ? {
+      [win
+        ? `${name}-${version}.data/scripts/tiny-harness.cmd`
+        : `${name}-${version}.data/scripts/tiny-harness`]: strToU8(win
+        ? `@echo off\r\necho|set /p=native-${version}\r\n`
+        : `#!/bin/sh\nprintf 'native-${version}'\n`),
+    } : {}),
   };
   files[`${stem}/RECORD`] = strToU8(Object.entries(files).map(([path, bytes]) => path.endsWith("/RECORD")
     ? `${path},,` : `${path},sha256=${createHash("sha256").update(bytes).digest("base64url")},${bytes.byteLength}`).join("\n"));
@@ -106,7 +123,13 @@ async function pythonFixture(version = "1.0.0", native = false, tls = false) {
   };
   const cert = join(root, "ca.pem");
   const key = join(root, "key.pem");
-  if (tls) await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1"]);
+  if (tls) {
+    // OpenSSL 3's default req -x509 config marks the certificate CA:TRUE.
+    // uv's rustls verifier rejects that peer as CaUsedAsEndEntity.
+    const opensslConf = join(root, "openssl.cnf");
+    await writeFile(opensslConf, "[req]\nprompt=no\ndistinguished_name=dn\nx509_extensions=leaf\n[dn]\nCN=localhost\n[leaf]\nbasicConstraints=CA:FALSE\nsubjectAltName=IP:127.0.0.1\nsubjectKeyIdentifier=hash\n");
+    await exec("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", key, "-out", cert, "-days", "1", "-config", opensslConf]);
+  }
   const server = tls ? createSecureServer({ key: await readFile(key), cert: await readFile(cert) }, handler) : createServer(handler);
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
@@ -122,10 +145,10 @@ it("installs a hash-pinned uvx tool with dependencies and keeps its launcher val
   const f = await pythonFixture();
   const [a, b] = await Promise.all([prepareUvxAcpRelease(f.release, { root: f.root }), prepareUvxAcpRelease(f.release, { root: f.root })]);
   expect(a.command).toBe(b.command);
-  expect((await exec(a.command, ["acp"])).stdout.trim()).toBe("1.0.0:dependency-ready:acp");
+  expect((await runCaptured(a.command, ["acp"])).stdout.trim()).toBe("1.0.0:dependency-ready:acp");
   await new Promise<void>(resolve => servers.pop()!.close(() => resolve()));
   const cached = await prepareUvxAcpRelease(f.release, { root: f.root });
-  expect((await exec(cached.command, ["offline"])).stdout.trim()).toBe("1.0.0:dependency-ready:offline");
+  expect((await runCaptured(cached.command, ["offline"])).stdout.trim()).toBe("1.0.0:dependency-ready:offline");
 }, 30_000);
 
 it("supports exact Python prereleases and version coexistence", async () => {
@@ -133,8 +156,8 @@ it("supports exact Python prereleases and version coexistence", async () => {
   const first = await prepareUvxAcpRelease(a.release, { root: a.root });
   const second = await prepareUvxAcpRelease(b.release, { root: a.root });
   expect(first.command).not.toBe(second.command);
-  expect((await exec(first.command, [])).stdout).toContain("1.0.0:");
-  expect((await exec(second.command, [])).stdout).toContain("1.1.0rc1:");
+  expect((await runCaptured(first.command, [])).stdout).toContain("1.0.0:");
+  expect((await runCaptured(second.command, [])).stdout).toContain("1.1.0rc1:");
 }, 30_000);
 
 it("rejects uvx archive hashes that differ from the persisted release", async () => {
@@ -148,13 +171,13 @@ it("rejects uvx archive hashes that differ from the persisted release", async ()
 it("supports executable files shipped in wheel scripts without console_scripts metadata", async () => {
   const f = await pythonFixture("1.0.0", true);
   const prepared = await prepareUvxAcpRelease(f.release, { root: f.root });
-  expect((await exec(prepared.command, [])).stdout).toBe("native-1.0.0");
+  expect((await runCaptured(prepared.command, [])).stdout.trim()).toBe("native-1.0.0");
 }, 30_000);
 
 it("rejects tar symlinks instead of extracting through them", async () => {
   const f = await binaryFixture("tar");
-  await symlink("/tmp", join(f.root, "bin/link"));
-  await exec("tar", ["-cf", join(f.root, "unsafe.tar"), "-C", f.root, "bin"]);
+  await symlink(win ? "escape-target" : "/tmp", join(f.root, "bin/link"), win ? "file" : undefined);
+  await packTar(f.root, join(f.root, "unsafe.tar"), ["bin"]);
   const bytes = await readFile(join(f.root, "unsafe.tar"));
   const release = resolveBinaryAcpRelease({ ...f.release, sha256: sha(bytes) });
   await expect(prepareBinaryAcpRelease(release, { root: join(f.root, "cache"), fetch: async () => new Response(bytes) })).rejects.toThrow(/links/);
@@ -164,5 +187,5 @@ it("uses the sandbox CA bundle for uvx HTTPS without disabling certificate verif
   const f = await pythonFixture("1.0.0", false, true);
   vi.stubEnv("SSL_CERT_FILE", f.cert);
   const prepared = await prepareUvxAcpRelease(f.release, { root: f.root });
-  expect((await exec(prepared.command, [])).stdout).toContain("1.0.0:dependency-ready");
+  expect((await runCaptured(prepared.command, [])).stdout).toContain("1.0.0:dependency-ready");
 }, 30_000);

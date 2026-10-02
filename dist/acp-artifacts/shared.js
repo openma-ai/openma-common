@@ -37,7 +37,14 @@ export function launchOptions(value) {
     return { args: [...(value.args ?? [])], env: Object.fromEntries(Object.entries((value.env ?? {})).sort(([a], [b]) => a.localeCompare(b))) };
 }
 export function childEnvironment() {
-    return Object.fromEntries(["PATH", "HOME", "TMPDIR", "TEMP", "SystemRoot", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"].flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
+    // Windows installers need cmd/PATHEXT and the profile npm uses for its cache.
+    // Work tokens, model credentials, and other host variables stay excluded.
+    const keys = [
+        "PATH", "PATHEXT", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+        "TMPDIR", "TEMP", "TMP", "SystemRoot", "SystemDrive", "ComSpec",
+        "APPDATA", "LOCALAPPDATA", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+    ];
+    return Object.fromEntries(keys.flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 export function timeout(signal, ms = 120_000) { return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms); }
 export async function download(address, options) {

@@ -21,6 +21,17 @@ export interface NpmAcpReleaseSelection { id: string; version: string; package: 
 export interface NpmAcpReleaseOptions { fetch?: typeof fetch; signal?: AbortSignal }
 export interface PreparedAcpRelease { command: string; release: NpmAcpRelease }
 const exec = promisify(execFile);
+function quoteWindowsArg(value: string): string {
+  if (value.length === 0) return '""';
+  if (!/[\s"&|<>^]/.test(value)) return value;
+  return `"${value.replaceAll('"', '""')}"`;
+}
+/** npm is a `.cmd` shim on Windows, which CreateProcess refuses to start. */
+function runNpm(args: string[], options: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number; signal?: AbortSignal }) {
+  if (process.platform !== "win32") return exec("npm", args, options);
+  const line = ["npm", ...args].map(quoteWindowsArg).join(" ");
+  return exec(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", line], options);
+}
 const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const packageName = /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/;
 const safeName = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -99,7 +110,7 @@ export async function prepareNpmAcpRelease(
     await writeFile(archive, bytes);
     // Deliberately exclude Work tokens and model credentials from package scripts.
     const env = childEnvironment();
-    await exec("npm", ["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
+    await runNpm(["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
       env, timeout: 600_000, maxBuffer: 1024 * 1024, signal: options.signal,
     });
     await verifyInstalled(staging, release);

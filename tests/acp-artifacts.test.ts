@@ -1,14 +1,13 @@
 import { createHash } from 'node:crypto';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { rootCertificates } from 'node:tls';
+import * as tar from 'tar';
 import { afterEach, expect, it } from 'vitest';
 import { resolveNpmAcpRelease, prepareNpmAcpRelease } from '../src/acp-artifacts/index.js';
+import { runCaptured } from './run-command.js';
 
-const exec = promisify(execFile);
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(p => rm(p, { recursive: true, force: true }))); });
 async function fixture(version = '1.8.0', scripts?: Record<string, string>) {
@@ -16,7 +15,8 @@ async function fixture(version = '1.8.0', scripts?: Record<string, string>) {
   await mkdir(join(root, 'package'));
   await writeFile(join(root, 'package/package.json'), JSON.stringify({ name: '@test/harness', version, bin: { 'codex-acp': 'cli.cjs' }, scripts }));
   await writeFile(join(root, 'package/cli.cjs'), '#!/usr/bin/env node\nconsole.log(require("./package.json").version)\n', { mode: 0o755 });
-  await exec('tar', ['-czf', join(root, 'package.tgz'), '-C', root, 'package']);
+  // node-tar, not system tar: GNU tar treats `C:\...` as a remote host, and bsdtar rejects `--force-local`.
+  await tar.c({ gzip: true, file: join(root, 'package.tgz'), cwd: root, portable: true }, ['package']);
   const archive = await readFile(join(root, 'package.tgz'));
   const metadata = { name: '@test/harness', version, bin: { 'codex-acp': 'cli.cjs' }, dist: { tarball: 'https://registry.npmjs.org/test.tgz', integrity: `sha512-${createHash('sha512').update(archive).digest('base64')}` } };
   const fetcher: typeof fetch = async input => {
@@ -36,10 +36,10 @@ it('installs the exact release into its own directory and reuses it offline', as
   const options = { root: join(f.root, 'installed'), fetch: f.fetcher };
   const [a, b] = await Promise.all([prepareNpmAcpRelease(release, options), prepareNpmAcpRelease(release, options)]);
   expect(a.command).toBe(b.command);
-  expect((await exec(a.command, [])).stdout.trim()).toBe('1.8.0');
+  expect((await runCaptured(a.command, [])).stdout.trim()).toBe('1.8.0');
   const offline: typeof fetch = async () => { throw new Error('offline'); };
   const cached = await prepareNpmAcpRelease(release, { ...options, fetch: offline });
-  expect((await exec(cached.command, [])).stdout.trim()).toBe('1.8.0');
+  expect((await runCaptured(cached.command, [])).stdout.trim()).toBe('1.8.0');
 }, 30_000);
 
 it('keeps two harness releases executable without replacing the first', async () => {
@@ -48,8 +48,8 @@ it('keeps two harness releases executable without replacing the first', async ()
   const first = await prepareNpmAcpRelease(await resolveNpmAcpRelease(a.selection, { fetch: a.fetcher }), { root, fetch: a.fetcher });
   const second = await prepareNpmAcpRelease(await resolveNpmAcpRelease(b.selection, { fetch: b.fetcher }), { root, fetch: b.fetcher });
   expect(first.command).not.toBe(second.command);
-  expect((await exec(first.command, [])).stdout.trim()).toBe('1.8.0');
-  expect((await exec(second.command, [])).stdout.trim()).toBe('1.9.0');
+  expect((await runCaptured(first.command, [])).stdout.trim()).toBe('1.8.0');
+  expect((await runCaptured(second.command, [])).stdout.trim()).toBe('1.9.0');
 }, 30_000);
 
 it.each(['latest', '^1.8.0', '1', '../1.8.0'])('rejects a floating or invalid release %s before fetching', async version => {
@@ -67,7 +67,7 @@ it('rejects modified archives and allows a clean retry after installation failur
   const root = join(f.root, 'installed');
   await expect(prepareNpmAcpRelease(release, { root, fetch: async () => new Response('wrong archive') })).rejects.toThrow(/integrity/);
   const installed = await prepareNpmAcpRelease(release, { root, fetch: f.fetcher });
-  expect((await exec(installed.command, [])).stdout.trim()).toBe('1.8.0');
+  expect((await runCaptured(installed.command, [])).stdout.trim()).toBe('1.8.0');
 }, 30_000);
 
 it('verifies the installed package identity, not only registry metadata', async () => {
