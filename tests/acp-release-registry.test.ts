@@ -1,17 +1,21 @@
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, expect, it } from "vitest";
 import { resolveAcpRelease, prepareAcpRelease, validateAcpRelease, acpReleaseMatchesSource, parseAcpReleaseSource } from "../src/acp-artifacts/index.js";
-const platform = `${process.platform}-${process.arch === "arm64" ? "aarch64" : "x86_64"}`;
-const bytes = Buffer.from('#!/bin/sh\nprintf "%s:%s\\n" "$MODE" "$*"\n');
+import { platformKey } from "../src/acp-artifacts/shared.js";
+import { runCaptured } from "./run-command.js";
+const platform = platformKey();
+const win = process.platform === "win32";
+const bytes = Buffer.from(win
+  ? "@echo off\r\necho %MODE%:%*\r\n"
+  : '#!/bin/sh\nprintf "%s:%s\\n" "$MODE" "$*"\n');
+const agentCommand = win ? "agent.cmd" : "./agent";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 function manifest(version: string) { return { id: "fixture", version, distribution: { binary: { [platform]: {
-  archive: "https://releases.test/agent", cmd: "./agent", sha256: createHash("sha256").update(bytes).digest("hex"), args: ["acp", "--stdio"], env: { MODE: "registry" },
+  archive: "https://releases.test/agent", cmd: agentCommand, sha256: createHash("sha256").update(bytes).digest("hex"), args: ["acp", "--stdio"], env: { MODE: "registry" },
 } } } }; }
 it("finds an exact historical release and preserves registry args/env through launch", async () => {
   const fetcher: typeof fetch = async input => {
@@ -26,7 +30,7 @@ it("finds an exact historical release and preserves registry args/env through la
   expect(release).toMatchObject({ id: "fixture", version: "1.0.0", schema: "openma.acp.registry.v1" });
   const root = await mkdtemp(join(tmpdir(), 'acp-registry-')); roots.push(root);
   const prepared = await prepareAcpRelease(release, { root, fetch: fetcher });
-  expect((await promisify(execFile)(prepared.command, prepared.args, { env: { ...process.env, ...prepared.env } })).stdout.trim()).toBe('registry:acp --stdio');
+  expect((await runCaptured(prepared.command, prepared.args ?? [], { env: { ...process.env, ...prepared.env } })).stdout.trim()).toBe('registry:acp --stdio');
   expect(acpReleaseMatchesSource(release, { type: "registry" })).toBe(true);
   expect(acpReleaseMatchesSource(release, { type: "registry", manifestUrl: "https://other.test/{version}/agent.json" })).toBe(false);
 });

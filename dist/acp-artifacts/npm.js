@@ -1,12 +1,26 @@
 /** Immutable npm releases for ACP hosts. No product settings or global installs. */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { childEnvironment } from "./shared.js";
+import { childEnvironment, discardStaging, publishDirectory } from "./shared.js";
 const exec = promisify(execFile);
+function quoteWindowsArg(value) {
+    if (value.length === 0)
+        return '""';
+    if (!/[\s"&|<>^]/.test(value))
+        return value;
+    return `"${value.replaceAll('"', '""')}"`;
+}
+/** npm is a `.cmd` shim on Windows, which CreateProcess refuses to start. */
+function runNpm(args, options) {
+    if (process.platform !== "win32")
+        return exec("npm", args, options);
+    const line = ["npm", ...args].map(quoteWindowsArg).join(" ");
+    return exec(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", line], options);
+}
 const exactVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const packageName = /^(?:@[a-z0-9._-]+\/)?[a-z0-9][a-z0-9._-]*$/;
 const safeName = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -90,27 +104,20 @@ export async function prepareNpmAcpRelease(input, options) {
         await writeFile(archive, bytes);
         // Deliberately exclude Work tokens and model credentials from package scripts.
         const env = childEnvironment();
-        await exec("npm", ["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
+        await runNpm(["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
             env, timeout: 600_000, maxBuffer: 1024 * 1024, signal: options.signal,
         });
         await verifyInstalled(staging, release);
         await writeFile(join(staging, "release.json"), JSON.stringify(release));
         options.signal?.throwIfAborted();
-        try {
-            await rename(staging, destination);
-        }
-        catch (error) {
-            if (!["EEXIST", "ENOTEMPTY"].includes(error.code ?? ""))
-                throw error;
-            // Another process published this same release; validate the winner below.
-        }
+        await publishDirectory(staging, destination);
         const prepared = await readPrepared(destination, release);
         if (!prepared)
             throw new Error("ACP release was not published");
         return prepared;
     }
     finally {
-        await rm(staging, { recursive: true, force: true });
+        await discardStaging(staging, destination);
     }
 }
 async function verifyInstalled(directory, release) {

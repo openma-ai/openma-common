@@ -1,19 +1,12 @@
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
-function fakePnpm() {
-  const root = mkdtempSync(join(tmpdir(), "openma-dev-consumers-"));
-  const bin = join(root, "bin");
-  const log = join(root, "calls.log");
-  mkdirSync(bin);
-  const executable = join(bin, "pnpm");
-  writeFileSync(executable, `#!/usr/bin/env node
-const { appendFileSync } = require("node:fs");
+const scriptBody = `const { appendFileSync } = require("node:fs");
 const call = process.argv.slice(2).join(" ");
 appendFileSync(process.env.OPENMA_TEST_LOG, call + "\\n");
 if (call === "dev") {
@@ -21,8 +14,22 @@ if (call === "dev") {
   if (exitCode !== undefined) process.exit(Number(exitCode));
   setInterval(() => {}, 1000);
 }
-`);
-  chmodSync(executable, 0o755);
+`;
+
+function fakePnpm() {
+  const root = mkdtempSync(join(tmpdir(), "openma-dev-consumers-"));
+  const bin = join(root, "bin");
+  const log = join(root, "calls.log");
+  mkdirSync(bin);
+  if (process.platform === "win32") {
+    const script = join(bin, "pnpm.cjs");
+    writeFileSync(script, scriptBody);
+    writeFileSync(join(bin, "pnpm.cmd"), `@echo off\r\n"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    const executable = join(bin, "pnpm");
+    writeFileSync(executable, `#!/usr/bin/env node\n${scriptBody}`);
+    chmodSync(executable, 0o755);
+  }
   return { bin, log };
 }
 
@@ -46,7 +53,7 @@ function runLifecycle(env: Record<string, string> = {}) {
     env: {
       ...process.env,
       ...env,
-      PATH: `${fixture.bin}:${process.env.PATH ?? ""}`,
+      PATH: `${fixture.bin}${delimiter}${process.env.PATH ?? ""}`,
       OPENMA_TEST_LOG: fixture.log,
     },
     stdio: "pipe",
@@ -73,7 +80,9 @@ describe("dev:consumers lifecycle", () => {
     ]);
   });
 
-  it("unlinks consumers when the orchestrator is terminated", async () => {
+  // Windows TerminateProcess does not run this SIGTERM handler, so the
+  // orchestrator cannot unlink on kill. That half of the lifecycle is POSIX-only.
+  it.skipIf(process.platform === "win32")("unlinks consumers when the orchestrator is terminated", async () => {
     const { child, log } = runLifecycle();
     await waitForCall(log, "dev");
     child.kill("SIGTERM");

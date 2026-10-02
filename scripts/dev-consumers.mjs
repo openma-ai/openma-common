@@ -1,7 +1,19 @@
 import { spawn, spawnSync } from "node:child_process";
 
+function pnpmLaunch(args) {
+  if (process.platform === "win32") {
+    // pnpm is a .cmd shim. Node's CreateProcess cannot start it.
+    return {
+      command: process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", "pnpm", ...args],
+    };
+  }
+  return { command: "pnpm", args };
+}
+
 function run(command) {
-  return spawnSync("pnpm", [command], { stdio: "inherit" }).status ?? 1;
+  const launch = pnpmLaunch([command]);
+  return spawnSync(launch.command, launch.args, { stdio: "inherit" }).status ?? 1;
 }
 
 const linkStatus = run("link:consumers");
@@ -14,7 +26,8 @@ function cleanup() {
   return run("unlink:consumers");
 }
 
-const dev = spawn("pnpm", ["dev"], { stdio: "inherit" });
+const devLaunch = pnpmLaunch(["dev"]);
+const dev = spawn(devLaunch.command, devLaunch.args, { stdio: "inherit" });
 let interrupted = false;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

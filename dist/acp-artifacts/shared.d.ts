@@ -24,6 +24,10 @@ export declare function childEnvironment(): NodeJS.ProcessEnv;
 export declare function timeout(signal?: AbortSignal, ms?: number): AbortSignal;
 export declare function download(address: string, options: ArtifactOptions): Promise<Buffer>;
 export declare function platformKey(): string;
+/** Move a finished install into place. Windows MoveFileEx returns EPERM when the
+ * destination directory already exists, and briefly while a scanner holds a new file. */
+export declare function publishDirectory(staging: string, destination: string): Promise<void>;
+export declare function discardStaging(staging: string, destination: string): Promise<void>;
 export declare function installAtomically<R extends {
     digest: string;
 }>(root: string, release: R, build: (directory: string) => Promise<void>, inspect: (directory: string) => Promise<Launch>, signal?: AbortSignal): Promise<Launch & {

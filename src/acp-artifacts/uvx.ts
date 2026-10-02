@@ -16,6 +16,27 @@ export interface UvxAcpReleaseInput {
 }
 const exec = promisify(execFile);
 const normalize = (name: string) => name.toLowerCase().replace(/[-_.]+/g, "-");
+// uv's venv layout is bin/python on POSIX and Scripts\python.exe on Windows.
+function venvPython(venv: string): string {
+  return process.platform === "win32" ? join(venv, "Scripts", "python.exe") : join(venv, "bin", "python");
+}
+function venvScriptCandidates(venv: string, command: string): string[] {
+  if (process.platform !== "win32") return [join(venv, "bin", command)];
+  const scripts = join(venv, "Scripts");
+  return [`${command}.exe`, `${command}.cmd`, command, `${command}.bat`].map(name => join(scripts, name));
+}
+async function venvCommand(venv: string, command: string): Promise<string> {
+  const candidates = venvScriptCandidates(venv, command);
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.F_OK);
+      return candidate;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  return candidates[0]!;
+}
 function releaseRecord(input: UvxAcpReleaseInput, hashes: string[]): Omit<UvxAcpRelease, "digest"> {
   identity(input.id, input.version);
   if (typeof input.package !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(input.package)) throw new Error("Invalid Python package name");
@@ -58,12 +79,12 @@ export async function prepareUvxAcpRelease(input: UvxAcpRelease, options: Artifa
     await exec("uv", ["venv", "--no-config", "--no-project", "--relocatable", "--python", interpreter, venv], runOptions);
     const requirements = join(directory, "requirements.txt");
     await writeFile(requirements, `${release.package}==${release.version} ${release.hashes.map(hash => `--hash=sha256:${hash}`).join(" ")}\n`);
-    await exec("uv", ["pip", "install", "--no-config", "--native-tls", "--python", join(venv, "bin/python"), "--index-url", release.indexUrl, "-r", requirements], runOptions);
+    await exec("uv", ["pip", "install", "--no-config", "--native-tls", "--python", venvPython(venv), "--index-url", release.indexUrl, "-r", requirements], runOptions);
   }, async directory => {
     const venv = join(directory, "venv");
-    const command = join(venv, "bin", release.command);
-    const inspect = "import importlib.metadata as m,json,sys,pathlib;d=m.distribution(sys.argv[1]);target=pathlib.Path(sys.argv[2]).resolve();print(json.dumps({'name':d.metadata['Name'],'version':d.version,'owns_command':any(pathlib.Path(d.locate_file(f)).resolve()==target for f in (d.files or []))}))";
-    const metadata = JSON.parse((await exec(join(venv, "bin/python"), ["-I", "-c", inspect, release.package, command], runOptions)).stdout) as { name: string; version: string; owns_command: boolean };
+    const command = await venvCommand(venv, release.command);
+    const inspect = "import importlib.metadata as m,json,sys,os;d=m.distribution(sys.argv[1]);\ndef owned(f):\n try: return os.path.samefile(d.locate_file(f), sys.argv[2])\n except OSError: return False\nprint(json.dumps({'name':d.metadata['Name'],'version':d.version,'owns_command':any(owned(f) for f in (d.files or []))}))";
+    const metadata = JSON.parse((await exec(venvPython(venv), ["-I", "-c", inspect, release.package, command], runOptions)).stdout) as { name: string; version: string; owns_command: boolean };
     if (normalize(metadata.name) !== release.package || metadata.version !== release.version || !metadata.owns_command) throw new Error("Installed uvx package identity or entry point mismatch");
     await access(command, constants.X_OK);
     return { command, args: release.args, env: release.env };
