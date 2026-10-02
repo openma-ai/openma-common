@@ -58,8 +58,33 @@ jobs:
             }
           }
           Add-Content -Path $env:GITHUB_PATH -Value $gitUsr
-      - name: Install xz
+      - name: Install official xz
         shell: pwsh
-        run: choco install xz --no-progress -y
+        run: |
+          # windows-2025 Git for Windows ships gzip, bzip2, and openssl under
+          # usr\bin, and does not ship xz.exe there or in mingw64\bin.
+          # Chocolatey community has no xz package. Use the official XZ Utils
+          # Windows build and keep it off the Git/MSYS tool directories.
+          $gitXz = @(
+            "C:\Program Files\Git\usr\bin\xz.exe",
+            "C:\Program Files\Git\mingw64\bin\xz.exe"
+          )
+          foreach ($candidate in $gitXz) {
+            if (Test-Path $candidate) { Write-Host "Git also has $candidate" }
+            else { Write-Host "Not present: $candidate" }
+          }
+          $version = "5.8.4"
+          $expected = "f31af7638391ecf286d48bc8555ce6e131691a1c52a9e44303bce57069e9de56"
+          $zip = Join-Path $env:RUNNER_TEMP "xz-windows.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "xz"
+          Invoke-WebRequest -Uri "https://github.com/tukaani-project/xz/releases/download/v$version/xz-$version-windows.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "xz zip checksum mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath $dest
+          $bin = Join-Path $dest "bin_x86-64"
+          $xz = Join-Path $bin "xz.exe"
+          if (-not (Test-Path $xz)) { throw "xz.exe missing from $bin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin
+          & $xz --version
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
