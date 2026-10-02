@@ -35,6 +35,7 @@ export function acpSessionFixture(
     initializeMeta: null,
     sessionSetupMeta: null,
     configOptions: [],
+    legacyModels: null,
     modes: null,
     promptCapabilities: {},
     supportsSessionFork: false,

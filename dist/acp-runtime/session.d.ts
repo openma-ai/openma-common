@@ -1,5 +1,17 @@
 import type * as schema from "@agentclientprotocol/sdk";
 import type { AcpSession, ChildHandle, SessionOptions, SteeringOutcome } from "./types.js";
+export interface AcpForkPoint {
+    messageId: string;
+    messageText: string;
+    messageOccurrence: number;
+}
+export interface LegacyModelState {
+    currentModelId: string;
+    availableModels: Array<{
+        modelId: string;
+        name: string;
+    }>;
+}
 export interface AcpSessionConstructOptions {
     child: ChildHandle;
     options: SessionOptions;
@@ -18,6 +30,7 @@ export declare class AcpSessionImpl implements AcpSession {
     get initializeMeta(): Record<string, unknown> | null;
     get sessionSetupMeta(): Record<string, unknown> | null;
     get configOptions(): readonly schema.SessionConfigOption[];
+    get legacyModels(): LegacyModelState | null;
     get modes(): schema.SessionModeState | null;
     get promptCapabilities(): schema.PromptCapabilities;
     get supportsSessionFork(): boolean;
@@ -64,4 +77,15 @@ export declare class AcpSessionImpl implements AcpSession {
     isAlive(): boolean;
     dispose(): Promise<void>;
 }
+/** Inclusive-fork `_meta` carried by `SessionOptions.sessionRequestMeta`.
+ * The fingerprint is `sha256:` plus the SHA-256 of the message text's UTF-8 bytes. */
+export declare function acpForkRequestMeta(point: AcpForkPoint): Record<string, unknown>;
+/** Clone `configOptions` from a session-setup response. When the response
+ * still carries the retired `models` catalog and no option already has
+ * category or id `model`, append a select marked as legacy model state. */
+export declare function sessionConfigOptionsFromResponse(value: unknown): schema.SessionConfigOption[];
+/** Merge a host capability overlay into the runtime's initialize advertisement.
+ * `fs` and `session.configOptions` merge one level. `auth._meta` and top-level
+ * `_meta` merge key by key. Overlay values win. */
+export declare function mergeClientCapabilities(base: schema.ClientCapabilities | undefined, extra: schema.ClientCapabilities): schema.ClientCapabilities;
 //# sourceMappingURL=session.d.ts.map

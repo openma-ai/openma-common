@@ -59,8 +59,14 @@ export interface SessionOptions {
     additionalDirectories?: string[];
     /** Adapter-specific metadata sent on session/new, load, resume, and fork.
      * The shared runtime transports it without interpretation; each harness
-     * owns the keys it understands. */
+     * owns the keys it understands. `acpForkRequestMeta()` builds the
+     * inclusive-fork object some hosts put here. */
     sessionRequestMeta?: Record<string, unknown>;
+    /** Merged into the built-in `initialize` client capabilities. `fs`,
+     * `session.configOptions`, `auth._meta`, and top-level `_meta` are
+     * deep-merged and overlay values win. Omit to keep the built-in
+     * advertisement unchanged. */
+    clientCapabilityOverlay?: schema.ClientCapabilities;
     /** NES suggestion kinds the host can render/apply. Omit when the host has
      * no editor surface; the runtime must not advertise an empty capability by
      * assumption. */
@@ -92,6 +98,17 @@ export interface AcpSession {
      * fork response. It is adapter evidence, not a GUI contract. */
     readonly sessionSetupMeta: Record<string, unknown> | null;
     readonly configOptions: readonly schema.SessionConfigOption[];
+    /** Legacy `models` catalog from the session-setup response, captured before
+     * the ACP SDK drops unknown fields. Codex can report a current model that
+     * is not in this catalog; callers must trust this snapshot. Null when the
+     * agent did not send one. The runtime does not rewrite the wire bytes. */
+    readonly legacyModels: {
+        currentModelId: string;
+        availableModels: ReadonlyArray<{
+            modelId: string;
+            name: string;
+        }>;
+    } | null;
     /** ACP v1 legacy-compatible session mode state. `configOptions` remains
      * preferred when the agent exposes both contracts. */
     readonly modes: schema.SessionModeState | null;

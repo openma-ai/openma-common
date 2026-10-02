@@ -32,8 +32,8 @@ or wire-event shapes into product state.
 - `@openma/common/agent-contract/managed` — Claude Managed wire events translated into Agent facts.
 - `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
-- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged.
-- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime.
+- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and accept an optional `clientCapabilityOverlay`.
+- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
