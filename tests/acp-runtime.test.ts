@@ -6,8 +6,13 @@ import {
   type Agent,
   type ContentBlock,
 } from "@agentclientprotocol/sdk";
-import { describe, expect, it } from "vitest";
-import { AcpSessionImpl } from "../src/acp-runtime/session.js";
+import { describe, expect, it, vi } from "vitest";
+import {
+  AcpSessionImpl,
+  acpForkRequestMeta,
+  mergeClientCapabilities,
+  sessionConfigOptionsFromResponse,
+} from "../src/acp-runtime/session.js";
 import type { ChildHandle } from "../src/acp-runtime/types.js";
 
 describe("shared ACP session runtime", () => {
@@ -2138,6 +2143,634 @@ describe("shared ACP session runtime", () => {
     expect(events).toContainEqual(expect.objectContaining({ type: "promptComplete" }));
   });
 });
+
+describe("legacy model catalog", () => {
+  it("converts a legacy models catalog into a model select and leaves an existing model option alone", () => {
+    const raw = {
+      configOptions: [{
+        id: "mode",
+        name: "Mode",
+        category: "mode",
+        type: "select" as const,
+        currentValue: "ask",
+        options: [{ value: "ask", name: "Ask" }],
+      }],
+      models: {
+        currentModelId: "future[medium]",
+        availableModels: [
+          { modelId: "known[medium]", name: "Known", description: "In the catalog" },
+          { modelId: 3, name: "Skipped" },
+          { modelId: "flash", name: "Flash" },
+        ],
+      },
+    };
+
+    const converted = sessionConfigOptionsFromResponse(raw);
+
+    expect(converted).toEqual([
+      raw.configOptions[0],
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "future[medium]",
+        options: [
+          { value: "known[medium]", name: "Known", description: "In the catalog" },
+          { value: "flash", name: "Flash" },
+        ],
+        _meta: { "openma.dev/legacy-model-state": true },
+      },
+    ]);
+    converted[0]!.name = "changed";
+    expect(raw.configOptions[0]!.name).toBe("Mode");
+    expect(sessionConfigOptionsFromResponse({
+      configOptions: [{ id: "model", name: "Model", type: "select", currentValue: "a", options: [] }],
+      models: raw.models,
+    })).toHaveLength(1);
+    expect(sessionConfigOptionsFromResponse({
+      configOptions: [{ id: "effort", name: "Effort", category: "model", type: "select", currentValue: "low", options: [] }],
+      models: raw.models,
+    })).toHaveLength(1);
+    expect(sessionConfigOptionsFromResponse({ models: { currentModelId: "x", availableModels: [] } })).toEqual([]);
+    expect(sessionConfigOptionsFromResponse(null)).toEqual([]);
+  });
+
+  it("keeps the legacy catalog before the SDK drops unknown response fields", async () => {
+    const models = {
+      currentModelId: "future[medium]",
+      availableModels: [{ modelId: "known[medium]", name: "Known" }],
+    };
+    const pair = makeStreamPair();
+    const wire = ndJsonStream(pair.agentOutput, pair.agentInput);
+    const reader = wire.readable.getReader();
+    const writer = wire.writable.getWriter();
+    const pump = (async () => {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const request = value as { id?: number; method?: string };
+        if (request.id === undefined) continue;
+        await writer.write({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: request.method === "initialize"
+            ? { protocolVersion: PROTOCOL_VERSION, agentCapabilities: {} }
+            : { sessionId: "legacy-models", models, configOptions: [] },
+        });
+      }
+    })();
+    const session = new AcpSessionImpl({
+      child: pair.child,
+      id: "legacy-models",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    try {
+      await session.init();
+      expect(session.legacyModels).toEqual(models);
+      expect(session.configOptions).toEqual([]);
+    } finally {
+      await reader.cancel();
+      await session.dispose();
+      await pump.catch(() => undefined);
+    }
+  });
+});
+
+describe("client capability overlay", () => {
+  it("deep-merges fs, session config options, auth meta, and top-level meta with the overlay winning", () => {
+    expect(mergeClientCapabilities({
+      fs: { readTextFile: false, writeTextFile: false, _meta: { base: true } },
+      session: { configOptions: { boolean: {}, _meta: { base: true } } },
+      auth: { terminal: false, _meta: { gateway: false, base: true } },
+      _meta: { "subagent-transcript": true, terminal_output: true },
+    }, {
+      fs: { readTextFile: true, _meta: { overlay: true } },
+      session: { configOptions: { _meta: { overlay: true } } },
+      auth: { terminal: true, _meta: { gateway: true } },
+      _meta: { "terminal-auth": true, parameterizedModelPicker: true, "subagent-transcript": false },
+    })).toEqual({
+      fs: { readTextFile: true, writeTextFile: false, _meta: { overlay: true } },
+      session: {
+        configOptions: {
+          boolean: {},
+          _meta: { overlay: true },
+        },
+      },
+      auth: { terminal: true, _meta: { gateway: true, base: true } },
+      _meta: {
+        "subagent-transcript": false,
+        terminal_output: true,
+        "terminal-auth": true,
+        parameterizedModelPicker: true,
+      },
+    });
+  });
+
+  it("leaves the built-in initialize capabilities unchanged when no overlay is set", async () => {
+    let capabilities: unknown;
+    const harness = createHarness((connection) => ({
+      async initialize(params) {
+        capabilities = params.clientCapabilities;
+        void connection;
+        return { protocolVersion: PROTOCOL_VERSION };
+      },
+      async newSession() {
+        return { sessionId: "default-capabilities" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "default-capabilities",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    await session.init();
+    await session.dispose();
+
+    expect(capabilities).toMatchObject({
+      session: { configOptions: { boolean: {} } },
+      _meta: { "subagent-transcript": true, terminal_output: true },
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+    });
+    expect((capabilities as { _meta?: Record<string, unknown> })._meta?.parameterizedModelPicker).toBeUndefined();
+    expect((capabilities as { _meta?: Record<string, unknown> })._meta?.["terminal-auth"]).toBeUndefined();
+    expect((capabilities as { auth?: { terminal?: boolean } }).auth?.terminal).not.toBe(true);
+  });
+
+  it("sends the merged overlay on initialize", async () => {
+    let capabilities: unknown;
+    const harness = createHarness(() => ({
+      async initialize(params) {
+        capabilities = params.clientCapabilities;
+        return { protocolVersion: PROTOCOL_VERSION };
+      },
+      async newSession() {
+        return { sessionId: "overlay-capabilities" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "overlay-capabilities",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        clientCapabilityOverlay: {
+          auth: { terminal: true, _meta: { gateway: true } },
+          _meta: { "terminal-auth": true, parameterizedModelPicker: true },
+          session: { configOptions: { _meta: { custom: true } } },
+          fs: { readTextFile: true },
+        },
+      },
+    });
+    await session.init();
+    await session.dispose();
+
+    expect(capabilities).toMatchObject({
+      auth: { terminal: true, _meta: { gateway: true } },
+      fs: { readTextFile: true, writeTextFile: false },
+      session: { configOptions: { boolean: {}, _meta: { custom: true } } },
+      _meta: {
+        "subagent-transcript": true,
+        terminal_output: true,
+        "terminal-auth": true,
+        parameterizedModelPicker: true,
+      },
+    });
+  });
+});
+
+describe("authentication-required session retry", () => {
+  it("authenticates the first agent method once and retries session/new", async () => {
+    const calls: string[] = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [
+            { id: "term", name: "Terminal", type: "terminal" },
+            { id: "login", name: "Login" },
+          ],
+        };
+      },
+      async newSession() {
+        calls.push("new");
+        if (calls.filter((call) => call === "new").length === 1) {
+          throw new RequestError(-32000, "Authentication required");
+        }
+        return { sessionId: "retried-session" };
+      },
+      async authenticate(params) {
+        calls.push(`authenticate:${params.methodId}`);
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "auth-retry",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    await session.init();
+    await session.dispose();
+
+    expect(session.acpSessionId).toBe("retried-session");
+    expect(calls).toEqual(["new", "authenticate:login", "new"]);
+  });
+
+  it("does not retry a -32000 error whose message is not authentication required", async () => {
+    const calls: string[] = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [{ id: "login", name: "Login", type: "agent" }],
+        };
+      },
+      async newSession() {
+        calls.push("new");
+        throw new RequestError(-32000, "Session store is locked");
+      },
+      async authenticate() {
+        calls.push("authenticate");
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "not-auth",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    await expect(session.init()).rejects.toMatchObject({
+      code: -32000,
+      message: "Session store is locked",
+    });
+    expect(calls).toEqual(["new"]);
+    await session.dispose();
+  });
+
+  it("stops after one authentication retry when session/new is still unauthorized", async () => {
+    let newCount = 0;
+    let authCount = 0;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [{ id: "login", name: "Login", type: "agent" }],
+        };
+      },
+      async newSession() {
+        newCount += 1;
+        throw new RequestError(-32000, "Authentication required: still signed out");
+      },
+      async authenticate() {
+        authCount += 1;
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "auth-retry-once",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+    });
+    await expect(session.init()).rejects.toMatchObject({ code: -32000 });
+    expect(newCount).toBe(2);
+    expect(authCount).toBe(1);
+    await session.dispose();
+  });
+
+  it("retries session/resume and session/load once before falling through", async () => {
+    const calls: string[] = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [{ id: "login", name: "Login", type: "agent" }],
+          agentCapabilities: {
+            loadSession: true,
+            sessionCapabilities: { resume: {} },
+          },
+        };
+      },
+      async resumeSession() {
+        calls.push("resume");
+        if (calls.filter((call) => call === "resume").length === 1) {
+          throw new RequestError(-32000, "Authentication required");
+        }
+        return { configOptions: [] };
+      },
+      async loadSession() {
+        calls.push("load");
+        return {};
+      },
+      async newSession() {
+        calls.push("new");
+        return { sessionId: "unused" };
+      },
+      async authenticate() {
+        calls.push("authenticate");
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "auth-retry-resume",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        resumeAcpSessionId: "existing",
+      },
+    });
+    await session.init();
+    await session.dispose();
+    expect(session.acpSessionId).toBe("existing");
+    expect(calls).toEqual(["resume", "authenticate", "resume"]);
+  });
+
+  it("retries session/load once when resume is unavailable", async () => {
+    const calls: string[] = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [{ id: "login", name: "Login", type: "agent" }],
+          agentCapabilities: { loadSession: true },
+        };
+      },
+      async loadSession() {
+        calls.push("load");
+        if (calls.filter((call) => call === "load").length === 1) {
+          throw new RequestError(-32000, "Authentication required");
+        }
+        return { configOptions: [] };
+      },
+      async newSession() {
+        calls.push("new");
+        return { sessionId: "fallback" };
+      },
+      async authenticate() {
+        calls.push("authenticate");
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "auth-retry-load",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        resumeAcpSessionId: "existing",
+      },
+    });
+    await session.init();
+    await session.dispose();
+    expect(session.acpSessionId).toBe("existing");
+    expect(calls).toEqual(["load", "authenticate", "load"]);
+  });
+
+  it("does not authenticate while forking an auth-required session", async () => {
+    const calls: string[] = [];
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          authMethods: [{ id: "login", name: "Login", type: "agent" }],
+          agentCapabilities: { sessionCapabilities: { fork: {} } },
+        };
+      },
+      async unstable_forkSession() {
+        calls.push("fork");
+        throw new RequestError(-32000, "Authentication required");
+      },
+      async newSession() {
+        calls.push("new");
+        return { sessionId: "should-not-run" };
+      },
+      async authenticate() {
+        calls.push("authenticate");
+        return {};
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "auth-retry-fork",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkFromAcpSessionId: "source",
+      },
+    });
+    await expect(session.init()).rejects.toMatchObject({ code: -32000 });
+    expect(calls).toEqual(["fork"]);
+    await session.dispose();
+  });
+});
+
+describe("prompt timeout and dispose", () => {
+  it("ends the prompt iterator when the agent ignores session/cancel", async () => {
+    let cancelCount = 0;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return { protocolVersion: PROTOCOL_VERSION };
+      },
+      async newSession() {
+        return { sessionId: "timeout-session" };
+      },
+      async prompt() {
+        return new Promise(() => undefined);
+      },
+      async cancel() {
+        cancelCount += 1;
+      },
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "timeout-session",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        perTurnTimeoutMs: 30,
+      },
+    });
+    await session.init();
+    const events: unknown[] = [];
+    const started = Date.now();
+    for await (const event of session.prompt("hello")) events.push(event);
+    expect(Date.now() - started).toBeLessThan(1_000);
+    await vi.waitFor(() => {
+      expect(cancelCount).toBe(1);
+    });
+    expect(events).toEqual([{
+      type: "promptError",
+      error: "Error: ACP prompt timed out after 30ms",
+      errorDetails: { message: "ACP prompt timed out after 30ms" },
+    }]);
+    await session.dispose();
+  });
+
+  it("shares one in-flight dispose promise until session/close and kill finish", async () => {
+    let releaseClose!: () => void;
+    const closeGate = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    let releaseKill!: () => void;
+    const killGate = new Promise<void>((resolve) => {
+      releaseKill = resolve;
+    });
+    let killStarted!: () => void;
+    const killStartedGate = new Promise<void>((resolve) => {
+      killStarted = resolve;
+    });
+    const order: string[] = [];
+    const kill = vi.fn(async () => {
+      order.push("kill");
+      killStarted();
+      await killGate;
+    });
+    const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+    const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+    new AgentSideConnection(
+      () => ({
+        async initialize() {
+          return {
+            protocolVersion: PROTOCOL_VERSION,
+            agentCapabilities: { sessionCapabilities: { close: {} } },
+          };
+        },
+        async newSession() {
+          return { sessionId: "dispose-session" };
+        },
+        async closeSession() {
+          order.push("close");
+          await closeGate;
+          return {};
+        },
+        async prompt() {
+          return { stopReason: "end_turn" };
+        },
+        async cancel() {},
+        async authenticate() {
+          return {};
+        },
+      }),
+      ndJsonStream(agentToClient.writable, clientToAgent.readable),
+    );
+    const session = new AcpSessionImpl({
+      id: "dispose-session",
+      options: { agent: { command: "fake-agent", cwd: "/tmp/openma" } },
+      child: {
+        stdin: clientToAgent.writable,
+        stdout: agentToClient.readable,
+        stderr: new ReadableStream({ start(controller) { controller.close(); } }),
+        exited: Promise.resolve({ code: 0, signal: null }),
+        kill,
+      },
+    });
+    await session.init();
+
+    const first = session.dispose();
+    const second = session.dispose();
+    await vi.waitFor(() => {
+      expect(order).toEqual(["close"]);
+    });
+    let secondSettled = false;
+    void second.then(() => {
+      secondSettled = true;
+    });
+    releaseClose();
+    await killStartedGate;
+    await Promise.resolve();
+    expect(secondSettled).toBe(false);
+    expect(kill).toHaveBeenCalledOnce();
+    releaseKill();
+    await Promise.all([first, second]);
+    expect(secondSettled).toBe(true);
+    expect(order).toEqual(["close", "kill"]);
+    await session.dispose();
+    expect(kill).toHaveBeenCalledOnce();
+  });
+});
+
+describe("acpForkRequestMeta", () => {
+  it("builds jetbrains.air.fork v1 with a sha256 fingerprint of the UTF-8 text", () => {
+    expect(acpForkRequestMeta({
+      messageId: "answer-old",
+      messageText: "abc",
+      messageOccurrence: 2,
+    })).toEqual({
+      jetbrains: {
+        air: {
+          fork: {
+            version: 1,
+            messageId: "answer-old",
+            messageOccurrence: 2,
+            messageFingerprint: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+          },
+        },
+      },
+    });
+  });
+});
+
+function makeStreamPair(): {
+  child: ChildHandle;
+  agentInput: ReadableStream<Uint8Array>;
+  agentOutput: WritableStream<Uint8Array>;
+} {
+  const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+  const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+  return {
+    child: {
+      stdin: clientToAgent.writable,
+      stdout: agentToClient.readable,
+      stderr: new ReadableStream({ start(controller) { controller.close(); } }),
+      exited: Promise.resolve({ code: 0, signal: null }),
+      async kill() {
+        await Promise.allSettled([
+          clientToAgent.writable.close(),
+          agentToClient.writable.close(),
+        ]);
+      },
+    },
+    agentInput: clientToAgent.readable,
+    agentOutput: agentToClient.writable,
+  };
+}
 
 function createHarness(toAgent: (conn: AgentSideConnection) => Agent): { child: ChildHandle } {
   const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();

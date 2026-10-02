@@ -1,11 +1,17 @@
+import { createHash } from "node:crypto";
 import { ClientSideConnection, RequestError, ndJsonStream, } from "@agentclientprotocol/sdk";
 import { preserveAcpNotificationContext } from "../session-events/acp.js";
+import { isAuthenticationRequiredError } from "./errors.js";
+const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
 export class AcpSessionImpl {
     id;
     options;
     #child;
+    #stdout;
     #childExit = null;
     #agent;
+    #legacyModels = null;
+    #disposePromise;
     #sessionId;
     #disposed = false;
     #acceptOutOfBandUpdates = false;
@@ -39,6 +45,10 @@ export class AcpSessionImpl {
         this.id = deps.id;
         this.options = deps.options;
         this.#child = deps.child;
+        this.#stdout = observeLegacyModels(deps.child.stdout, (models) => {
+            if (this.#legacyModels === null)
+                this.#legacyModels = models;
+        });
         void deps.child.exited.then((result) => {
             this.#childExit = result;
         });
@@ -66,6 +76,9 @@ export class AcpSessionImpl {
     }
     get configOptions() {
         return this.#configOptions;
+    }
+    get legacyModels() {
+        return this.#legacyModels;
     }
     get modes() {
         return this.#modes;
@@ -125,47 +138,51 @@ export class AcpSessionImpl {
                 || requestedElicitationCapabilities.url != null)
             ? requestedElicitationCapabilities
             : undefined;
-        const connection = new ClientSideConnection(() => this.#createClient(callbacks, elicitationCapabilities?.url != null), ndJsonStream(this.#child.stdin, this.#child.stdout));
+        const connection = new ClientSideConnection(() => this.#createClient(callbacks, elicitationCapabilities?.url != null), ndJsonStream(this.#child.stdin, this.#stdout));
         this.#agent = connection;
+        const clientCapabilities = {
+            // The existing OpenMA controls render both boolean config options and
+            // structured/markdown plans. Advertising these capabilities prevents
+            // agents such as codex-acp from degrading them to plain transcript
+            // text even though the canonical event and GUI projections exist.
+            session: {
+                configOptions: {
+                    boolean: {},
+                },
+            },
+            plan: {},
+            // Claude Agent ACP uses this ACP-reserved extension capability to
+            // forward nested subagent text, thinking, and tool updates. It is
+            // harmless for agents that do not implement the extension: ACP
+            // clients and agents must treat unknown `_meta` keys as optional.
+            _meta: {
+                "subagent-transcript": true,
+                // claude-agent-acp and codex-acp use this negotiated extension to
+                // send terminal snapshots instead of forcing clients to reconstruct
+                // them from provider-specific delta notifications.
+                terminal_output: true,
+            },
+            fs: {
+                readTextFile: Boolean(callbacks.readTextFile),
+                writeTextFile: Boolean(callbacks.writeTextFile),
+            },
+            terminal: Boolean(callbacks.createTerminal),
+            ...(elicitationCapabilities
+                ? { elicitation: elicitationCapabilities }
+                : {}),
+            ...(this.options.clientNesCapabilities
+                ? { nes: this.options.clientNesCapabilities }
+                : {}),
+            ...(this.options.positionEncodings?.length
+                ? { positionEncodings: this.options.positionEncodings }
+                : {}),
+        };
+        const overlay = this.options.clientCapabilityOverlay;
         const initialized = await this.#agent.initialize({
             protocolVersion: 1,
-            clientCapabilities: {
-                // The existing OpenMA controls render both boolean config options and
-                // structured/markdown plans. Advertising these capabilities prevents
-                // agents such as codex-acp from degrading them to plain transcript
-                // text even though the canonical event and GUI projections exist.
-                session: {
-                    configOptions: {
-                        boolean: {},
-                    },
-                },
-                plan: {},
-                // Claude Agent ACP uses this ACP-reserved extension capability to
-                // forward nested subagent text, thinking, and tool updates. It is
-                // harmless for agents that do not implement the extension: ACP
-                // clients and agents must treat unknown `_meta` keys as optional.
-                _meta: {
-                    "subagent-transcript": true,
-                    // claude-agent-acp and codex-acp use this negotiated extension to
-                    // send terminal snapshots instead of forcing clients to reconstruct
-                    // them from provider-specific delta notifications.
-                    terminal_output: true,
-                },
-                fs: {
-                    readTextFile: Boolean(callbacks.readTextFile),
-                    writeTextFile: Boolean(callbacks.writeTextFile),
-                },
-                terminal: Boolean(callbacks.createTerminal),
-                ...(elicitationCapabilities
-                    ? { elicitation: elicitationCapabilities }
-                    : {}),
-                ...(this.options.clientNesCapabilities
-                    ? { nes: this.options.clientNesCapabilities }
-                    : {}),
-                ...(this.options.positionEncodings?.length
-                    ? { positionEncodings: this.options.positionEncodings }
-                    : {}),
-            },
+            clientCapabilities: overlay
+                ? mergeClientCapabilities(clientCapabilities, overlay)
+                : clientCapabilities,
         });
         const initializedAt = Date.now();
         this.#authMethods = initialized.authMethods ?? [];
@@ -234,13 +251,13 @@ export class AcpSessionImpl {
             this.#supportsSessionResume &&
             this.#agent.resumeSession) {
             try {
-                const resumed = await this.#agent.resumeSession({
+                const resumed = await this.#withAuthenticationRetry(() => this.#agent.resumeSession({
                     sessionId: this.options.resumeAcpSessionId,
                     cwd,
                     mcpServers,
                     ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
                     ...(requestMeta ? { _meta: requestMeta } : {}),
-                });
+                }));
                 this.#sessionId = this.options.resumeAcpSessionId;
                 this.#configOptions = resumed.configOptions ?? [];
                 this.#modes = resumed.modes ?? null;
@@ -257,13 +274,13 @@ export class AcpSessionImpl {
             initialized.agentCapabilities?.loadSession === true &&
             this.#agent.loadSession) {
             try {
-                const loaded = await this.#agent.loadSession({
+                const loaded = await this.#withAuthenticationRetry(() => this.#agent.loadSession({
                     sessionId: this.options.resumeAcpSessionId,
                     cwd,
                     mcpServers,
                     ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
                     ...(requestMeta ? { _meta: requestMeta } : {}),
-                });
+                }));
                 this.#sessionId = this.options.resumeAcpSessionId;
                 this.#configOptions = loaded?.configOptions ?? [];
                 this.#modes = loaded?.modes ?? null;
@@ -276,12 +293,12 @@ export class AcpSessionImpl {
                 console.error(`[acp] session/load(${this.options.resumeAcpSessionId}) failed, falling back to new:`, error);
             }
         }
-        const created = await this.#agent.newSession({
+        const created = await this.#withAuthenticationRetry(() => this.#agent.newSession({
             cwd,
             mcpServers,
             ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
             ...(requestMeta ? { _meta: requestMeta } : {}),
-        });
+        }));
         this.#sessionId = created.sessionId;
         this.#configOptions = created.configOptions ?? [];
         this.#modes = created.modes ?? null;
@@ -471,6 +488,20 @@ export class AcpSessionImpl {
             return;
         const completedAt = Date.now();
         process.stderr.write(`[acp-init] id=${this.id} mode=${mode} initialize_ms=${initializedAt - startedAt} session_open_ms=${completedAt - initializedAt} total_ms=${completedAt - startedAt}\n`);
+    }
+    async #withAuthenticationRetry(open) {
+        try {
+            return await open();
+        }
+        catch (error) {
+            if (!isAuthenticationRequiredError(error))
+                throw error;
+            const method = this.#authMethods.find((candidate) => authMethodType(candidate) === "agent");
+            if (!method)
+                throw error;
+            await this.#agent.authenticate({ methodId: method.id });
+            return await open();
+        }
     }
     async authenticate(methodId) {
         if (!this.#agent)
@@ -668,9 +699,18 @@ export class AcpSessionImpl {
                 .catch(() => { });
         };
         const abortTurn = () => turnAbort.abort();
-        const timer = this.options.perTurnTimeoutMs
-            ? setTimeout(() => turnAbort.abort(), this.options.perTurnTimeoutMs)
-            : undefined;
+        const timeoutMs = this.options.perTurnTimeoutMs;
+        let timer;
+        let turnFinished = false;
+        const finishTurn = () => {
+            if (turnFinished)
+                return;
+            turnFinished = true;
+            this.#activePromptCount = Math.max(0, this.#activePromptCount - 1);
+            if (timer)
+                clearTimeout(timer);
+            options?.abortSignal?.removeEventListener("abort", abortTurn);
+        };
         options?.abortSignal?.addEventListener("abort", abortTurn, { once: true });
         turnAbort.signal.addEventListener("abort", onAbort, { once: true });
         if (options?.abortSignal?.aborted)
@@ -678,18 +718,35 @@ export class AcpSessionImpl {
         this.#activePromptCount += 1;
         const prompt = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
         const done = Promise.resolve(this.#agent.prompt({ sessionId: this.#sessionId, prompt }))
-            .finally(() => {
-            this.#activePromptCount = Math.max(0, this.#activePromptCount - 1);
-            if (timer)
-                clearTimeout(timer);
-            options?.abortSignal?.removeEventListener("abort", abortTurn);
-        });
+            .finally(finishTurn);
         let ended = false;
+        let timedOut = false;
+        if (timeoutMs) {
+            timer = setTimeout(() => {
+                if (ended)
+                    return;
+                timedOut = true;
+                ended = true;
+                turnAbort.abort();
+                const message = `ACP prompt timed out after ${timeoutMs}ms`;
+                this.#pushEvent({
+                    type: "promptError",
+                    error: `Error: ${message}`,
+                    errorDetails: { message },
+                });
+                this.#endStream();
+                finishTurn();
+            }, timeoutMs);
+        }
         void done.then((response) => {
+            if (timedOut || ended)
+                return;
             ended = true;
             this.#pushEvent({ type: "promptComplete", response });
             this.#endStream();
         }, (error) => {
+            if (timedOut || ended)
+                return;
             ended = true;
             // Keep the legacy display string, but retain the JSON-RPC evidence
             // so hosts can classify failures without interpreting message text.
@@ -722,14 +779,17 @@ export class AcpSessionImpl {
                 });
             }
         }
-        await done;
+        if (!timedOut)
+            await done;
     }
     isAlive() {
         return !this.#disposed && this.#childExit === null;
     }
-    async dispose() {
-        if (this.#disposed)
-            return;
+    dispose() {
+        this.#disposePromise ??= this.#disposeOnce();
+        return this.#disposePromise;
+    }
+    async #disposeOnce() {
         if (this.#supportsSessionClose && this.#sessionId && this.#agent?.closeSession) {
             try {
                 await this.#agent.closeSession({ sessionId: this.#sessionId });
@@ -812,5 +872,179 @@ const IDLE_SESSION_UPDATES = new Set([
 function isIdleSessionUpdate(update) {
     const tag = update?.sessionUpdate;
     return typeof tag === "string" && IDLE_SESSION_UPDATES.has(tag);
+}
+function authMethodType(method) {
+    return typeof method.type === "string" && method.type.length > 0 ? method.type : "agent";
+}
+/** Inclusive-fork `_meta` carried by `SessionOptions.sessionRequestMeta`.
+ * The fingerprint is `sha256:` plus the SHA-256 of the message text's UTF-8 bytes. */
+export function acpForkRequestMeta(point) {
+    return {
+        jetbrains: {
+            air: {
+                fork: {
+                    version: 1,
+                    messageId: point.messageId,
+                    messageFingerprint: `sha256:${createHash("sha256").update(point.messageText, "utf8").digest("hex")}`,
+                    messageOccurrence: point.messageOccurrence,
+                },
+            },
+        },
+    };
+}
+/** Clone `configOptions` from a session-setup response. When the response
+ * still carries the retired `models` catalog and no option already has
+ * category or id `model`, append a select marked as legacy model state. */
+export function sessionConfigOptionsFromResponse(value) {
+    const responseConfigOptions = value && typeof value === "object"
+        ? value.configOptions
+        : undefined;
+    const configOptions = Array.isArray(responseConfigOptions)
+        ? responseConfigOptions.map((option) => structuredClone(option))
+        : [];
+    const legacyModels = legacyModelStateFromResponse(value);
+    if (legacyModels && !configOptions.some(isModelConfigOption)) {
+        configOptions.push(legacyModelConfigOption(legacyModels));
+    }
+    return configOptions;
+}
+function legacyModelStateFromResponse(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const models = value.models;
+    if (!models || typeof models !== "object")
+        return null;
+    const currentModelId = models.currentModelId;
+    const availableModels = models.availableModels;
+    if (typeof currentModelId !== "string" || !Array.isArray(availableModels))
+        return null;
+    const normalized = availableModels.flatMap((model) => {
+        if (!model || typeof model !== "object")
+            return [];
+        const candidate = model;
+        if (typeof candidate.modelId !== "string" || typeof candidate.name !== "string")
+            return [];
+        return [{
+                modelId: candidate.modelId,
+                name: candidate.name,
+                ...(typeof candidate.description === "string"
+                    ? { description: candidate.description }
+                    : {}),
+            }];
+    });
+    if (normalized.length === 0)
+        return null;
+    return { currentModelId, availableModels: normalized };
+}
+function isModelConfigOption(option) {
+    return option?.category === "model" || option?.id === "model";
+}
+function legacyModelConfigOption(state) {
+    return {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: state.currentModelId,
+        options: state.availableModels.map((model) => ({
+            value: model.modelId,
+            name: model.name,
+            ...(model.description ? { description: model.description } : {}),
+        })),
+        _meta: { [LEGACY_MODEL_META_KEY]: true },
+    };
+}
+/** Merge a host capability overlay into the runtime's initialize advertisement.
+ * `fs` and `session.configOptions` merge one level. `auth._meta` and top-level
+ * `_meta` merge key by key. Overlay values win. */
+export function mergeClientCapabilities(base, extra) {
+    const left = base ?? {};
+    const leftSession = left.session;
+    const rightSession = extra.session;
+    const leftAuth = left.auth;
+    const rightAuth = extra.auth;
+    return {
+        ...left,
+        ...extra,
+        ...(left.fs || extra.fs ? { fs: { ...left.fs, ...extra.fs } } : {}),
+        ...(leftSession || rightSession
+            ? {
+                session: {
+                    ...(leftSession ?? {}),
+                    ...(rightSession ?? {}),
+                    ...(leftSession?.configOptions || rightSession?.configOptions
+                        ? {
+                            configOptions: {
+                                ...(leftSession?.configOptions ?? {}),
+                                ...(rightSession?.configOptions ?? {}),
+                            },
+                        }
+                        : {}),
+                },
+            }
+            : {}),
+        ...(leftAuth || rightAuth
+            ? {
+                auth: {
+                    ...(leftAuth ?? {}),
+                    ...(rightAuth ?? {}),
+                    ...(leftAuth?._meta || rightAuth?._meta
+                        ? { _meta: { ...(leftAuth?._meta ?? {}), ...(rightAuth?._meta ?? {}) } }
+                        : {}),
+                },
+            }
+            : {}),
+        ...(left._meta || extra._meta
+            ? { _meta: { ...(left._meta ?? {}), ...(extra._meta ?? {}) } }
+            : {}),
+    };
+}
+function observeLegacyModels(source, onModels) {
+    const decoder = new TextDecoder();
+    let pending = "";
+    let found = false;
+    return source.pipeThrough(new TransformStream({
+        transform(chunk, controller) {
+            if (!found) {
+                pending += decoder.decode(chunk, { stream: true });
+                let end = pending.indexOf("\n");
+                while (end >= 0) {
+                    const line = pending.slice(0, end);
+                    pending = pending.slice(end + 1);
+                    const models = legacyModelsFromLine(line);
+                    if (models) {
+                        found = true;
+                        onModels(models);
+                        break;
+                    }
+                    end = pending.indexOf("\n");
+                }
+            }
+            controller.enqueue(chunk);
+        },
+    }));
+}
+function legacyModelsFromLine(line) {
+    try {
+        const models = JSON.parse(line)?.result?.models;
+        if (!models
+            || typeof models.currentModelId !== "string"
+            || !Array.isArray(models.availableModels)) {
+            return null;
+        }
+        const availableModels = [];
+        for (const model of models.availableModels) {
+            if (!model
+                || typeof model.modelId !== "string"
+                || typeof model.name !== "string") {
+                return null;
+            }
+            availableModels.push({ modelId: model.modelId, name: model.name });
+        }
+        return { currentModelId: models.currentModelId, availableModels };
+    }
+    catch {
+        return null;
+    }
 }
 //# sourceMappingURL=session.js.map

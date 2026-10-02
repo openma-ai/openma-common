@@ -75,6 +75,7 @@ function fakeAcpRuntime(log: string[], hooks: {
         initializeMeta: null,
         sessionSetupMeta: null,
         configOptions: [],
+        legacyModels: null,
         modes: null,
         promptCapabilities: {},
         supportsSessionFork: false,
