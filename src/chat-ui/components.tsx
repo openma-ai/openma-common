@@ -298,7 +298,7 @@ export function projectChatThoughtEvent({
   return {
     leading: (
       <BrainIcon
-        className="chat-activity-icon shrink-0 text-fg-muted"
+        className="chat-activity-icon shrink-0"
         aria-hidden="true"
       />
     ),
@@ -368,7 +368,7 @@ export function ChatThoughtEventRow({
         )}
         <span
           className={chatClassNames(
-            "chat-transcript-disclosure-summary min-w-0 flex-1 text-left text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1 text-left",
             !resolvedProjection.multiline && "truncate",
           )}
         >
@@ -534,9 +534,9 @@ export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({
       type="button"
       tabIndex={0}
       className={chatClassNames(
-        "chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+        "chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-sm",
         showIcon
-          ? "chat-interactive-surface--chip chat-reasoning-trigger--chip"
+          ? "chat-interactive-surface--chip chat-reasoning-trigger--chip text-muted-foreground transition-colors hover:text-foreground"
           : "chat-interactive-surface--transcript",
         className,
       )}
@@ -668,7 +668,7 @@ function ChatCollapsibleEventSequenceGroup({
         )}
         <span
           className={chatClassNames(
-            "chat-transcript-disclosure-summary min-w-0 flex-1 text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1",
             !projected.multiline && "truncate",
           )}
         >
@@ -1223,7 +1223,7 @@ export function AgentUITurnView({
             }) ?? {
               leading: live ? undefined : (
                 <BrainIcon
-                  className="chat-activity-icon shrink-0 text-fg-muted"
+                  className="chat-activity-icon shrink-0"
                   aria-hidden="true"
                 />
               ),
@@ -1343,7 +1343,7 @@ export function AgentUITurnView({
               getThinkingMessage={() => (
                 <>
                   {slots.renderProcessLeading?.(renderContext)}
-                  <span className="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left text-fg-muted">
+                  <span className="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left">
                     {isCancelled && labels.cancelled !== undefined ? (
                       <>
                         <span data-session-process-status="cancelled">

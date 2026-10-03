@@ -114,7 +114,7 @@ export function projectChatThoughtEvent({ text, live, liveFallback, completedLab
         };
     }
     return {
-        leading: (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0 text-fg-muted", "aria-hidden": "true" })),
+        leading: (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0", "aria-hidden": "true" })),
         summary: completedLabel,
     };
 }
@@ -140,7 +140,7 @@ export function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, 
             stopScroll: stick.stopScroll,
         });
     };
-    return (_jsxs("div", { className: "py-0.5", "data-thought-block": "true", "data-thought-live": live, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [resolvedProjection.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: resolvedProjection.leading })), _jsx("span", { className: chatClassNames("chat-transcript-disclosure-summary min-w-0 flex-1 text-left text-fg-muted", !resolvedProjection.multiline && "truncate"), children: resolvedProjection.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, "data-thought-stream-body": "true", hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-5 mt-1 min-w-0", children: renderBody({ live }) })] }));
+    return (_jsxs("div", { className: "py-0.5", "data-thought-block": "true", "data-thought-live": live, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [resolvedProjection.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: resolvedProjection.leading })), _jsx("span", { className: chatClassNames("chat-transcript-disclosure-summary min-w-0 flex-1 text-left", !resolvedProjection.multiline && "truncate"), children: resolvedProjection.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, "data-thought-stream-body": "true", hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-5 mt-1 min-w-0", children: renderBody({ live }) })] }));
 }
 const ChatReasoningContext = createContext(null);
 function useChatReasoning() {
@@ -210,8 +210,8 @@ const defaultThinkingMessage = (isStreaming, duration) => {
 export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({ className, children, getThinkingMessage = defaultThinkingMessage, showIcon = true, ...props }) {
     const { collapsible, isStreaming, isOpen, duration, triggerRef } = useChatReasoning();
     const CollapsibleTrigger = collapsible.Trigger;
-    return (_jsx(CollapsibleTrigger, { ref: triggerRef, type: "button", tabIndex: 0, className: chatClassNames("chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", showIcon
-            ? "chat-interactive-surface--chip chat-reasoning-trigger--chip"
+    return (_jsx(CollapsibleTrigger, { ref: triggerRef, type: "button", tabIndex: 0, className: chatClassNames("chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-sm", showIcon
+            ? "chat-interactive-surface--chip chat-reasoning-trigger--chip text-muted-foreground transition-colors hover:text-foreground"
             : "chat-interactive-surface--transcript", className), "data-chat-reasoning-trigger": "true", "data-chat-turn-disclosure-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
 });
 export const ChatReasoningContent = memo(function ChatReasoningContent({ className, children, ...props }) {
@@ -242,7 +242,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
             stopScroll: stick.stopScroll,
         });
     };
-    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("chat-transcript-disclosure-summary min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
+    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("chat-transcript-disclosure-summary min-w-0 flex-1", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
 }
 const COMPACT_AGENT_CHAT_STYLE = {
     "--chat-message-padding-inline": "16px",
@@ -423,7 +423,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                             live,
                             prefixSkip,
                         }) ?? {
-                            leading: live ? undefined : (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0 text-fg-muted", "aria-hidden": "true" })),
+                            leading: live ? undefined : (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0", "aria-hidden": "true" })),
                             multiline: live,
                             summary: live
                                 ? labels.thinking
@@ -488,7 +488,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                     : undefined, children: [slots.renderResponseBeforeProcess?.(renderContext), hasProcess ? (_jsxs(ChatReasoning, { isStreaming: isStreaming, open: processOpen, onOpenChange: (open) => {
                             if (!isStreaming)
                                 setProcessOpen(open);
-                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left text-fg-muted", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
+                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
                                                     ? labels.workingFor(elapsedSeconds)
                                                     : labels.workedFor(elapsedSeconds)] })] })) }), processOpen ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: processActivitySequences })) : (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", hidden: true, "aria-hidden": "true", inert: true, children: processActivitySequences })), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
                                             if (item.kind !== "message" || item.role !== "assistant") {

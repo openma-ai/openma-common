@@ -33,7 +33,6 @@ function mountTurnFixture(renderTree: () => ReactNode) {
       --chat-fg: var(--fg);
       --chat-fg-muted: var(--fg-muted);
     }
-    .text-fg-muted { color: var(--fg-muted); }
     .assistant-body { font-size: 14px; line-height: 1.6; margin-top: 12px; }
     ${loadChatStyles()}
   `;

@@ -80,23 +80,18 @@ button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disc
 button.chat-interactive-surface--transcript.activity-disclosure-row:hover
   :is(
     .chat-transcript-disclosure-summary,
-    .text-fg-muted,
-    .text-muted-foreground,
-    .turn-muted,
-    .chat-activity-icon
+    .chat-activity-icon,
+    .activity-disclosure-chevron,
+    .activity-disclosure-chevron svg,
+    .activity-disclosure-chevron .text-fg-subtle
   ),
 button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row:hover
   :is(
     .chat-transcript-disclosure-summary,
-    .text-fg-muted,
-    .text-muted-foreground,
-    .turn-muted
-  ),
-button.chat-interactive-surface--transcript.activity-disclosure-row:hover
-  .activity-disclosure-chevron,
-button.chat-interactive-surface--transcript.activity-disclosure-row:hover
-  .activity-disclosure-chevron
-  :is(svg, .text-fg-subtle) {
+    .activity-disclosure-chevron,
+    .activity-disclosure-chevron svg,
+    .activity-disclosure-chevron .text-fg-subtle
+  ) {
   color: var(--chat-fg, var(--fg, currentColor));
 }
 
@@ -538,6 +533,18 @@ button.chat-interactive-surface--transcript.activity-disclosure-row.activity-dis
   padding: 0;
   padding-inline-start: 0;
   font-size: 13px;
+}
+
+button.chat-interactive-surface--transcript.activity-disclosure-row
+  .chat-transcript-disclosure-summary,
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row
+  .chat-transcript-disclosure-summary {
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+}
+
+button.chat-interactive-surface--transcript.activity-disclosure-row
+  .chat-activity-icon {
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
 }
 
 /* Standalone thought/reasoning chip (showIcon on ChatReasoningTrigger). */

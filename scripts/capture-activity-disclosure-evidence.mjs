@@ -51,12 +51,12 @@ function turnMarkup({ version }) {
   return `
     <button type="button" data-chat-reasoning-trigger="true" aria-expanded="false"
       class="${reasoningClass}" data-turn-reasoning="true">
-      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left turn-muted">已工作 4 秒</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left">已工作 4 秒</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <button type="button" aria-expanded="false"${activityAttr}
       class="${activityClass}" data-turn-activity="true">
-      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate turn-muted">已执行 1 项操作</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate">已执行 1 项操作</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <div class="activity-body" data-activity-body="true" hidden>
@@ -118,7 +118,6 @@ body { margin:0; padding:32px; font-family:system-ui,sans-serif; background:${ca
 .shell { width:${PANEL}px; margin:0 auto; background:${panel}; border-radius:12px; padding:20px 24px; border:1px solid ${isDark ? "#3f3f46" : "#e4e4e7"}; }
 .user { display:flex; justify-content:flex-end; margin-bottom:16px; }
 .bubble { background:${isDark ? "#3f3f46" : "#18181b"}; color:${isDark ? fg : "#fafafa"}; padding:10px 14px; border-radius:16px 16px 4px 16px; font-size:14px; }
-.turn-muted { color: ${muted}; font-size: 13px; }
 .assistant { margin-top:12px; font-size:14px; line-height:1.6; }
 .activity-body { margin-top:4px; margin-left:8px; font-size:13px; color:${muted}; }
 ${HOST_RESET}
@@ -235,8 +234,8 @@ async function readTurnSummaryColor(page, which) {
   return page.evaluate((target) => {
     const el = document.querySelector(
       target === "activity"
-        ? "[data-turn-activity=true] .chat-transcript-disclosure-summary, [data-turn-activity=true] .turn-muted"
-        : "[data-turn-reasoning=true] .chat-transcript-disclosure-summary, [data-turn-reasoning=true] .turn-muted",
+        ? "[data-turn-activity=true] .chat-transcript-disclosure-summary"
+        : "[data-turn-reasoning=true] .chat-transcript-disclosure-summary",
     );
     return el ? getComputedStyle(el).color : null;
   }, which);

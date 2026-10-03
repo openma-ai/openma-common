@@ -41,7 +41,7 @@ const FIXTURES = [
 <button type="button" aria-expanded="false"
   data-chat-activity-disclosure-trigger="true"
   class="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]">
-  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-fg-muted">已执行 1 项操作</span>
+  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate">已执行 1 项操作</span>
   <span class="activity-disclosure-chevron">›</span>
 </button>`,
   },
@@ -51,7 +51,7 @@ const FIXTURES = [
     html: `
 <button type="button" aria-expanded="false" data-chat-reasoning-trigger="true"
   class="chat-interactive-surface chat-interactive-surface--transcript chat-reasoning-trigger activity-disclosure-row flex w-full items-center gap-2 text-sm">
-  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left text-fg-muted">已工作 4 秒</span>
+  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left">已工作 4 秒</span>
   <span class="activity-disclosure-chevron">›</span>
 </button>`,
   },
@@ -133,7 +133,7 @@ const idleSummaryTextColors = new Map();
 async function readSummaryTextColor(page, buttonSelector) {
   return page.$eval(buttonSelector, (btn) => {
     const summary = btn.querySelector(
-      ".chat-transcript-disclosure-summary, .text-fg-muted, .turn-muted",
+      ".chat-transcript-disclosure-summary",
     );
     if (!(summary instanceof HTMLElement)) return null;
     return getComputedStyle(summary).color;

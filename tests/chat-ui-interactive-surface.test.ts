@@ -55,8 +55,7 @@ describe("chat UI interactive surface contract", () => {
     expect(components).toContain("data-chat-turn-disclosure-trigger");
     expect(components).toContain("chat-transcript-disclosure-summary");
     expect(css).toContain(".chat-transcript-disclosure-summary");
-    expect(css).toContain(":is(");
-    expect(css).toContain(".turn-muted");
+    expect(css).not.toContain(".turn-muted");
     expect(components).toContain(
       "chat-interactive-surface chat-interactive-surface--transcript",
     );
