@@ -1,10 +1,8 @@
 import type * as schema from "@agentclientprotocol/sdk";
+import { type AcpForkSupport } from "./fork-support.js";
 import type { AcpSession, ChildHandle, SessionOptions, SteeringOutcome } from "./types.js";
-export interface AcpForkPoint {
-    messageId: string;
-    messageText: string;
-    messageOccurrence: number;
-}
+export type { AcpForkPoint } from "./fork-support.js";
+export { acpForkRequestMeta } from "./fork-support.js";
 export interface LegacyModelState {
     currentModelId: string;
     availableModels: Array<{
@@ -34,6 +32,7 @@ export declare class AcpSessionImpl implements AcpSession {
     get modes(): schema.SessionModeState | null;
     get promptCapabilities(): schema.PromptCapabilities;
     get supportsSessionFork(): boolean;
+    get forkSupport(): AcpForkSupport;
     get supportsSessionList(): boolean;
     get supportsSessionDelete(): boolean;
     get supportsSessionResume(): boolean;
@@ -77,9 +76,6 @@ export declare class AcpSessionImpl implements AcpSession {
     isAlive(): boolean;
     dispose(): Promise<void>;
 }
-/** Inclusive-fork `_meta` carried by `SessionOptions.sessionRequestMeta`.
- * The fingerprint is `sha256:` plus the SHA-256 of the message text's UTF-8 bytes. */
-export declare function acpForkRequestMeta(point: AcpForkPoint): Record<string, unknown>;
 /** Clone `configOptions` from a session-setup response. When the response
  * still carries the retired `models` catalog and no option already has
  * category or id `model`, append a select marked as legacy model state. */

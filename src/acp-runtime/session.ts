@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   ClientSideConnection,
   RequestError,
@@ -9,6 +8,11 @@ import {
 import type * as schema from "@agentclientprotocol/sdk";
 import { preserveAcpNotificationContext } from "../session-events/acp.js";
 import { isAuthenticationRequiredError } from "./errors.js";
+import {
+  acpForkRequestMeta,
+  forkSupport as forkSupportOf,
+  type AcpForkSupport,
+} from "./fork-support.js";
 import type {
   AcpSession,
   ChildHandle,
@@ -17,13 +21,10 @@ import type {
   SteeringOutcome,
 } from "./types.js";
 
-const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
+export type { AcpForkPoint } from "./fork-support.js";
+export { acpForkRequestMeta } from "./fork-support.js";
 
-export interface AcpForkPoint {
-  messageId: string;
-  messageText: string;
-  messageOccurrence: number;
-}
+const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
 
 export interface LegacyModelState {
   currentModelId: string;
@@ -138,6 +139,10 @@ export class AcpSessionImpl implements AcpSession {
     return this.#supportsSessionFork;
   }
 
+  get forkSupport(): AcpForkSupport {
+    return forkSupportOf(this);
+  }
+
   get supportsSessionList(): boolean {
     return this.#supportsSessionList;
   }
@@ -209,6 +214,9 @@ export class AcpSessionImpl implements AcpSession {
       ndJsonStream(this.#child.stdin, this.#stdout),
     );
     this.#agent = connection;
+    if (this.options.forkPoint && !this.options.forkFromAcpSessionId) {
+      throw new Error("forkPoint can only be used together with forkFromAcpSessionId");
+    }
 
     const clientCapabilities: schema.ClientCapabilities = {
       // The existing OpenMA controls render both boolean config options and
@@ -304,15 +312,26 @@ export class AcpSessionImpl implements AcpSession {
     const requestMeta = this.options.sessionRequestMeta;
 
     if (this.options.forkFromAcpSessionId) {
+      const support = forkSupportOf(initialized);
+      const wantsMessageFork = this.options.forkPoint != null
+        || sessionRequestDeclaresAirFork(requestMeta);
+      if (wantsMessageFork && support.level !== "message") {
+        throw new Error(
+          `ACP agent does not support message-level fork (${support.reason}): ${support.message}`,
+        );
+      }
       if (!this.#supportsSessionFork || !this.#agent.unstable_forkSession) {
         throw new Error("ACP agent does not support unstable session/fork");
       }
+      const forkRequestMeta = this.options.forkPoint
+        ? mergeSessionRequestMeta(requestMeta, acpForkRequestMeta(this.options.forkPoint))
+        : requestMeta;
       const forked = await this.#agent.unstable_forkSession({
         sessionId: this.options.forkFromAcpSessionId,
         cwd,
         mcpServers,
         ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
-        ...(requestMeta ? { _meta: requestMeta } : {}),
+        ...(forkRequestMeta ? { _meta: forkRequestMeta } : {}),
       });
       this.#sessionId = forked.sessionId;
       this.#configOptions = forked.configOptions ?? [];
@@ -1110,21 +1129,31 @@ interface LegacyModelInfo {
   description?: string;
 }
 
-/** Inclusive-fork `_meta` carried by `SessionOptions.sessionRequestMeta`.
- * The fingerprint is `sha256:` plus the SHA-256 of the message text's UTF-8 bytes. */
-export function acpForkRequestMeta(point: AcpForkPoint): Record<string, unknown> {
-  return {
-    jetbrains: {
-      air: {
-        fork: {
-          version: 1,
-          messageId: point.messageId,
-          messageFingerprint: `sha256:${createHash("sha256").update(point.messageText, "utf8").digest("hex")}`,
-          messageOccurrence: point.messageOccurrence,
-        },
-      },
-    },
-  };
+function sessionRequestDeclaresAirFork(
+  meta: Record<string, unknown> | undefined,
+): boolean {
+  if (!meta || !isPlainRecord(meta.jetbrains) || !isPlainRecord(meta.jetbrains.air)) return false;
+  return Object.hasOwn(meta.jetbrains.air, "fork");
+}
+
+function mergeSessionRequestMeta(
+  base: Record<string, unknown> | undefined,
+  extra: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...(base ?? {}) };
+  for (const [key, value] of Object.entries(extra)) {
+    const current = merged[key];
+    if (isPlainRecord(current) && isPlainRecord(value)) {
+      merged[key] = mergeSessionRequestMeta(current, value);
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Clone `configOptions` from a session-setup response. When the response

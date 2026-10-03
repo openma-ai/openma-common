@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
 import { ClientSideConnection, RequestError, ndJsonStream, } from "@agentclientprotocol/sdk";
 import { preserveAcpNotificationContext } from "../session-events/acp.js";
 import { isAuthenticationRequiredError } from "./errors.js";
+import { acpForkRequestMeta, forkSupport as forkSupportOf, } from "./fork-support.js";
+export { acpForkRequestMeta } from "./fork-support.js";
 const LEGACY_MODEL_META_KEY = "openma.dev/legacy-model-state";
 export class AcpSessionImpl {
     id;
@@ -89,6 +90,9 @@ export class AcpSessionImpl {
     get supportsSessionFork() {
         return this.#supportsSessionFork;
     }
+    get forkSupport() {
+        return forkSupportOf(this);
+    }
     get supportsSessionList() {
         return this.#supportsSessionList;
     }
@@ -140,6 +144,9 @@ export class AcpSessionImpl {
             : undefined;
         const connection = new ClientSideConnection(() => this.#createClient(callbacks, elicitationCapabilities?.url != null), ndJsonStream(this.#child.stdin, this.#stdout));
         this.#agent = connection;
+        if (this.options.forkPoint && !this.options.forkFromAcpSessionId) {
+            throw new Error("forkPoint can only be used together with forkFromAcpSessionId");
+        }
         const clientCapabilities = {
             // The existing OpenMA controls render both boolean config options and
             // structured/markdown plans. Advertising these capabilities prevents
@@ -229,15 +236,24 @@ export class AcpSessionImpl {
         const additionalDirectories = requestedAdditionalDirectories;
         const requestMeta = this.options.sessionRequestMeta;
         if (this.options.forkFromAcpSessionId) {
+            const support = forkSupportOf(initialized);
+            const wantsMessageFork = this.options.forkPoint != null
+                || sessionRequestDeclaresAirFork(requestMeta);
+            if (wantsMessageFork && support.level !== "message") {
+                throw new Error(`ACP agent does not support message-level fork (${support.reason}): ${support.message}`);
+            }
             if (!this.#supportsSessionFork || !this.#agent.unstable_forkSession) {
                 throw new Error("ACP agent does not support unstable session/fork");
             }
+            const forkRequestMeta = this.options.forkPoint
+                ? mergeSessionRequestMeta(requestMeta, acpForkRequestMeta(this.options.forkPoint))
+                : requestMeta;
             const forked = await this.#agent.unstable_forkSession({
                 sessionId: this.options.forkFromAcpSessionId,
                 cwd,
                 mcpServers,
                 ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
-                ...(requestMeta ? { _meta: requestMeta } : {}),
+                ...(forkRequestMeta ? { _meta: forkRequestMeta } : {}),
             });
             this.#sessionId = forked.sessionId;
             this.#configOptions = forked.configOptions ?? [];
@@ -876,21 +892,26 @@ function isIdleSessionUpdate(update) {
 function authMethodType(method) {
     return typeof method.type === "string" && method.type.length > 0 ? method.type : "agent";
 }
-/** Inclusive-fork `_meta` carried by `SessionOptions.sessionRequestMeta`.
- * The fingerprint is `sha256:` plus the SHA-256 of the message text's UTF-8 bytes. */
-export function acpForkRequestMeta(point) {
-    return {
-        jetbrains: {
-            air: {
-                fork: {
-                    version: 1,
-                    messageId: point.messageId,
-                    messageFingerprint: `sha256:${createHash("sha256").update(point.messageText, "utf8").digest("hex")}`,
-                    messageOccurrence: point.messageOccurrence,
-                },
-            },
-        },
-    };
+function sessionRequestDeclaresAirFork(meta) {
+    if (!meta || !isPlainRecord(meta.jetbrains) || !isPlainRecord(meta.jetbrains.air))
+        return false;
+    return Object.hasOwn(meta.jetbrains.air, "fork");
+}
+function mergeSessionRequestMeta(base, extra) {
+    const merged = { ...(base ?? {}) };
+    for (const [key, value] of Object.entries(extra)) {
+        const current = merged[key];
+        if (isPlainRecord(current) && isPlainRecord(value)) {
+            merged[key] = mergeSessionRequestMeta(current, value);
+        }
+        else {
+            merged[key] = value;
+        }
+    }
+    return merged;
+}
+function isPlainRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 /** Clone `configOptions` from a session-setup response. When the response
  * still carries the retired `models` catalog and no option already has

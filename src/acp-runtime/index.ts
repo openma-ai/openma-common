@@ -13,10 +13,25 @@ export type { ContentBlock, PromptCapabilities } from "@agentclientprotocol/sdk"
 export { AcpRuntimeImpl } from "./runtime.js";
 export {
   AcpSessionImpl,
-  acpForkRequestMeta,
   sessionConfigOptionsFromResponse,
 } from "./session.js";
-export type { AcpForkPoint, AcpSessionConstructOptions } from "./session.js";
+export type { AcpSessionConstructOptions } from "./session.js";
+export {
+  ACP_INCLUSIVE_FORK_CAPABILITY,
+  ACP_INCLUSIVE_FORK_VERSION,
+  acpForkPointsFromMessages,
+  acpForkRequestMeta,
+  acpInclusiveForkCapabilityMeta,
+  forkSupport,
+} from "./fork-support.js";
+export type {
+  AcpForkPoint,
+  AcpForkSupport,
+  AcpForkSupportLevel,
+  AcpForkSupportReason,
+  AcpForkSupportSource,
+  AcpInclusiveForkCapability,
+} from "./fork-support.js";
 export {
   ACP_AUTH_REQUIRED_CODE,
   isAuthRequired,

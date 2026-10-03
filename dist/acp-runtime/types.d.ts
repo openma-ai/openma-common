@@ -1,4 +1,5 @@
 import type * as schema from "@agentclientprotocol/sdk";
+import type { AcpForkPoint, AcpForkSupport } from "./fork-support.js";
 export interface AgentSpec {
     command: string;
     args?: string[];
@@ -54,13 +55,22 @@ export interface SessionOptions {
     perTurnTimeoutMs?: number;
     resumeAcpSessionId?: string;
     forkFromAcpSessionId?: string;
+    /** Inclusive message fork point. Valid only together with
+     * `forkFromAcpSessionId`. The runtime calls `forkSupport()` after
+     * initialize and refuses to send `session/fork` unless the level is
+     * `"message"`. `acpForkRequestMeta(forkPoint)` is deep-merged into
+     * `sessionRequestMeta` for that fork request only. */
+    forkPoint?: AcpForkPoint;
     mcpServers?: schema.McpServer[];
     /** Additional absolute workspace roots from ACP session setup. */
     additionalDirectories?: string[];
     /** Adapter-specific metadata sent on session/new, load, resume, and fork.
      * The shared runtime transports it without interpretation; each harness
      * owns the keys it understands. `acpForkRequestMeta()` builds the
-     * inclusive-fork object some hosts put here. */
+     * inclusive-fork object some hosts put here. A `forkPoint` deep-merges
+     * that object into the `session/fork` request only. Placing
+     * `jetbrains.air.fork` here while the agent cannot fork from a message
+     * fails the fork instead of falling back to a whole-session fork. */
     sessionRequestMeta?: Record<string, unknown>;
     /** Merged into the built-in `initialize` client capabilities. `fs`,
      * `session.configOptions`, `auth._meta`, and top-level `_meta` are
@@ -114,6 +124,8 @@ export interface AcpSession {
     readonly modes: schema.SessionModeState | null;
     readonly promptCapabilities: schema.PromptCapabilities;
     readonly supportsSessionFork: boolean;
+    /** Inclusive and whole-session fork support. Equivalent to `forkSupport(this)`. */
+    readonly forkSupport: AcpForkSupport;
     readonly supportsSessionList: boolean;
     readonly supportsSessionDelete: boolean;
     readonly supportsSessionResume: boolean;

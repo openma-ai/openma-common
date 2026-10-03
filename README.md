@@ -32,7 +32,7 @@ or wire-event shapes into product state.
 - `@openma/common/agent-contract/managed` — Claude Managed wire events translated into Agent facts.
 - `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
-- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and accept an optional `clientCapabilityOverlay`.
+- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `forkSupport()` (the only client entry for session and inclusive message fork), `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
@@ -75,6 +75,14 @@ mapping policy is reviewed.
 The `session-events/openma` export is the harness-neutral event boundary. It
 distinguishes canonical events from `vendor.event` records and opaque
 `raw.event` records; vendor/raw records do not imply GUI lifecycle semantics.
+
+## ACP inclusive fork
+
+Clients ask `forkSupport()` whether an agent can fork a whole session or from one assistant message. They do not hardcode harness names or versions. `SessionOptions.forkPoint` is valid only with `forkFromAcpSessionId`. After `initialize`, the runtime refuses the fork when `forkSupport()` is not `"message"` — it does not fall back to a whole-session fork. The same refusal applies when the caller puts `jetbrains.air.fork` on `sessionRequestMeta` directly. A supported `forkPoint` is deep-merged into that metadata for the `session/fork` request only, so other keys such as `claudeCode` stay in place.
+
+Adapters that implement the request advertise `sessionCapabilities.fork` together with `agentCapabilities._meta.jetbrains.air.fork = { "version": 1, "inclusive": true }`. The nested object is the capability. A flat `"jetbrains.air.fork"` key is not. Own adapters copy `ACP_INCLUSIVE_FORK_CAPABILITY` and keep it byte-identical; they do not depend on this private package.
+
+Truncation keeps the selected assistant message and everything before it, and drops everything after it. If that message contains tool calls whose results sit after the message, adapters remove those tool calls from the truncated message. The new session stays a legal model transcript, and `session/load` replay still ends on the target message. Tool calls that already completed before that message stay as they were. The contract, client example, and dependency order are in [docs/fork-support.md](./docs/fork-support.md).
 
 ## Install from Git
 

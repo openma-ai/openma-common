@@ -1,6 +1,7 @@
-import type {
-  AcpSession,
-  SessionOptions,
+import {
+  forkSupport,
+  type AcpSession,
+  type SessionOptions,
 } from "../src/acp-runtime/index.js";
 
 interface AcpSessionFixtureOptions {
@@ -39,6 +40,7 @@ export function acpSessionFixture(
     modes: null,
     promptCapabilities: {},
     supportsSessionFork: false,
+    forkSupport: forkSupport({ agentCapabilities: {}, agentInfo: null }),
     supportsSessionList: false,
     supportsSessionDelete: false,
     supportsSessionResume: false,
