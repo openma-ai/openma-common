@@ -92,6 +92,124 @@ export async function probeAcpSession(options) {
         await connection.dispose();
     }
 }
+/** Disposable session/capability probe that also reports auth status from the same child. */
+export async function probeAgentSessionConfig(options) {
+    const cwd = options.cwd ?? join(tmpdir(), "openma-acp-probe");
+    await mkdir(cwd, { recursive: true });
+    let updatedConfigOptions = [];
+    let updatedAvailableCommands = [];
+    let updatedModeId = null;
+    let resolveAvailableCommands = null;
+    const availableCommandsReady = new Promise((resolve) => {
+        resolveAvailableCommands = resolve;
+    });
+    const client = {
+        sessionUpdate: async (params) => {
+            const next = configOptionsFromSessionUpdate(params.update);
+            if (next)
+                updatedConfigOptions = next;
+            const commands = availableCommandsFromSessionUpdate(params.update);
+            if (commands) {
+                updatedAvailableCommands = commands;
+                resolveAvailableCommands?.();
+            }
+            const modeId = modeFromSessionUpdate(params.update);
+            if (modeId)
+                updatedModeId = modeId;
+        },
+        requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
+    };
+    const connection = await spawnAuthAgent({
+        agent: options.agent,
+        cwd,
+        env: options.env,
+        spawner: options.spawner,
+        client,
+    });
+    const timeoutMs = Math.max(1, options.timeoutMs ?? 15_000);
+    const capabilitySettleMs = Math.max(0, options.capabilitySettleMs ?? 750);
+    try {
+        return await withTimeout((async () => {
+            const initResult = await initializeAuthAgent(connection.agent);
+            const methods = supportedAuthMethods(initResult.authMethods);
+            const method = selectAuthMethod(initResult.authMethods);
+            if (!method) {
+                const declared = declaredAuthMethods(initResult.authMethods);
+                if (declared.length > 0) {
+                    const unsupported = unsupportedAuthMethodTypes(declared);
+                    return {
+                        configOptions: [],
+                        availableCommands: [],
+                        auth: {
+                            status: "unknown",
+                            message: unsupported.length > 0
+                                ? `No supported ACP auth method is available. Unsupported methods: ${unsupported.join(", ")}.`
+                                : "No supported ACP auth method is available.",
+                        },
+                    };
+                }
+            }
+            const methodFields = method
+                ? authMethodStatusFields(method, methods, options.agent, connection.env, cwd)
+                : {};
+            if (method && isCredentialPromptAuthMethod(method)) {
+                const missing = missingCredentialVariableNames(method, connection.env);
+                if (missing.length > 0) {
+                    return {
+                        configOptions: [],
+                        availableCommands: [],
+                        auth: {
+                            status: "needs-auth",
+                            ...methodFields,
+                            message: missing.length === 1
+                                ? `Missing credential variable: ${missing[0]}.`
+                                : `Missing credential variables: ${missing.join(", ")}.`,
+                        },
+                    };
+                }
+            }
+            try {
+                const session = await createAuthProbeSession(connection.agent, cwd);
+                const responseConfigOptions = configOptionsFromResponse(session);
+                const modes = modesFromResponse(session);
+                await waitForSignalOrTimeout(availableCommandsReady, capabilitySettleMs);
+                await allowDiagnosticsToFlush();
+                const diagnostic = unauthenticatedDiagnostic(connection.diagnosticLines);
+                return {
+                    configOptions: responseConfigOptions.length > 0 ? responseConfigOptions : updatedConfigOptions,
+                    availableCommands: updatedAvailableCommands,
+                    ...(modes ? { modes: updatedModeId ? { ...modes, currentModeId: updatedModeId } : modes } : {}),
+                    auth: diagnostic
+                        ? { status: "needs-auth", ...methodFields, message: diagnostic }
+                        : method
+                            ? { status: "configured", ...methodFields }
+                            : { status: "none" },
+                };
+            }
+            catch (error) {
+                if (isAuthenticationRequiredError(error)) {
+                    return {
+                        configOptions: [],
+                        availableCommands: [],
+                        auth: { status: "needs-auth", ...methodFields },
+                    };
+                }
+                const message = acpErrorMessage(error);
+                if (isAuthFailureMessage(message)) {
+                    return {
+                        configOptions: [],
+                        availableCommands: [],
+                        auth: { status: "needs-auth", ...methodFields, message },
+                    };
+                }
+                throw error;
+            }
+        })(), timeoutMs, `ACP agent config probe timed out after ${timeoutMs}ms`);
+    }
+    finally {
+        await connection.dispose();
+    }
+}
 const activeProbes = new Set();
 /** Dispose every in-flight capability probe, auth probe, and background
  * authentication child before a product shuts down. */
@@ -698,6 +816,43 @@ function envArrayToRecord(env) {
         && entry.name.length > 0
         && typeof entry.value === "string")).map((entry) => [entry.name, entry.value]);
     return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+function configOptionsFromResponse(value) {
+    return Array.isArray(value?.configOptions)
+        ? value.configOptions.map((option) => structuredClone(option))
+        : [];
+}
+function configOptionsFromSessionUpdate(update) {
+    const typed = asRecord(update);
+    if (!typed || typed.sessionUpdate !== "config_option_update" || !Array.isArray(typed.configOptions)) {
+        return null;
+    }
+    return typed.configOptions.map((option) => structuredClone(option));
+}
+function availableCommandsFromSessionUpdate(update) {
+    const typed = asRecord(update);
+    if (!typed || typed.sessionUpdate !== "available_commands_update")
+        return null;
+    const commands = Array.isArray(typed.availableCommands)
+        ? typed.availableCommands
+        : Array.isArray(typed.available_commands)
+            ? typed.available_commands
+            : null;
+    return commands?.map((command) => structuredClone(command)) ?? null;
+}
+function modesFromResponse(value) {
+    return value?.modes ? structuredClone(value.modes) : null;
+}
+function modeFromSessionUpdate(update) {
+    const typed = asRecord(update);
+    if (!typed || typed.sessionUpdate !== "current_mode_update" || typeof typed.currentModeId !== "string") {
+        return null;
+    }
+    return typed.currentModeId;
+}
+function isAuthFailureMessage(message) {
+    return typeof message === "string"
+        && /authentication required\b|authentication fails\b|invalid api key|api key[:\s=][^\n]*\binvalid\b/i.test(message);
 }
 function unauthenticatedDiagnostic(lines) {
     for (const line of lines) {

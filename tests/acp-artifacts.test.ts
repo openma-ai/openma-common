@@ -76,6 +76,19 @@ it('verifies the installed package identity, not only registry metadata', async 
   await expect(prepareNpmAcpRelease(release, { root: join(f.root, 'installed'), fetch: f.fetcher })).rejects.toThrow(/installed package identity/);
 }, 30_000);
 
+it('installs through an explicit nodePath using the bundled npm CLI', async () => {
+  const f = await fixture();
+  const release = await resolveNpmAcpRelease(f.selection, { fetch: f.fetcher });
+  const root = join(f.root, 'node-path');
+  const prepared = await prepareNpmAcpRelease(release, {
+    root,
+    fetch: f.fetcher,
+    nodePath: process.execPath,
+    env: { INSTALL_MARKER: 'present' },
+  });
+  expect((await runCaptured(prepared.command, [])).stdout.trim()).toBe('1.8.0');
+}, 30_000);
+
 it('rejects a cancelled preparation before downloading or spawning npm', async () => {
   const f = await fixture();
   const release = await resolveNpmAcpRelease(f.selection, { fetch: f.fetcher });

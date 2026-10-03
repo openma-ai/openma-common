@@ -17,12 +17,29 @@ export interface ProbeAcpSessionResult {
     modes: SessionModeState | null;
     authMethods: AuthMethod[];
 }
+export interface ProbeAgentConfigOptionsOptions {
+    agent: AgentSpec;
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    /** Bounded collection window for capability notifications published after session/new. */
+    capabilitySettleMs?: number;
+    timeoutMs?: number;
+    spawner?: Spawner;
+}
+export interface ProbeAgentSessionConfigResult {
+    configOptions: SessionConfigOption[];
+    availableCommands: unknown[];
+    modes?: SessionModeState | null;
+    auth: ProbeAgentAuthStatus;
+}
 /**
  * Disposable capability probe used during product cold start. It deliberately
  * never returns the child as a real session: callers must start a fresh ACP
  * session after consuming this snapshot.
  */
 export declare function probeAcpSession(options: ProbeAcpSessionOptions): Promise<ProbeAcpSessionResult>;
+/** Disposable session/capability probe that also reports auth status from the same child. */
+export declare function probeAgentSessionConfig(options: ProbeAgentConfigOptionsOptions): Promise<ProbeAgentSessionConfigResult>;
 /** Dispose every in-flight capability probe, auth probe, and background
  * authentication child before a product shuts down. */
 export declare function disposeAllAcpProbes(): Promise<void>;

@@ -36,7 +36,10 @@ or wire-event shapes into product state.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `forkSupport()` (the only client entry for session and inclusive message fork), `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown. A pure Node process with no other listener for that `SIGHUP`, `SIGINT`, or `SIGTERM` re-raises the signal after cleanup, so the process still exits with it. The Electron main process keeps its own handlers; children are reaped from the `exit` hook when that process actually quits.
-- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
+- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`) and persisted-catalog cloning and validation.
+- `@openma/common/acp-harnesses/registry` — official ACP registry fetch/cache plus OpenMA overlay (`known-agents`), and managed-bin / PATH detection.
+- `@openma/common/acp-harnesses/installer` — registry-backed npm/uvx/binary installs into a managed bin directory (host-agnostic `npmCommand` / `npmEnv`).
+- `@openma/common/acp-harnesses/agent-setup` — install/upgrade/uninstall and capability inspection service used by Backchat. See [Managed ACP harness installation](#managed-acp-harness-installation).
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
@@ -220,8 +223,14 @@ can be used offline. Registry-provided arguments and environment are preserved;
 hosts must still remove their own control-plane secrets from the final agent
 environment. Installer subprocesses receive only the minimal system environment.
 
-The host environment needs Node/npm for npm sources, uv plus a compatible Python
-interpreter for uvx, and bzip2/xz when those archive formats are used. Python
+npm installs accept an optional `nodePath` (any Node-compatible executable) and
+`env` map; the installer runs the bundled `npm` CLI through that executable.
+Hosts that embed Node (for example Electron) pass their executable and whatever
+environment that runtime requires.
+
+The host environment needs Node/npm for npm sources when `nodePath` is omitted,
+uv plus a compatible Python interpreter for uvx, and bzip2/xz when those archive
+formats are used. Python
 interpreters may be provisioned with `uv python install`. uvx virtual environments
 use `bin/python` on POSIX and `Scripts\python.exe` on Windows. uvx handles console
 entry points and wheel-packaged scripts, verifies package ownership of the selected
@@ -241,3 +250,43 @@ Artifact installers retain `SSL_CERT_FILE`, `SSL_CERT_DIR` and
 `NODE_EXTRA_CA_CERTS` from the sandbox so its trusted outbound-proxy CA remains
 available. uv uses native TLS trust. Certificate verification stays enabled;
 Work/model credentials and arbitrary host environment variables remain excluded.
+
+## Managed ACP harness installation
+
+The harness modules vend Backchat's ACP registry and installer into
+`@openma/common` so Clash, Martty, and Backchat can share one implementation.
+`loadRegistry()` merges the official CDN registry with `OVERLAY_AGENTS` (pi/dsh
+npm overlays, featured metadata, and other curated entries). `detect()` /
+`detectAll()` resolve commands from the managed bin directory or system PATH as
+in Backchat.
+
+Hosts that bundle their own Node pass `npmCommand`, `npmCommandArgs`, and
+`npmEnv` into `installAcpRegistryAgent()` or `createAcpAgentSetupService()`.
+`@openma/common/acp-artifacts` remains the low-level release resolver for
+session-scoped artifact preparation; the harness installer uses registry
+snapshots and npm shims the same way Backchat does.
+
+```ts
+import { loadRegistry, detect } from "@openma/common/acp-harnesses/registry";
+import { installAcpRegistryAgent } from "@openma/common/acp-harnesses/installer";
+import { createAcpAgentSetupService } from "@openma/common/acp-harnesses/agent-setup";
+
+await loadRegistry({ cachePath: "/var/acp/.registry/official.json" });
+const claude = await detect("claude-acp", { managedBinDirs: ["/var/acp/bin"] });
+
+await installAcpRegistryAgent({
+  registryId: "codex-acp",
+  shimName: "openma-codex-acp",
+  binDir: "/var/acp/bin",
+  npmCommand: "/path/to/node",
+  npmCommandArgs: ["/path/to/npm-cli.js"],
+});
+
+const setup = createAcpAgentSetupService({
+  registryCachePath: "/var/acp/.registry/official.json",
+  acpBinDir: "/var/acp/bin",
+  acpInstallRoot: "/var/acp/install",
+});
+await setup.warmup();
+await setup.installAgent("pi");
+```

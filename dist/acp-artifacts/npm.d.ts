@@ -16,6 +16,9 @@ export interface NpmAcpReleaseSelection {
 export interface NpmAcpReleaseOptions {
     fetch?: typeof fetch;
     signal?: AbortSignal;
+    nodePath?: string;
+    npmCliPath?: string;
+    env?: Record<string, string>;
 }
 export interface PreparedAcpRelease {
     command: string;

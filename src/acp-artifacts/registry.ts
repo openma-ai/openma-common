@@ -100,14 +100,35 @@ async function registryManifest(selection: { id: string; version: string }, sour
   }
   throw new Error(`ACP registry release not found: ${selection.id}@${selection.version}`);
 }
+export async function resolveAcpReleaseFromManifest(
+  selection: { id: string; version: string },
+  manifest: Record<string, unknown>,
+  input: AcpReleaseSource = { type: "registry" },
+  options: ArtifactOptions = {},
+): Promise<AcpRelease> {
+  identity(selection.id, selection.version);
+  const source = parseAcpReleaseSource(input);
+  if (source.type !== "registry") throw new Error("Manifest resolution requires a registry source");
+  if (!record(manifest.distribution)) throw new Error("ACP manifest has no distributions");
+  return resolveRegistryDistribution(selection, source, manifest.distribution, options);
+}
+
 export async function resolveAcpRelease(selection: { id: string; version: string }, input: AcpReleaseSource = { type: "registry" }, options: ArtifactOptions = {}): Promise<AcpRelease> {
   identity(selection.id, selection.version);
   const source = parseAcpReleaseSource(input);
   if (source.type === "npm") return resolveNpmAcpRelease({ ...selection, package: source.package }, options);
   if (source.type === "uvx") return resolveUvxAcpRelease({ ...source, ...selection }, options);
   const manifest = await registryManifest(selection, source, options);
-  if (!record(manifest.distribution)) throw new Error("ACP manifest has no distributions");
-  const distribution = manifest.distribution;
+  return resolveAcpReleaseFromManifest(selection, manifest, source, options);
+}
+
+async function resolveRegistryDistribution(
+  selection: { id: string; version: string },
+  source: Extract<AcpReleaseSource, { type: "registry" }>,
+  distribution: unknown,
+  options: ArtifactOptions,
+): Promise<AcpRelease> {
+  if (!record(distribution)) throw new Error("ACP manifest has no distributions");
   for (const kind of source.preference ?? ["binary", "npx", "uvx"]) {
     let artifact: DistributionRelease;
     let launch: { args: string[]; env: Record<string, string> };
@@ -116,10 +137,16 @@ export async function resolveAcpRelease(selection: { id: string; version: string
       const target = distribution.binary[platformKey()];
       if (!record(target)) continue;
       const archive = url(target.archive);
-      // Older manifests omit checksums: freeze the bytes fetched over HTTPS on
-      // first resolution. This is a recorded content hash, not publisher attestation.
-      const sha256 = target.sha256 === undefined ? createHash("sha256").update(await download(archive, options)).digest("hex") : target.sha256;
-      artifact = resolveBinaryAcpRelease({ ...selection, platform: platformKey(), archive, sha256: sha256 as string, command: target.cmd as string });
+      const sha256 = target.sha256 === undefined
+        ? createHash("sha256").update(await download(archive, options)).digest("hex")
+        : target.sha256;
+      artifact = resolveBinaryAcpRelease({
+        ...selection,
+        platform: platformKey(),
+        archive,
+        sha256: sha256 as string,
+        command: target.cmd as string,
+      });
       launch = launchOptions(target);
     } else {
       const entry = distribution[kind];
@@ -128,15 +155,25 @@ export async function resolveAcpRelease(selection: { id: string; version: string
       if (kind === "npx") {
         const at = entry.package.lastIndexOf("@");
         const name = at > 0 ? entry.package.slice(0, at) : entry.package;
-        if (at > 0 && entry.package.slice(at + 1) !== selection.version) throw new Error("Registry npm package version does not match release");
+        if (at > 0 && entry.package.slice(at + 1) !== selection.version) {
+          throw new Error("Registry npm package version does not match release");
+        }
         artifact = await resolveNpmAcpRelease({ ...selection, package: name }, options);
       } else {
         const parts = entry.package.split(/==|@/);
-        if (parts.length > 2 || parts.length === 2 && parts[1] !== selection.version) throw new Error("Registry uvx package version does not match release");
+        if (parts.length > 2 || parts.length === 2 && parts[1] !== selection.version) {
+          throw new Error("Registry uvx package version does not match release");
+        }
         artifact = await resolveUvxAcpRelease({ ...selection, package: parts[0]! }, options);
       }
     }
-    const result = { schema: "openma.acp.registry.v1" as const, ...selection, source: source.manifestUrl ?? official, artifact, ...launch };
+    const result = {
+      schema: "openma.acp.registry.v1" as const,
+      ...selection,
+      source: source.manifestUrl ?? official,
+      artifact,
+      ...launch,
+    };
     return { ...result, digest: digest(result) };
   }
   throw new Error(`No supported ACP distribution for ${platformKey()}`);

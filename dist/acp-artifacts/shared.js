@@ -36,6 +36,12 @@ export function launchOptions(value) {
         throw new Error("Invalid artifact launch env");
     return { args: [...(value.args ?? [])], env: Object.fromEntries(Object.entries((value.env ?? {})).sort(([a], [b]) => a.localeCompare(b))) };
 }
+export function installerEnvironment(overlay) {
+    const base = childEnvironment();
+    if (!overlay)
+        return base;
+    return { ...base, ...overlay };
+}
 export function childEnvironment() {
     // Windows installers need cmd/PATHEXT and the profile npm uses for its cache.
     // Work tokens, model credentials, and other host variables stay excluded.

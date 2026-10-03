@@ -2,7 +2,18 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, posix, resolve } from "node:path";
 
-export interface ArtifactOptions { fetch?: typeof fetch; signal?: AbortSignal }
+export interface ArtifactInstallerOptions {
+  /** Node-compatible executable used to run the bundled npm CLI during npm installs. */
+  nodePath?: string;
+  /** Override path to `npm-cli.js`; defaults to the copy from the `npm` package. */
+  npmCliPath?: string;
+  /** Host-provided environment merged onto the minimal installer environment. */
+  env?: Record<string, string>;
+}
+export interface ArtifactOptions extends ArtifactInstallerOptions {
+  fetch?: typeof fetch;
+  signal?: AbortSignal;
+}
 export interface Launch { command: string; args?: string[]; env?: Record<string, string> }
 export function digest(value: unknown): string { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
 export function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }
@@ -31,6 +42,12 @@ export function launchOptions(value: { args?: unknown; env?: unknown }): { args:
   if (value.env !== undefined && (!record(value.env) || Object.entries(value.env).some(([k, v]) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || typeof v !== "string" || v.includes("\0")))) throw new Error("Invalid artifact launch env");
   return { args: [...(value.args as string[] ?? [])], env: Object.fromEntries(Object.entries((value.env ?? {}) as Record<string, string>).sort(([a], [b]) => a.localeCompare(b))) };
 }
+export function installerEnvironment(overlay?: Record<string, string>): NodeJS.ProcessEnv {
+  const base = childEnvironment();
+  if (!overlay) return base;
+  return { ...base, ...overlay };
+}
+
 export function childEnvironment(): NodeJS.ProcessEnv {
   // Windows installers need cmd/PATHEXT and the profile npm uses for its cache.
   // Work tokens, model credentials, and other host variables stay excluded.

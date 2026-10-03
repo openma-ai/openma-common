@@ -41,6 +41,7 @@ export {
   authenticateAgent,
   disposeAllAcpProbes,
   probeAcpSession,
+  probeAgentSessionConfig,
   probeAgentAuthStatus,
 } from "./probe.js";
 export type {
@@ -48,6 +49,8 @@ export type {
   AuthenticateAgentResult,
   ProbeAcpSessionOptions,
   ProbeAcpSessionResult,
+  ProbeAgentConfigOptionsOptions,
+  ProbeAgentSessionConfigResult,
   ProbeAgentAuthMethod,
   ProbeAgentAuthStatus,
   ProbeAgentAuthStatusOptions,
