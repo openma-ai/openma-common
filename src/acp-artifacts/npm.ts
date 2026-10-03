@@ -5,7 +5,9 @@ import { access, mkdir, mkdtemp, readFile, realpath, writeFile } from "node:fs/p
 import { constants } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { childEnvironment, discardStaging, publishDirectory } from "./shared.js";
+import { defaultNpmCliPath } from "./npm-cli.js";
+import { nodeModulesCacheKey } from "./node-abi.js";
+import { discardStaging, installerEnvironment, publishDirectory } from "./shared.js";
 
 export interface NpmAcpRelease {
   schema: "openma.acp.npm.v1";
@@ -18,7 +20,13 @@ export interface NpmAcpRelease {
   digest: string;
 }
 export interface NpmAcpReleaseSelection { id: string; version: string; package: string }
-export interface NpmAcpReleaseOptions { fetch?: typeof fetch; signal?: AbortSignal }
+export interface NpmAcpReleaseOptions {
+  fetch?: typeof fetch;
+  signal?: AbortSignal;
+  nodePath?: string;
+  npmCliPath?: string;
+  env?: Record<string, string>;
+}
 export interface PreparedAcpRelease { command: string; release: NpmAcpRelease }
 const exec = promisify(execFile);
 function quoteWindowsArg(value: string): string {
@@ -26,8 +34,21 @@ function quoteWindowsArg(value: string): string {
   if (!/[\s"&|<>^]/.test(value)) return value;
   return `"${value.replaceAll('"', '""')}"`;
 }
+type NpmRunOptions = {
+  env: NodeJS.ProcessEnv;
+  timeout: number;
+  maxBuffer: number;
+  signal?: AbortSignal;
+  nodePath?: string;
+  npmCliPath?: string;
+};
+
 /** npm is a `.cmd` shim on Windows, which CreateProcess refuses to start. */
-function runNpm(args: string[], options: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number; signal?: AbortSignal }) {
+function runNpm(args: string[], options: NpmRunOptions) {
+  if (options.nodePath) {
+    const cli = options.npmCliPath ?? defaultNpmCliPath();
+    return exec(options.nodePath, [cli, ...args], options);
+  }
   if (process.platform !== "win32") return exec("npm", args, options);
   const line = ["npm", ...args].map(quoteWindowsArg).join(" ");
   return exec(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", line], options);
@@ -94,7 +115,8 @@ export async function prepareNpmAcpRelease(
 ): Promise<PreparedAcpRelease> {
   const release = validateNpmAcpRelease(input);
   options.signal?.throwIfAborted();
-  const root = join(resolve(options.root), `${process.platform}-${process.arch}-node${process.versions.modules}`);
+  const abi = await nodeModulesCacheKey(options.nodePath);
+  const root = join(resolve(options.root), `${process.platform}-${process.arch}-${abi}`);
   const destination = join(root, release.digest);
   const cached = await readPrepared(destination, release);
   if (cached) return cached;
@@ -109,9 +131,14 @@ export async function prepareNpmAcpRelease(
     const archive = join(staging, "release.tgz");
     await writeFile(archive, bytes);
     // Deliberately exclude Work tokens and model credentials from package scripts.
-    const env = childEnvironment();
+    const env = installerEnvironment(options.env);
     await runNpm(["install", "--prefix", staging, "--omit=dev", "--no-audit", "--no-fund", "--", archive], {
-      env, timeout: 600_000, maxBuffer: 1024 * 1024, signal: options.signal,
+      env,
+      timeout: 600_000,
+      maxBuffer: 1024 * 1024,
+      signal: options.signal,
+      nodePath: options.nodePath,
+      npmCliPath: options.npmCliPath,
     });
     await verifyInstalled(staging, release);
     await writeFile(join(staging, "release.json"), JSON.stringify(release));

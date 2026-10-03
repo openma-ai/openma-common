@@ -1,3 +1,4 @@
+export { OPENMA_ACP_HARNESS_CATALOG, catalogHarnessById, selectCatalogHarnesses } from "./catalog.js";
 /**
  * Browser-safe baseline catalog for OpenMA products that launch ACP agents
  * from the user's PATH. Products may append or replace entries when they also

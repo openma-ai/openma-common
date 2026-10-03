@@ -1,4 +1,12 @@
-export interface ArtifactOptions {
+export interface ArtifactInstallerOptions {
+    /** Node-compatible executable used to run the bundled npm CLI during npm installs. */
+    nodePath?: string;
+    /** Override path to `npm-cli.js`; defaults to the copy from the `npm` package. */
+    npmCliPath?: string;
+    /** Host-provided environment merged onto the minimal installer environment. */
+    env?: Record<string, string>;
+}
+export interface ArtifactOptions extends ArtifactInstallerOptions {
     fetch?: typeof fetch;
     signal?: AbortSignal;
 }
@@ -20,6 +28,7 @@ export declare function launchOptions(value: {
     args: string[];
     env: Record<string, string>;
 };
+export declare function installerEnvironment(overlay?: Record<string, string>): NodeJS.ProcessEnv;
 export declare function childEnvironment(): NodeJS.ProcessEnv;
 export declare function timeout(signal?: AbortSignal, ms?: number): AbortSignal;
 export declare function download(address: string, options: ArtifactOptions): Promise<Buffer>;

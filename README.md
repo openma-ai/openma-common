@@ -36,7 +36,8 @@ or wire-event shapes into product state.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `forkSupport()` (the only client entry for session and inclusive message fork), `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown.
-- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
+- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`), managed catalog metadata (`OPENMA_ACP_HARNESS_CATALOG`), and persisted-catalog cloning and validation.
+- `@openma/common/acp-harnesses/install` — idempotent preinstall/CI installer for catalog harnesses. See [Managed ACP harness installation](#managed-acp-harness-installation).
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
@@ -220,8 +221,14 @@ can be used offline. Registry-provided arguments and environment are preserved;
 hosts must still remove their own control-plane secrets from the final agent
 environment. Installer subprocesses receive only the minimal system environment.
 
-The host environment needs Node/npm for npm sources, uv plus a compatible Python
-interpreter for uvx, and bzip2/xz when those archive formats are used. Python
+npm installs accept an optional `nodePath` (any Node-compatible executable) and
+`env` map; the installer runs the bundled `npm` CLI through that executable.
+Hosts that embed Node (for example Electron) pass their executable and whatever
+environment that runtime requires.
+
+The host environment needs Node/npm for npm sources when `nodePath` is omitted,
+uv plus a compatible Python interpreter for uvx, and bzip2/xz when those archive
+formats are used. Python
 interpreters may be provisioned with `uv python install`. uvx virtual environments
 use `bin/python` on POSIX and `Scripts\python.exe` on Windows. uvx handles console
 entry points and wheel-packaged scripts, verifies package ownership of the selected
@@ -241,3 +248,41 @@ Artifact installers retain `SSL_CERT_FILE`, `SSL_CERT_DIR` and
 `NODE_EXTRA_CA_CERTS` from the sandbox so its trusted outbound-proxy CA remains
 available. uv uses native TLS trust. Certificate verification stays enabled;
 Work/model credentials and arbitrary host environment variables remain excluded.
+
+## Managed ACP harness installation
+
+`OPENMA_ACP_HARNESS_CATALOG` lists OpenMA-managed harnesses with one entry shape:
+`id`, `label`, pinned `version`, and `source` (`registry`, `npm`, `uvx`, or
+`binary`). Every catalog entry today uses `{ type: "npm", package }` with
+versions verified on the npm registry. OpenCode is not listed because there is
+no official npm distribution for that agent.
+
+`@openma/common/acp-harnesses/install` prepares releases through the same
+`resolveAcpRelease` / `prepareAcpRelease` path as `@openma/common/acp-artifacts`.
+Fork support is not inferred from harness ids; hosts call `forkSupport()` from
+`@openma/common/acp-runtime` on the agent `initialize` response.
+
+```ts
+import {
+  installAcpHarnesses,
+  upgradeAcpHarnesses,
+  detectInstalledAcpHarness,
+  OPENMA_ACP_HARNESS_CATALOG,
+} from "@openma/common/acp-harnesses/install";
+
+const installed = await installAcpHarnesses({
+  root: "/var/acp-harnesses",
+  nodePath: "/path/to/node",
+  env: { /* host runtime environment */ },
+});
+// installed[0]: { id, label, version, command, args, env, release }
+
+await upgradeAcpHarnesses({ root: "/var/acp-harnesses", ids: ["codex-acp"] });
+
+const cached = await detectInstalledAcpHarness(OPENMA_ACP_HARNESS_CATALOG[0]!, {
+  root: "/var/acp-harnesses",
+});
+```
+
+Pass `ids` to install a subset; omit `ids` to install the full catalog.
+Preparation is idempotent and safe for CI preinstall scripts.

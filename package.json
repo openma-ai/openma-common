@@ -95,6 +95,10 @@
       "types": "./dist/acp-harnesses/index.d.ts",
       "import": "./dist/acp-harnesses/index.js"
     },
+    "./acp-harnesses/install": {
+      "types": "./dist/acp-harnesses/install.d.ts",
+      "import": "./dist/acp-harnesses/install.js"
+    },
     "./session-ui": {
       "types": "./dist/session-ui/index.d.ts",
       "import": "./dist/session-ui/index.js"
@@ -155,6 +159,7 @@
     "@tanstack/react-virtual": "^3.14.11",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
+    "npm": "^11.6.0",
     "lucide-react": "^1.17.0",
     "streamdown": "^2.5.0",
     "streaming-markdown": "^0.2.15",
