@@ -70,8 +70,28 @@ details[open]
 }
 
 button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
-summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover {
-  background: var(--chat-interactive-hover-bg);
+summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row:hover {
+  background: transparent;
+  background-color: transparent;
+  color: var(--chat-fg, var(--fg, currentColor));
+}
+
+button.chat-interactive-surface--transcript.activity-disclosure-row:hover
+  :is(
+    .chat-transcript-disclosure-summary,
+    .chat-activity-icon,
+    .activity-disclosure-chevron,
+    .activity-disclosure-chevron svg,
+    .activity-disclosure-chevron .text-fg-subtle
+  ),
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row:hover
+  :is(
+    .chat-transcript-disclosure-summary,
+    .activity-disclosure-chevron,
+    .activity-disclosure-chevron svg,
+    .activity-disclosure-chevron .text-fg-subtle
+  ) {
   color: var(--chat-fg, var(--fg, currentColor));
 }
 
@@ -481,13 +501,13 @@ summary.openma-session-toolbar-chip.is-warning {
 
 button.activity-disclosure-row.activity-disclosure-row,
 .activity-disclosure-row {
-  --chat-activity-row-leading-space: 8px;
+  --chat-activity-row-leading-space: 0px;
   display: flex;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   padding: 0;
-  padding-inline-start: var(--chat-activity-row-leading-space);
+  padding-inline-start: 0;
   -webkit-user-select: none;
   user-select: none;
   align-items: center;
@@ -511,8 +531,20 @@ button.chat-interactive-surface--transcript.activity-disclosure-row.activity-dis
   min-height: 24px;
   height: auto;
   padding: 0;
-  padding-inline-start: var(--chat-activity-row-leading-space, 0px);
+  padding-inline-start: 0;
   font-size: 13px;
+}
+
+button.chat-interactive-surface--transcript.activity-disclosure-row
+  .chat-transcript-disclosure-summary,
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row
+  .chat-transcript-disclosure-summary {
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+}
+
+button.chat-interactive-surface--transcript.activity-disclosure-row
+  .chat-activity-icon {
+  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
 }
 
 /* Standalone thought/reasoning chip (showIcon on ChatReasoningTrigger). */

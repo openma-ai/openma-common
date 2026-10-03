@@ -52,6 +52,10 @@ describe("chat UI interactive surface contract", () => {
 
   it("requires chat-interactive-surface on transcript disclosure triggers", () => {
     expect(components).toContain("data-chat-activity-disclosure-trigger");
+    expect(components).toContain("data-chat-turn-disclosure-trigger");
+    expect(components).toContain("chat-transcript-disclosure-summary");
+    expect(css).toContain(".chat-transcript-disclosure-summary");
+    expect(css).not.toContain(".turn-muted");
     expect(components).toContain(
       "chat-interactive-surface chat-interactive-surface--transcript",
     );

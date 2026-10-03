@@ -4,6 +4,8 @@ import { StickToBottom } from "use-stick-to-bottom";
 import type { AgentUIMessageItem, AgentUIRawItem, AgentUIToolItem, AgentUITurnState } from "../agent-ui/index.js";
 import { type AgentUIThoughtPresentation } from "../agent-ui/presentation.js";
 import { type SessionTurnStatus } from "../session-ui/index.js";
+/** Shared marker for transcript disclosure controls (process + tool rows). */
+export declare const CHAT_TURN_DISCLOSURE_TRIGGER_ATTR = "data-chat-turn-disclosure-trigger";
 export declare const ChatCollapsible: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleProps & import("react").RefAttributes<HTMLDivElement>>;
 export declare const ChatCollapsibleTrigger: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleTriggerProps & import("react").RefAttributes<HTMLButtonElement>>;
 export declare const ChatCollapsibleContent: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleContentProps & import("react").RefAttributes<HTMLDivElement>>;

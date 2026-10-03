@@ -3,13 +3,14 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { ArrowDownIcon, BrainIcon, ChevronRightIcon } from "lucide-react";
-import type { ComponentProps, CSSProperties, ReactNode, Ref, UIEvent } from "react";
+import type { ComponentProps, CSSProperties, KeyboardEvent, ReactNode, Ref, UIEvent } from "react";
 import {
   createContext,
   memo,
   useCallback,
   useContext,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -40,6 +41,19 @@ import {
   projectAgentUIActivityTools,
 } from "./presentation.js";
 import { chatClassNames, preserveChatScrollAnchor } from "./utils.js";
+
+/** Shared marker for transcript disclosure controls (process + tool rows). */
+export const CHAT_TURN_DISCLOSURE_TRIGGER_ATTR = "data-chat-turn-disclosure-trigger";
+
+function handleTranscriptDisclosureKeyDown(
+  event: KeyboardEvent<HTMLButtonElement>,
+  toggle: () => void,
+) {
+  if (event.key === "Enter" || event.key === " ") {
+    event.preventDefault();
+    toggle();
+  }
+}
 
 type ChatScrollAnchorValue = Pick<
   ReturnType<typeof useStickToBottomContext>,
@@ -284,7 +298,7 @@ export function projectChatThoughtEvent({
   return {
     leading: (
       <BrainIcon
-        className="chat-activity-icon shrink-0 text-fg-muted"
+        className="chat-activity-icon shrink-0"
         aria-hidden="true"
       />
     ),
@@ -312,6 +326,7 @@ export function ChatThoughtEventRow({
   const [open, setOpen] = useState(false);
   const stick = useOptionalChatStickToBottom();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelId = useId();
   const resolvedProjection =
     projection ??
     projectChatThoughtEvent({
@@ -337,10 +352,14 @@ export function ChatThoughtEventRow({
       <button
         ref={triggerRef}
         type="button"
+        tabIndex={0}
         aria-expanded={open}
+        aria-controls={panelId}
         onClick={toggleOpen}
+        onKeyDown={(event) => handleTranscriptDisclosureKeyDown(event, toggleOpen)}
         className="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
         data-chat-activity-disclosure-trigger="true"
+        data-chat-turn-disclosure-trigger="true"
       >
         {resolvedProjection.leading && (
           <span className="grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center">
@@ -349,7 +368,7 @@ export function ChatThoughtEventRow({
         )}
         <span
           className={chatClassNames(
-            "min-w-0 flex-1 text-left text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1 text-left",
             !resolvedProjection.multiline && "truncate",
           )}
         >
@@ -358,6 +377,7 @@ export function ChatThoughtEventRow({
         <ChatDisclosureChevron open={open} />
       </button>
       <div
+        id={panelId}
         data-thought-stream-body="true"
         hidden={!open}
         aria-hidden={open ? undefined : true}
@@ -511,14 +531,17 @@ export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({
   return (
     <CollapsibleTrigger
       ref={triggerRef}
+      type="button"
+      tabIndex={0}
       className={chatClassNames(
-        "chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+        "chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-sm",
         showIcon
-          ? "chat-interactive-surface--chip chat-reasoning-trigger--chip"
+          ? "chat-interactive-surface--chip chat-reasoning-trigger--chip text-muted-foreground transition-colors hover:text-foreground"
           : "chat-interactive-surface--transcript",
         className,
       )}
       data-chat-reasoning-trigger="true"
+      data-chat-turn-disclosure-trigger="true"
       {...props}
     >
       {children ?? (
@@ -605,6 +628,7 @@ function ChatCollapsibleEventSequenceGroup({
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
   const stick = useOptionalChatStickToBottom();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const panelId = useId();
   const open = manualOpen ?? false;
   const projected = active ? nodes.at(-1)?.projection : completedProjection;
   if (!projected) return null;
@@ -628,10 +652,14 @@ function ChatCollapsibleEventSequenceGroup({
       <button
         ref={triggerRef}
         type="button"
+        tabIndex={0}
         aria-expanded={open}
+        aria-controls={panelId}
         onClick={toggleOpen}
+        onKeyDown={(event) => handleTranscriptDisclosureKeyDown(event, toggleOpen)}
         className="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
         data-chat-activity-disclosure-trigger="true"
+        data-chat-turn-disclosure-trigger="true"
       >
         {projected.leading && (
           <span className="grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center">
@@ -640,7 +668,7 @@ function ChatCollapsibleEventSequenceGroup({
         )}
         <span
           className={chatClassNames(
-            "min-w-0 flex-1 text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1",
             !projected.multiline && "truncate",
           )}
         >
@@ -649,6 +677,7 @@ function ChatCollapsibleEventSequenceGroup({
         <ChatDisclosureChevron open={open} />
       </button>
       <div
+        id={panelId}
         hidden={!open}
         aria-hidden={open ? undefined : true}
         inert={open ? undefined : true}
@@ -1162,6 +1191,108 @@ export function AgentUITurnView({
   );
   const showThinkingFallback = isStreaming && !hasLiveTail;
 
+  const processActivitySequences = useMemo(() => {
+    const sequences: ReactNode[] = [];
+    for (let index = 0; index < processItems.length; index += 1) {
+      const item = processItems[index];
+      if (item?.kind === "message") continue;
+      const group = activityGroups.get(index);
+      if (!group) continue;
+      const groupTools = group.flatMap((child) =>
+        "tool" in child ? [child.tool] : [],
+      );
+      const lastGroupChild = group.at(-1);
+      const active =
+        isStreaming && lastGroupChild?.item === finalActivityItem;
+      const forceGroup =
+        active &&
+        lastGroupChild !== undefined &&
+        "tool" in lastGroupChild &&
+        !isAgentUIToolRunning(lastGroupChild.tool.status);
+      const nodes: ChatCollapsibleEventNode[] = group.map((child) => {
+        if (!("tool" in child)) {
+          const live = active && child === lastGroupChild;
+          const prefixSkip = thoughtPrefixes.get(child.item.id) ?? 0;
+          return {
+            key: child.item.id,
+            projection: slots.projectThoughtActivity?.({
+              ...renderContext,
+              item: child.item,
+              live,
+              prefixSkip,
+            }) ?? {
+              leading: live ? undefined : (
+                <BrainIcon
+                  className="chat-activity-icon shrink-0"
+                  aria-hidden="true"
+                />
+              ),
+              multiline: live,
+              summary: live
+                ? labels.thinking
+                : (labels.thoughtFor?.(0) ?? labels.thinking),
+            },
+            content:
+              slots.renderThought?.({
+                ...renderContext,
+                item: child.item,
+                live,
+                prefixSkip,
+              }) ?? child.item.text,
+          };
+        }
+        const projectionLive = active && child === lastGroupChild;
+        const contentLive =
+          projectionLive && isAgentUIToolRunning(child.tool.status);
+        return {
+          key: child.tool.id,
+          projection: slots.projectToolActivity?.({
+            ...renderContext,
+            tool: child.tool,
+            live: projectionLive,
+            prefixSkip: 0,
+          }) ?? {
+            summary: labels.toolActivity(child.tool),
+          },
+          content: slots.renderTool({
+            ...renderContext,
+            tool: child.tool,
+            live: contentLive,
+            prefixSkip: 0,
+          }),
+        };
+      });
+      sequences.push(
+        <ChatCollapsibleEventSequence
+          key={`event-sequence-${index}`}
+          nodes={nodes}
+          active={active}
+          forceGroup={forceGroup}
+          completedProjection={
+            slots.projectToolRun?.({
+              turn,
+              tools: groupTools,
+              active,
+            }) ?? {
+              summary: labels.toolRunSummary(groupTools),
+            }
+          }
+        />,
+      );
+    }
+    return sequences;
+  }, [
+    activityGroups,
+    finalActivityItem,
+    isStreaming,
+    labels,
+    processItems,
+    renderContext,
+    slots,
+    thoughtPrefixes,
+    turn,
+  ]);
+
   return (
     <>
       {slots.renderBeforeTurn?.({ turn })}
@@ -1212,7 +1343,7 @@ export function AgentUITurnView({
               getThinkingMessage={() => (
                 <>
                   {slots.renderProcessLeading?.(renderContext)}
-                  <span className="min-w-0 flex-1 truncate text-left text-fg-muted">
+                  <span className="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left">
                     {isCancelled && labels.cancelled !== undefined ? (
                       <>
                         <span data-session-process-status="cancelled">
@@ -1228,110 +1359,38 @@ export function AgentUITurnView({
                 </>
               )}
             />
+            {processOpen ? (
+              <div className="space-y-1" data-session-process-activity="true">
+                {processActivitySequences}
+              </div>
+            ) : (
+              <div
+                className="space-y-1"
+                data-session-process-activity="true"
+                hidden
+                aria-hidden="true"
+                inert={true}
+              >
+                {processActivitySequences}
+              </div>
+            )}
             <ChatReasoningContent>
               <div className="space-y-1">
                 {slots.renderProcessBefore?.(renderContext)}
                 {processItems.map((item, index) => {
-                  if (item.kind === "message") {
-                    if (item.role !== "assistant") return null;
-                    return (
-                      <div key={item.id} className="min-w-0">
-                        {slots.renderAssistant({
-                          ...renderContext,
-                          item,
-                          section: "process",
-                          live: isStreaming && item === finalItem,
-                          prefixSkip: assistantPrefixes.get(item.id) ?? 0,
-                        })}
-                      </div>
-                    );
+                  if (item.kind !== "message" || item.role !== "assistant") {
+                    return null;
                   }
-                  const group = activityGroups.get(index);
-                  if (!group) return null;
-                  const groupTools = group.flatMap((child) =>
-                    "tool" in child ? [child.tool] : [],
-                  );
-                  const lastGroupChild = group.at(-1);
-                  const active =
-                    isStreaming && lastGroupChild?.item === finalActivityItem;
-                  const forceGroup =
-                    active &&
-                    lastGroupChild !== undefined &&
-                    "tool" in lastGroupChild &&
-                    !isAgentUIToolRunning(lastGroupChild.tool.status);
-                  const nodes: ChatCollapsibleEventNode[] = group.map(
-                    (child) => {
-                      if (!("tool" in child)) {
-                        const live = active && child === lastGroupChild;
-                        const prefixSkip =
-                          thoughtPrefixes.get(child.item.id) ?? 0;
-                        return {
-                          key: child.item.id,
-                          projection: slots.projectThoughtActivity?.({
-                            ...renderContext,
-                            item: child.item,
-                            live,
-                            prefixSkip,
-                          }) ?? {
-                            leading: live ? undefined : (
-                              <BrainIcon
-                                className="chat-activity-icon shrink-0 text-fg-muted"
-                                aria-hidden="true"
-                              />
-                            ),
-                            multiline: live,
-                            summary: live
-                              ? labels.thinking
-                              : (labels.thoughtFor?.(0) ?? labels.thinking),
-                          },
-                          content:
-                            slots.renderThought?.({
-                              ...renderContext,
-                              item: child.item,
-                              live,
-                              prefixSkip,
-                            }) ?? child.item.text,
-                        };
-                      }
-                      const projectionLive = active && child === lastGroupChild;
-                      const contentLive =
-                        projectionLive &&
-                        isAgentUIToolRunning(child.tool.status);
-                      return {
-                        key: child.tool.id,
-                        projection: slots.projectToolActivity?.({
-                          ...renderContext,
-                          tool: child.tool,
-                          live: projectionLive,
-                          prefixSkip: 0,
-                        }) ?? {
-                          summary: labels.toolActivity(child.tool),
-                        },
-                        content: slots.renderTool({
-                          ...renderContext,
-                          tool: child.tool,
-                          live: contentLive,
-                          prefixSkip: 0,
-                        }),
-                      };
-                    },
-                  );
                   return (
-                    <ChatCollapsibleEventSequence
-                      key={`event-sequence-${index}`}
-                      nodes={nodes}
-                      active={active}
-                      forceGroup={forceGroup}
-                      completedProjection={
-                        slots.projectToolRun?.({
-                          turn,
-                          tools: groupTools,
-                          active,
-                        }) ?? {
-                          summary: labels.toolRunSummary(groupTools),
-                        }
-                      }
-                    />
+                    <div key={item.id} className="min-w-0">
+                      {slots.renderAssistant({
+                        ...renderContext,
+                        item,
+                        section: "process",
+                        live: isStreaming && item === finalItem,
+                        prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                      })}
+                    </div>
                   );
                 })}
                 {slots.renderProcessAfter?.(renderContext)}

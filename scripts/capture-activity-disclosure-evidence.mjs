@@ -14,7 +14,7 @@ const outDir =
   process.env.ARTIFACT_DIR ??
   "/opt/cursor/artifacts/activity-disclosure-evidence";
 
-const cssV076 = execSync("git show v0.7.6:src/chat-ui/styles.css", {
+const cssV077 = execSync("git show v0.7.7:src/chat-ui/styles.css", {
   cwd: repoRoot,
   encoding: "utf8",
 });
@@ -51,12 +51,12 @@ function turnMarkup({ version }) {
   return `
     <button type="button" data-chat-reasoning-trigger="true" aria-expanded="false"
       class="${reasoningClass}" data-turn-reasoning="true">
-      <span class="min-w-0 flex-1 truncate text-left turn-muted">已工作 4 秒</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left">已工作 4 秒</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <button type="button" aria-expanded="false"${activityAttr}
       class="${activityClass}" data-turn-activity="true">
-      <span class="min-w-0 flex-1 truncate turn-muted">已执行 1 项操作</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate">已执行 1 项操作</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <div class="activity-body" data-activity-body="true" hidden>
@@ -118,14 +118,13 @@ body { margin:0; padding:32px; font-family:system-ui,sans-serif; background:${ca
 .shell { width:${PANEL}px; margin:0 auto; background:${panel}; border-radius:12px; padding:20px 24px; border:1px solid ${isDark ? "#3f3f46" : "#e4e4e7"}; }
 .user { display:flex; justify-content:flex-end; margin-bottom:16px; }
 .bubble { background:${isDark ? "#3f3f46" : "#18181b"}; color:${isDark ? fg : "#fafafa"}; padding:10px 14px; border-radius:16px 16px 4px 16px; font-size:14px; }
-.turn-muted { color: ${muted}; font-size: 13px; }
 .assistant { margin-top:12px; font-size:14px; line-height:1.6; }
 .activity-body { margin-top:4px; margin-left:8px; font-size:13px; color:${muted}; }
 ${HOST_RESET}
 ${css}
 </style></head><body>
 <div class="shell" data-panel="true">
-  <div data-hover-reset="true" style="font-size:12px;color:${muted};margin-bottom:12px">Session · demo · ${version === "head" ? "v0.7.7" : "v0.7.6"}</div>
+  <div data-hover-reset="true" style="font-size:12px;color:${muted};margin-bottom:12px">Session · demo · ${version === "head" ? "v0.7.8" : "v0.7.6"}</div>
   ${bodyInner}
 </div></body></html>`,
     panelSelector,
@@ -144,7 +143,7 @@ async function setupHiDpi(page) {
 }
 
 async function captureTurnStates(page, { variant, version, css }) {
-  const label = version === "head" ? "v077" : "v076";
+  const label = version === "head" ? "v078" : "v077";
   const body = `
   <div class="user"><div class="bubble">请读 README 并总结。</div></div>
   <div data-session-turn-response="true">${turnMarkup({ version })}</div>`;
@@ -193,11 +192,22 @@ async function captureTurnStates(page, { variant, version, css }) {
     await page.waitForTimeout(150);
     const file = join(outDir, `${label}-${variant}-turn-${state.name}.png`);
     await page.locator("[data-panel=true]").screenshot({ path: file, scale: "device" });
+    if (
+      version === "head" &&
+      (state.name === "idle" || state.name === "hover")
+    ) {
+      const activity = await readTurnSummaryColor(page, "activity");
+      const process = await readTurnSummaryColor(page, "process");
+      manifest.computedTextColors[`${label}-${variant}-turn-${state.name}`] = {
+        activitySummary: activity,
+        processSummary: process,
+      };
+    }
   }
 }
 
 async function captureSessionPanels(page, { variant, version, css }) {
-  const label = version === "head" ? "v077" : "v076";
+  const label = version === "head" ? "v078" : "v077";
   const fixtures = sessionFixtures({ version });
 
   for (const [kind, inner] of [
@@ -218,14 +228,25 @@ async function captureSessionPanels(page, { variant, version, css }) {
   }
 }
 
-const manifest = { outDir, files: [] };
+const manifest = { outDir, files: [], computedTextColors: {} };
+
+async function readTurnSummaryColor(page, which) {
+  return page.evaluate((target) => {
+    const el = document.querySelector(
+      target === "activity"
+        ? "[data-turn-activity=true] .chat-transcript-disclosure-summary"
+        : "[data-turn-reasoning=true] .chat-transcript-disclosure-summary",
+    );
+    return el ? getComputedStyle(el).color : null;
+  }, which);
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
 await setupHiDpi(page);
 
-for (const version of ["v076", "head"]) {
-  const css = version === "v076" ? cssV076 : cssHead;
+for (const version of ["v077", "head"]) {
+  const css = version === "v077" ? cssV077 : cssHead;
   for (const variant of ["light", "dark"]) {
     await captureTurnStates(page, { variant, version, css });
     await captureSessionPanels(page, { variant, version, css });
