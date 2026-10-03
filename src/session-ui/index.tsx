@@ -82,7 +82,7 @@ export function SessionHistoryMenu({
       ref={menuRef}
     >
       <summary
-        className="openma-session-history-trigger"
+        className="chat-interactive-surface chat-interactive-surface--control openma-session-history-trigger"
         data-session-history-trigger="true"
         aria-label="Chat history"
         title={activeSession?.title ?? "Chat history"}
@@ -102,7 +102,7 @@ export function SessionHistoryMenu({
               type="button"
               role="menuitemradio"
               aria-checked={active}
-              className="openma-session-menu-item openma-session-history-item"
+              className="chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-history-item"
               key={session.id}
               onClick={() => {
                 onSelectSession(session.id);
@@ -228,7 +228,7 @@ function SessionModeMenu({
   return (
     <details className="openma-session-chip-menu" ref={menuRef}>
       <summary
-        className={`openma-session-toolbar-chip${presentation.warning ? " is-warning" : ""}`}
+        className={`chat-interactive-surface chat-interactive-surface--control openma-session-toolbar-chip${presentation.warning ? " is-warning" : ""}`}
         data-session-mode-trigger="true"
         aria-label={presentation.label}
         title={presentation.hint}
@@ -251,7 +251,7 @@ function SessionModeMenu({
               type="button"
               role="menuitemradio"
               aria-checked={active}
-              className={`openma-session-menu-item${itemPresentation.warning ? " is-warning" : ""}`}
+              className={`chat-interactive-surface chat-interactive-surface--control openma-session-menu-item${itemPresentation.warning ? " is-warning" : ""}`}
               key={item.value}
               onClick={() => {
                 onSetConfigOption(option.id, item.value);
@@ -325,7 +325,7 @@ function SessionRunMenu({
   return (
     <details className="openma-session-chip-menu openma-session-run-menu" ref={menuRef}>
       <summary
-        className="openma-session-toolbar-chip openma-session-run-trigger"
+        className="chat-interactive-surface chat-interactive-surface--control openma-session-toolbar-chip openma-session-run-trigger"
         data-session-run-trigger="true"
         aria-label={`Run with ${activeHarnessLabel} using ${summary}`}
         aria-disabled={disabled}
@@ -437,7 +437,7 @@ function SessionSubmenuTrigger({
       aria-expanded={open}
       aria-label={label}
       data-session-submenu-trigger={submenuId}
-      className="openma-session-menu-item openma-session-submenu-trigger"
+      className="chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-submenu-trigger"
       onClick={onClick}
     >
       {icon}
@@ -470,7 +470,7 @@ function SessionSubmenuChoice({
       type="button"
       role={role}
       aria-checked={active}
-      className="openma-session-menu-item openma-session-submenu-choice"
+      className="chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-submenu-choice"
       onClick={onClick}
     >
       {icon ?? <span className="openma-session-submenu-placeholder" aria-hidden="true" />}
