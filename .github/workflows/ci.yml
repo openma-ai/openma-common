@@ -33,6 +33,29 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: test "v$(node -p \"require('./package.json').version\")" = "$GITHUB_REF_NAME"
 
+  release-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Fetch the base branch and tags
+        run: |
+          git fetch --no-recurse-submodules origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          git fetch --tags --force origin
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Check release notes, version bump, and dist
+        env:
+          RELEASE_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: node scripts/release-check.mjs
+
   verify-windows:
     runs-on: windows-latest
     steps:
