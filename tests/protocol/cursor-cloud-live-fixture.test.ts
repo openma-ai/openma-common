@@ -5,6 +5,7 @@ import {
   decodeCursorCloudRunStreamEvent,
   type CursorCloudSseEvent,
 } from "../../src/protocol/cursor-cloud/index.js";
+import { assessRunBoundaries } from "../live/assess.js";
 import { FIXTURE_AGENT_ID, FIXTURE_RUN_ID, FIXTURE_RUN_ID_2 } from "../live/redact.js";
 
 const NOW = "2026-04-13T18:30:00.000Z";
@@ -107,6 +108,48 @@ describe("Cursor Cloud live fixture", () => {
         message: "Run stream is no longer available",
       },
     });
+  });
+
+  it("keeps the follow-up run on its own turn after a rejected mid-run post", () => {
+    const fixture = JSON.parse(readFileSync(
+      resolve(import.meta.dirname, "../fixtures/cursor-cloud/2026-10-03-two-rounds.events.json"),
+      "utf8",
+    )) as {
+      steer: { httpStatus: number; code: string; accepted: boolean };
+      runs: { label: string; runId: string; prompt: string; events: CursorCloudSseEvent[] }[];
+    };
+    expect(fixture.steer).toMatchObject({ httpStatus: 409, code: "agent_busy", accepted: false });
+    const decoded = fixture.runs.map((run) => ({
+      label: run.label,
+      turnId: run.runId,
+      frames: run.events.map((event) => ({
+        raw: event,
+        events: decodeCursorCloudRunStreamEvent(event, {
+          sessionId: FIXTURE_AGENT_ID,
+          turnId: run.runId,
+          now: () => NOW,
+        }),
+      })),
+    }));
+    expect(assessRunBoundaries(FIXTURE_AGENT_ID, decoded)).toEqual([]);
+    const followUp = decoded.find((run) => run.label === "follow-up");
+    const types = followUp?.frames.flatMap((frame) => frame.events).map((event) => event.type) ?? [];
+    expect(types.indexOf("turn.started")).toBeGreaterThanOrEqual(0);
+    expect(types.indexOf("user.message")).toBeGreaterThan(types.indexOf("turn.started"));
+    expect(types.indexOf("agent.message_chunk")).toBeGreaterThan(types.indexOf("user.message"));
+    expect(types.lastIndexOf("turn.completed")).toBeGreaterThan(types.indexOf("agent.message_chunk"));
+    const user = followUp?.frames.flatMap((frame) => frame.events).find((event) => event.type === "user.message");
+    expect(user).toMatchObject({
+      turn_id: FIXTURE_RUN_ID_2,
+      data: { text: "只回复 ok" },
+    });
+    const initialText = decoded
+      .find((run) => run.label === "initial")
+      ?.frames.flatMap((frame) => frame.events)
+      .filter((event) => event.type === "user.message")
+      .map((event) => event.data && typeof event.data === "object" && "text" in event.data ? event.data.text : "")
+      .join("\n");
+    expect(initialText).not.toContain("只回复 ok");
   });
 });
 
