@@ -14,7 +14,7 @@ const outDir =
   process.env.ARTIFACT_DIR ??
   "/opt/cursor/artifacts/activity-disclosure-evidence";
 
-const cssV076 = execSync("git show v0.7.6:src/chat-ui/styles.css", {
+const cssV077 = execSync("git show v0.7.7:src/chat-ui/styles.css", {
   cwd: repoRoot,
   encoding: "utf8",
 });
@@ -125,7 +125,7 @@ ${HOST_RESET}
 ${css}
 </style></head><body>
 <div class="shell" data-panel="true">
-  <div data-hover-reset="true" style="font-size:12px;color:${muted};margin-bottom:12px">Session · demo · ${version === "head" ? "v0.7.7" : "v0.7.6"}</div>
+  <div data-hover-reset="true" style="font-size:12px;color:${muted};margin-bottom:12px">Session · demo · ${version === "head" ? "v0.7.8" : "v0.7.6"}</div>
   ${bodyInner}
 </div></body></html>`,
     panelSelector,
@@ -144,7 +144,7 @@ async function setupHiDpi(page) {
 }
 
 async function captureTurnStates(page, { variant, version, css }) {
-  const label = version === "head" ? "v077" : "v076";
+  const label = version === "head" ? "v078" : "v077";
   const body = `
   <div class="user"><div class="bubble">请读 README 并总结。</div></div>
   <div data-session-turn-response="true">${turnMarkup({ version })}</div>`;
@@ -197,7 +197,7 @@ async function captureTurnStates(page, { variant, version, css }) {
 }
 
 async function captureSessionPanels(page, { variant, version, css }) {
-  const label = version === "head" ? "v077" : "v076";
+  const label = version === "head" ? "v078" : "v077";
   const fixtures = sessionFixtures({ version });
 
   for (const [kind, inner] of [
@@ -224,8 +224,8 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 await setupHiDpi(page);
 
-for (const version of ["v076", "head"]) {
-  const css = version === "v076" ? cssV076 : cssHead;
+for (const version of ["v077", "head"]) {
+  const css = version === "v077" ? cssV077 : cssHead;
   for (const variant of ["light", "dark"]) {
     await captureTurnStates(page, { variant, version, css });
     await captureSessionPanels(page, { variant, version, css });

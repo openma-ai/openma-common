@@ -3,12 +3,20 @@ import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-run
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import { ArrowDownIcon, BrainIcon, ChevronRightIcon } from "lucide-react";
-import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, } from "react";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import { agentUIProcessEndIndex, agentUITurnElapsedSeconds, projectAgentUITurnItems, } from "../agent-ui/presentation.js";
 import { SessionTurnFrame, } from "../session-ui/index.js";
 import { groupAgentUIActivityEvents, isAgentUIToolRunning, projectAgentUIActivityTools, } from "./presentation.js";
 import { chatClassNames, preserveChatScrollAnchor } from "./utils.js";
+/** Shared marker for transcript disclosure controls (process + tool rows). */
+export const CHAT_TURN_DISCLOSURE_TRIGGER_ATTR = "data-chat-turn-disclosure-trigger";
+function handleTranscriptDisclosureKeyDown(event, toggle) {
+    if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        toggle();
+    }
+}
 const FALLBACK_CHAT_SCROLL_ANCHOR = {
     contentRef: { current: null },
     scrollRef: { current: null },
@@ -114,6 +122,7 @@ export function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, 
     const [open, setOpen] = useState(false);
     const stick = useOptionalChatStickToBottom();
     const triggerRef = useRef(null);
+    const panelId = useId();
     const resolvedProjection = projection ??
         projectChatThoughtEvent({
             text,
@@ -131,7 +140,7 @@ export function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, 
             stopScroll: stick.stopScroll,
         });
     };
-    return (_jsxs("div", { className: "py-0.5", "data-thought-block": "true", "data-thought-live": live, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", children: [resolvedProjection.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: resolvedProjection.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-left text-fg-muted", !resolvedProjection.multiline && "truncate"), children: resolvedProjection.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { "data-thought-stream-body": "true", hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-5 mt-1 min-w-0", children: renderBody({ live }) })] }));
+    return (_jsxs("div", { className: "py-0.5", "data-thought-block": "true", "data-thought-live": live, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [resolvedProjection.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: resolvedProjection.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-left text-fg-muted", !resolvedProjection.multiline && "truncate"), children: resolvedProjection.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, "data-thought-stream-body": "true", hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-5 mt-1 min-w-0", children: renderBody({ live }) })] }));
 }
 const ChatReasoningContext = createContext(null);
 function useChatReasoning() {
@@ -201,9 +210,9 @@ const defaultThinkingMessage = (isStreaming, duration) => {
 export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({ className, children, getThinkingMessage = defaultThinkingMessage, showIcon = true, ...props }) {
     const { collapsible, isStreaming, isOpen, duration, triggerRef } = useChatReasoning();
     const CollapsibleTrigger = collapsible.Trigger;
-    return (_jsx(CollapsibleTrigger, { ref: triggerRef, className: chatClassNames("chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", showIcon
+    return (_jsx(CollapsibleTrigger, { ref: triggerRef, type: "button", tabIndex: 0, className: chatClassNames("chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", showIcon
             ? "chat-interactive-surface--chip chat-reasoning-trigger--chip"
-            : "chat-interactive-surface--transcript", className), "data-chat-reasoning-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
+            : "chat-interactive-surface--transcript", className), "data-chat-reasoning-trigger": "true", "data-chat-turn-disclosure-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
 });
 export const ChatReasoningContent = memo(function ChatReasoningContent({ className, children, ...props }) {
     const { collapsible, isOpen } = useChatReasoning();
@@ -219,6 +228,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
     const [manualOpen, setManualOpen] = useState(null);
     const stick = useOptionalChatStickToBottom();
     const triggerRef = useRef(null);
+    const panelId = useId();
     const open = manualOpen ?? false;
     const projected = active ? nodes.at(-1)?.projection : completedProjection;
     if (!projected)
@@ -232,7 +242,7 @@ function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection,
             stopScroll: stick.stopScroll,
         });
     };
-    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", "aria-expanded": open, onClick: toggleOpen, className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
+    return (_jsxs("div", { className: "py-0.5", "data-collapsible-event-count": nodes.length, "data-tool-group-size": nodes.length, children: [_jsxs("button", { ref: triggerRef, type: "button", tabIndex: 0, "aria-expanded": open, "aria-controls": panelId, onClick: toggleOpen, onKeyDown: (event) => handleTranscriptDisclosureKeyDown(event, toggleOpen), className: "chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]", "data-chat-activity-disclosure-trigger": "true", "data-chat-turn-disclosure-trigger": "true", children: [projected.leading && (_jsx("span", { className: "grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center", children: projected.leading })), _jsx("span", { className: chatClassNames("min-w-0 flex-1 text-fg-muted", !projected.multiline && "truncate"), children: projected.summary }), _jsx(ChatDisclosureChevron, { open: open })] }), _jsx("div", { id: panelId, hidden: !open, "aria-hidden": open ? undefined : true, inert: open ? undefined : true, className: "ml-4 mt-1 border-l border-border/40 pl-2", children: _jsx("div", { className: "space-y-1", children: nodes.map((node) => (_jsx("div", { children: node.content }, node.key))) }) })] }));
 }
 const COMPACT_AGENT_CHAT_STYLE = {
     "--chat-message-padding-inline": "16px",
@@ -385,6 +395,88 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         ? finalActivityItem.status === "streaming" && finalActivityItem.text.trim().length > 0
         : finalActivityItem.kind === "tool" && isAgentUIToolRunning(finalActivityItem.status));
     const showThinkingFallback = isStreaming && !hasLiveTail;
+    const processActivitySequences = useMemo(() => {
+        const sequences = [];
+        for (let index = 0; index < processItems.length; index += 1) {
+            const item = processItems[index];
+            if (item?.kind === "message")
+                continue;
+            const group = activityGroups.get(index);
+            if (!group)
+                continue;
+            const groupTools = group.flatMap((child) => "tool" in child ? [child.tool] : []);
+            const lastGroupChild = group.at(-1);
+            const active = isStreaming && lastGroupChild?.item === finalActivityItem;
+            const forceGroup = active &&
+                lastGroupChild !== undefined &&
+                "tool" in lastGroupChild &&
+                !isAgentUIToolRunning(lastGroupChild.tool.status);
+            const nodes = group.map((child) => {
+                if (!("tool" in child)) {
+                    const live = active && child === lastGroupChild;
+                    const prefixSkip = thoughtPrefixes.get(child.item.id) ?? 0;
+                    return {
+                        key: child.item.id,
+                        projection: slots.projectThoughtActivity?.({
+                            ...renderContext,
+                            item: child.item,
+                            live,
+                            prefixSkip,
+                        }) ?? {
+                            leading: live ? undefined : (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0 text-fg-muted", "aria-hidden": "true" })),
+                            multiline: live,
+                            summary: live
+                                ? labels.thinking
+                                : (labels.thoughtFor?.(0) ?? labels.thinking),
+                        },
+                        content: slots.renderThought?.({
+                            ...renderContext,
+                            item: child.item,
+                            live,
+                            prefixSkip,
+                        }) ?? child.item.text,
+                    };
+                }
+                const projectionLive = active && child === lastGroupChild;
+                const contentLive = projectionLive && isAgentUIToolRunning(child.tool.status);
+                return {
+                    key: child.tool.id,
+                    projection: slots.projectToolActivity?.({
+                        ...renderContext,
+                        tool: child.tool,
+                        live: projectionLive,
+                        prefixSkip: 0,
+                    }) ?? {
+                        summary: labels.toolActivity(child.tool),
+                    },
+                    content: slots.renderTool({
+                        ...renderContext,
+                        tool: child.tool,
+                        live: contentLive,
+                        prefixSkip: 0,
+                    }),
+                };
+            });
+            sequences.push(_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, forceGroup: forceGroup, completedProjection: slots.projectToolRun?.({
+                    turn,
+                    tools: groupTools,
+                    active,
+                }) ?? {
+                    summary: labels.toolRunSummary(groupTools),
+                } }, `event-sequence-${index}`));
+        }
+        return sequences;
+    }, [
+        activityGroups,
+        finalActivityItem,
+        isStreaming,
+        labels,
+        processItems,
+        renderContext,
+        slots,
+        thoughtPrefixes,
+        turn,
+    ]);
     return (_jsxs(_Fragment, { children: [slots.renderBeforeTurn?.({ turn }), _jsxs(SessionTurnFrame, { turnId: turn.id, sessionId: sessionId, status: frameStatus ?? sessionTurnStatus(turn), errorMessage: turn.error, labels: labels.cancelled === undefined
                     ? undefined
                     : { cancelled: labels.cancelled }, hideStatusMessage: hasProcess && isCancelled, className: chatClassNames(density === "compact"
@@ -398,82 +490,17 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                 setProcessOpen(open);
                         }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "min-w-0 flex-1 truncate text-left text-fg-muted", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
                                                     ? labels.workingFor(elapsedSeconds)
-                                                    : labels.workedFor(elapsedSeconds)] })] })) }), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
-                                            if (item.kind === "message") {
-                                                if (item.role !== "assistant")
-                                                    return null;
-                                                return (_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
-                                                        ...renderContext,
-                                                        item,
-                                                        section: "process",
-                                                        live: isStreaming && item === finalItem,
-                                                        prefixSkip: assistantPrefixes.get(item.id) ?? 0,
-                                                    }) }, item.id));
-                                            }
-                                            const group = activityGroups.get(index);
-                                            if (!group)
+                                                    : labels.workedFor(elapsedSeconds)] })] })) }), processOpen ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: processActivitySequences })) : (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", hidden: true, "aria-hidden": "true", inert: true, children: processActivitySequences })), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
+                                            if (item.kind !== "message" || item.role !== "assistant") {
                                                 return null;
-                                            const groupTools = group.flatMap((child) => "tool" in child ? [child.tool] : []);
-                                            const lastGroupChild = group.at(-1);
-                                            const active = isStreaming && lastGroupChild?.item === finalActivityItem;
-                                            const forceGroup = active &&
-                                                lastGroupChild !== undefined &&
-                                                "tool" in lastGroupChild &&
-                                                !isAgentUIToolRunning(lastGroupChild.tool.status);
-                                            const nodes = group.map((child) => {
-                                                if (!("tool" in child)) {
-                                                    const live = active && child === lastGroupChild;
-                                                    const prefixSkip = thoughtPrefixes.get(child.item.id) ?? 0;
-                                                    return {
-                                                        key: child.item.id,
-                                                        projection: slots.projectThoughtActivity?.({
-                                                            ...renderContext,
-                                                            item: child.item,
-                                                            live,
-                                                            prefixSkip,
-                                                        }) ?? {
-                                                            leading: live ? undefined : (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0 text-fg-muted", "aria-hidden": "true" })),
-                                                            multiline: live,
-                                                            summary: live
-                                                                ? labels.thinking
-                                                                : (labels.thoughtFor?.(0) ?? labels.thinking),
-                                                        },
-                                                        content: slots.renderThought?.({
-                                                            ...renderContext,
-                                                            item: child.item,
-                                                            live,
-                                                            prefixSkip,
-                                                        }) ?? child.item.text,
-                                                    };
-                                                }
-                                                const projectionLive = active && child === lastGroupChild;
-                                                const contentLive = projectionLive &&
-                                                    isAgentUIToolRunning(child.tool.status);
-                                                return {
-                                                    key: child.tool.id,
-                                                    projection: slots.projectToolActivity?.({
-                                                        ...renderContext,
-                                                        tool: child.tool,
-                                                        live: projectionLive,
-                                                        prefixSkip: 0,
-                                                    }) ?? {
-                                                        summary: labels.toolActivity(child.tool),
-                                                    },
-                                                    content: slots.renderTool({
-                                                        ...renderContext,
-                                                        tool: child.tool,
-                                                        live: contentLive,
-                                                        prefixSkip: 0,
-                                                    }),
-                                                };
-                                            });
-                                            return (_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, forceGroup: forceGroup, completedProjection: slots.projectToolRun?.({
-                                                    turn,
-                                                    tools: groupTools,
-                                                    active,
-                                                }) ?? {
-                                                    summary: labels.toolRunSummary(groupTools),
-                                                } }, `event-sequence-${index}`));
+                                            }
+                                            return (_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
+                                                    ...renderContext,
+                                                    item,
+                                                    section: "process",
+                                                    live: isStreaming && item === finalItem,
+                                                    prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                                                }) }, item.id));
                                         }), slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
                         const live = isStreaming && item === finalItem;
                         if (item.kind === "message" && item.role === "assistant") {

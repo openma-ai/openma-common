@@ -71,7 +71,15 @@ details[open]
 
 button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
 summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover {
-  background: var(--chat-interactive-hover-bg);
+  background: transparent;
+  background-color: transparent;
+  color: var(--chat-fg, var(--fg, currentColor));
+}
+
+button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover
+  :where(.text-fg-muted, .text-muted-foreground, .chat-activity-icon),
+button.chat-interactive-surface--transcript.activity-disclosure-row:hover
+  .activity-disclosure-chevron {
   color: var(--chat-fg, var(--fg, currentColor));
 }
 
@@ -481,13 +489,13 @@ summary.openma-session-toolbar-chip.is-warning {
 
 button.activity-disclosure-row.activity-disclosure-row,
 .activity-disclosure-row {
-  --chat-activity-row-leading-space: 8px;
+  --chat-activity-row-leading-space: 0px;
   display: flex;
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   padding: 0;
-  padding-inline-start: var(--chat-activity-row-leading-space);
+  padding-inline-start: 0;
   -webkit-user-select: none;
   user-select: none;
   align-items: center;
@@ -511,7 +519,7 @@ button.chat-interactive-surface--transcript.activity-disclosure-row.activity-dis
   min-height: 24px;
   height: auto;
   padding: 0;
-  padding-inline-start: var(--chat-activity-row-leading-space, 0px);
+  padding-inline-start: 0;
   font-size: 13px;
 }
 

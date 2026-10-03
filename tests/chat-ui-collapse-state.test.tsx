@@ -117,7 +117,7 @@ describe("nested chat disclosure state", () => {
       expect(computed.paddingLeft).toBe("0px");
       expect(
         computed.paddingInlineStart || computed.getPropertyValue("padding-inline-start"),
-      ).toMatch(/8px|0px/);
+      ).toBe("0px");
       expect(computed.fontSize).toBe("13px");
       expect(computed.width).not.toBe("fit-content");
     }
