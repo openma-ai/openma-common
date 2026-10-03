@@ -22,9 +22,22 @@
  *   canonical type. The docs call the payload a text delta, so each event
  *   carries that delta (`adapter_meta.text_role = "delta"`) and shares
  *   `message_id` `${turnId}:thinking`.
- * - `interaction_update` is vendor-only. The docs say it is emitted
- *   alongside the simplified events; mapping both would duplicate text,
- *   tools, and turns.
+ * - `interaction_update` stays vendor-only when it repeats a simplified
+ *   event (`text-delta`, `thinking-delta`, tool calls, `turn-ended`).
+ *   A live run on 2026-10-03 (Actions run 37110762427) also sent
+ *   `interaction_update` `{ type: "user-message-appended", userMessage:
+ *   { type: "user_message", session_id, text } }`. No simplified event
+ *   carries that user text. `text` becomes `user.message`. `session_id`
+ *   in that payload was the run id, so it is kept on `adapter_meta` and
+ *   is not used as the OpenMA `session_id`. Other `userMessage` fields
+ *   are preserved on `adapter_meta.user_message`.
+ * - `error` with string `code` and `message` is `session.error`, except
+ *   `code: "stream_unavailable"`. Live runs on 2026-10-03 showed that
+ *   code is a transient transport close: the run keeps going, and a
+ *   reconnect still delivers `user.message` and `turn.completed`.
+ *   A canonical `session.error` would make a GUI report a false failure,
+ *   so this code stays a vendor event. Other error codes stay
+ *   `session.error`.
  * - `heartbeat` and `done` produce nothing.
  * - The SSE `id` is an opaque `Last-Event-ID` cursor. It is copied to
  *   `adapter_meta.sse_id` on canonical events and to `data.sse_id` on
@@ -61,7 +74,7 @@ export function decodeCursorCloudRunStreamEvent(event, context) {
         case "error":
             return decodeError(event.data, context, streamId);
         case "interaction_update":
-            return [vendorEvent(context, streamId ? `interaction_update:${streamId}` : `interaction_update:${context.turnId}`, "interaction_update", event.data, streamId)];
+            return decodeInteractionUpdate(event, context, streamId);
         case "heartbeat":
         case "done":
             return [];
@@ -199,9 +212,31 @@ function decodeResult(data, context, streamId) {
     }
     return events;
 }
+function decodeInteractionUpdate(event, context, streamId) {
+    const body = record(event.data);
+    const message = body?.type === "user-message-appended" ? record(body.userMessage) : undefined;
+    const text = typeof message?.text === "string" ? message.text : undefined;
+    if (!message || text === undefined) {
+        return [vendorEvent(context, streamId ? `interaction_update:${streamId}` : `interaction_update:${context.turnId}`, "interaction_update", event.data, streamId)];
+    }
+    const eventId = streamId ? `user:${streamId}` : `user:${context.turnId}`;
+    return [canonicalEvent(context, eventId, "user.message", {
+            message_id: streamId ? `${context.turnId}:user:${streamId}` : `${context.turnId}:user`,
+            text,
+            adapter_meta: adapterMeta("interaction_update", streamId, {
+                interaction_type: "user-message-appended",
+                user_message: message,
+            }),
+        })];
+}
 function decodeError(data, context, streamId) {
     const body = record(data);
     const eventId = streamId ? `error:${streamId}` : `error:${context.turnId}`;
+    // stream_unavailable is a dropped socket, not a failed run. Reconnect
+    // still receives the rest of the turn.
+    if (body?.code === "stream_unavailable") {
+        return [vendorEvent(context, eventId, "error", data, streamId)];
+    }
     if (!body || typeof body.code !== "string" || typeof body.message !== "string") {
         return [vendorEvent(context, eventId, "error", data, streamId)];
     }

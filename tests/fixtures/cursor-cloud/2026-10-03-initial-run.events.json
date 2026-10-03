@@ -1,0 +1,136 @@
+{
+  "source": "https://api.cursor.com/v1/agents/{id}/runs/{runId}/stream",
+  "anonymized": true,
+  "capturedFrom": "https://github.com/openma-ai/openma-common/actions/runs/37110762427",
+  "repoUrl": "https://github.com/openma-ai/openma-common",
+  "note": "Initial read-only plan-mode run. Identifiers replaced with the documented placeholders. No API key or contact data.",
+  "events": [
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "RUNNING"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017141372-1",
+      "data": {
+        "type": "step-started",
+        "stepId": 0
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017141403-0",
+      "data": {
+        "type": "user-message-appended",
+        "userMessage": {
+          "type": "user_message",
+          "session_id": "run-00000000-0000-0000-0000-000000000001",
+          "text": "Reply with exactly the word hello and then stop. Do not use tools. Do not read or modify files. Do not run commands. Do not commit, push, or open a pull request."
+        }
+      }
+    },
+    {
+      "event": "thinking",
+      "id": "1791017143446-0",
+      "data": {
+        "text": "Replying with exactly the word \"hello\" and then stopping."
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143446-0",
+      "data": {
+        "type": "thinking-delta",
+        "text": "Replying with exactly the word \"hello\" and then stopping."
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143449-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 14
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143453-0",
+      "data": {
+        "type": "thinking-completed",
+        "thinkingDurationMs": 10
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791017143459-0",
+      "data": {
+        "text": "hello"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143459-0",
+      "data": {
+        "type": "text-delta",
+        "text": "hello"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143462-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143690-0",
+      "data": {
+        "type": "turn-ended"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791017143694-0",
+      "data": {
+        "type": "step-completed",
+        "stepId": 0,
+        "stepDurationMs": 2333
+      }
+    },
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "FINISHED"
+      }
+    },
+    {
+      "event": "result",
+      "id": "1791017152054-0",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "FINISHED",
+        "text": "hello",
+        "durationMs": 10637,
+        "git": {
+          "branches": [
+            {
+              "repoUrl": "github.com/openma-ai/openma-common",
+              "branch": "cursor/openma-live-37110762427-e25d"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event": "done",
+      "id": "1791017152054-0",
+      "data": {}
+    }
+  ]
+}

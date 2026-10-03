@@ -1,0 +1,97 @@
+# Live decode of a real Cursor Cloud Agents run stream, including one
+# mid-run follow-up attempt and one follow-up run after the first finishes.
+# This workflow is intentionally separate from ci.yml. Ordinary pull requests
+# must not depend on it: a missing organization secret skips, and a fork
+# pull request never receives secrets. Failures here are the live API check
+# only.
+name: Cursor Cloud live
+
+on:
+  pull_request:
+    paths:
+      - "src/protocol/cursor-cloud/**"
+      - "tests/live/**"
+      - "tests/fixtures/cursor-cloud/**"
+      - "src/session-events/**"
+      - ".github/workflows/cursor-cloud-live.yml"
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: cursor-cloud-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Skip when the Cursor API key cannot be used
+        id: gate
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$HEAD_REPO" != "$THIS_REPO" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Fork pull request. CURSOR_API_KEY is not available. Skipping the live Cloud Agents run."
+            exit 0
+          fi
+          if [ -z "$CURSOR_API_KEY" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "CURSOR_API_KEY is not available to this repository. Skipping the live Cloud Agents run."
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.skip != 'true'
+
+      - uses: pnpm/action-setup@v4
+        if: steps.gate.outputs.skip != 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.skip != 'true'
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Decode a real Cloud Agents run stream
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          CURSOR_CLOUD_LIVE_SKIP_IF_UNSET: "1"
+        run: pnpm test:live:cursor-cloud
+
+      - name: Delete the cloud agent if the test was interrupted
+        if: always() && steps.gate.outputs.skip != 'true'
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          if [ -f tests/live/cleanup-agent.mjs ]; then
+            node tests/live/cleanup-agent.mjs
+          else
+            echo "cleanup skipped: repository checkout is not available"
+          fi
+
+      - name: Upload anonymized stream sample
+        if: always() && steps.gate.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cursor-cloud-live-sample
+          path: tests/live/out/events.json
+          if-no-files-found: ignore

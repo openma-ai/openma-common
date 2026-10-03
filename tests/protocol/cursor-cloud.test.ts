@@ -353,12 +353,52 @@ describe("Cursor Cloud run SSE decoder", () => {
     expect(decode({ event: "error", data: { code: "unavailable" } })).toEqual([
       vendor("error", `error:${RUN}`, { code: "unavailable" }),
     ]);
+    const transport = { code: "stream_unavailable", message: "Run stream is no longer available" };
+    expect(decode({ event: "error", data: transport })).toEqual([
+      vendor("error", `error:${RUN}`, transport),
+    ]);
+    expect(decode({ event: "error", data: transport })[0]?.type).not.toBe("session.error");
   });
 
   it("keeps interaction_update as a vendor event and passes the payload through", () => {
     const data = { type: "text-delta", text: "partial" };
     expect(decode({ event: "interaction_update", id: "ix-1", data })).toEqual([
       vendor("interaction_update", "interaction_update:ix-1", data, "ix-1"),
+    ]);
+  });
+
+  it("maps a live user-message-appended update to user.message", () => {
+    // Captured from Actions run 37110762427. The simplified event list has
+    // no user event; the prompt arrives only on this interaction update.
+    const userMessage = {
+      type: "user_message",
+      session_id: RUN,
+      text: "Reply with exactly the word hello and then stop.",
+    };
+    const data = { type: "user-message-appended", userMessage };
+    expect(decode({ event: "interaction_update", id: "1791017141403-0", data })).toEqual([
+      canonical("user.message", "user:1791017141403-0", {
+        message_id: `${RUN}:user:1791017141403-0`,
+        text: userMessage.text,
+        adapter_meta: {
+          cursor_event: "interaction_update",
+          sse_id: "1791017141403-0",
+          interaction_type: "user-message-appended",
+          user_message: userMessage,
+        },
+      }),
+    ]);
+    expect(decode({
+      event: "interaction_update",
+      id: "missing-text",
+      data: { type: "user-message-appended", userMessage: { type: "user_message" } },
+    })).toEqual([
+      vendor(
+        "interaction_update",
+        "interaction_update:missing-text",
+        { type: "user-message-appended", userMessage: { type: "user_message" } },
+        "missing-text",
+      ),
     ]);
   });
 
