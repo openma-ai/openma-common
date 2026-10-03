@@ -35,7 +35,7 @@ or wire-event shapes into product state.
 - `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `forkSupport()` (the only client entry for session and inclusive message fork), `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
-- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown.
+- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown. A pure Node process with no other listener for that `SIGHUP`, `SIGINT`, or `SIGTERM` re-raises the signal after cleanup, so the process still exits with it. The Electron main process keeps its own handlers; children are reaped from the `exit` hook when that process actually quits.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`), managed catalog metadata (`OPENMA_ACP_HARNESS_CATALOG`), and persisted-catalog cloning and validation.
 - `@openma/common/acp-harnesses/install` — idempotent preinstall/CI installer for catalog harnesses. See [Managed ACP harness installation](#managed-acp-harness-installation).
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
@@ -94,7 +94,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.7.2"
+    "@openma/common": "github:openma-ai/openma-common#v0.7.3"
   }
 }
 ```
