@@ -9,6 +9,9 @@ import {
   listAcpRegistryCatalog,
 } from "../src/acp-harnesses/installer.js";
 
+/** Backchat installer tests use POSIX shell shims and fake npm scripts. */
+const unixIt = process.platform === "win32" ? it.skip : it;
+
 describe("ACP registry installer", () => {
   it("allows large managed npm packages enough time to install", () => {
     expect(ACP_NPM_INSTALL_TIMEOUT_MS).toBeGreaterThanOrEqual(10 * 60_000);
@@ -46,7 +49,7 @@ describe("ACP registry installer", () => {
     ]);
   });
 
-  it("keeps the installed npx command available until an upgrade is ready", async () => {
+  unixIt("keeps the installed npx command available until an upgrade is ready", async () => {
     const root = join(tmpdir(), `openma-acp-atomic-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = join(root, "fake-npm.mjs");
@@ -130,7 +133,7 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
-  it("installs from a supplied registry snapshot without fetching it again", async () => {
+  unixIt("installs from a supplied registry snapshot without fetching it again", async () => {
     const root = join(tmpdir(), `openma-acp-snapshot-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = await writeFakeNpm(root);
@@ -157,7 +160,7 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
-  it("can run npm through a bundled Node executable and CLI entrypoint", async () => {
+  unixIt("can run npm through a bundled Node executable and CLI entrypoint", async () => {
     const root = join(tmpdir(), `openma-acp-bundled-npm-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = await writeFakeNpm(root);
@@ -181,7 +184,7 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
-  it("installs an npx upgrade into a clean version directory", async () => {
+  unixIt("installs an npx upgrade into a clean version directory", async () => {
     const root = join(tmpdir(), `openma-acp-clean-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = await writeFakeNpm(root);
@@ -224,7 +227,7 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
-  it("retries an ETARGET npx install against the online registry", async () => {
+  unixIt("retries an ETARGET npx install against the online registry", async () => {
     const root = join(tmpdir(), `openma-acp-etarget-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = join(root, "fake-npm-etarget.mjs");
@@ -276,7 +279,7 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
-  it("falls back from the preferred npm registry to the official registry", async () => {
+  unixIt("falls back from the preferred npm registry to the official registry", async () => {
     const root = join(tmpdir(), `openma-acp-registry-fallback-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
     const fakeNpm = join(root, "fake-npm-registry-fallback.mjs");

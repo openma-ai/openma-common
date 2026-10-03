@@ -350,7 +350,7 @@ describe("acp agent setup sdk", () => {
     expect(agents[0]?.auth?.status).toBe("configured");
   });
 
-  it("repairs a stale managed npx shim during cold start", async () => {
+  it.skipIf(process.platform === "win32")("repairs a stale managed npx shim during cold start", async () => {
     const root = join(
       tmpdir(),
       `sdk-repair-managed-shim-${process.pid}-${Date.now()}`,
