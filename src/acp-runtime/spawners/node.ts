@@ -35,13 +35,43 @@ function cleanupActiveChildren(signal: "SIGTERM" | "SIGKILL" = "SIGTERM"): void 
   }
 }
 
+function isElectronMainProcess(): boolean {
+  // Electron sets process.type to "browser" only in the main process.
+  // ELECTRON_RUN_AS_NODE and utility/renderer processes keep versions.electron
+  // but are not "browser"; those still need the CLI re-raise below.
+  const electron = process.versions.electron;
+  const type = (process as NodeJS.Process & { type?: string }).type;
+  return typeof electron === "string" && electron.length > 0 && type === "browser";
+}
+
 function installProcessCleanupHandlers(): void {
   if (cleanupHandlersInstalled) return;
   cleanupHandlersInstalled = true;
+  // Reap when the host actually exits. This covers process.exit(), a natural
+  // end of the event loop, and Electron's graceful quit. A raw SIG_DFL death
+  // does not run it; the signal handler below cleans up before that death.
   process.once("exit", () => cleanupActiveChildren());
+
+  // Do not install JS listeners in the Electron main process. Electron already
+  // turns SIGHUP/SIGINT/SIGTERM into app.quit() with a native sigaction.
+  // process.on() replaces that handler, and libuv's unregister path sets
+  // SIG_DFL rather than restoring it (uv__signal_register_handler does not
+  // save the previous action). Removing our listener and re-raising then
+  // kills the process and skips the host's quit flow. Leaving the native
+  // handlers in place lets that flow run; children are reaped by the exit
+  // hook when the host finishes shutting down. Skipping only the re-raise
+  // would still swallow the signal, so the native handler would never run.
+  if (isElectronMainProcess()) return;
+
   for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"] satisfies ShutdownSignal[]) {
     const handler = () => {
       cleanupActiveChildren();
+      // Pure Node CLI: this handler is the only listener, so Node has
+      // suppressed the default terminate action. Drop it and re-raise so the
+      // process still exits with the original signal (shells and supervisors
+      // keep seeing SIGINT/SIGTERM) instead of staying up after Ctrl+C.
+      // A host that registered its own listener keeps that listener. Re-raising
+      // here would kill the process before that shutdown logic finishes.
       if (process.listenerCount(signal) === 1) {
         process.off(signal, handler);
         process.kill(process.pid, signal);
