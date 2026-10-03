@@ -16,8 +16,7 @@ export interface AcpCatalogHarness {
  * OpenMA-managed harness catalog. All current entries use `{ type: "npm", package }`
  * with versions pinned to npm registry releases verified at catalog update time.
  *
- * OpenCode is omitted: there is no official `opencode` npm package for the Anomaly
- * agent (binary-only distribution today).
+ * All entries use npm; versions and bin names are verified on the npm registry.
  */
 export declare const OPENMA_ACP_HARNESS_CATALOG: readonly AcpCatalogHarness[];
 export declare function catalogHarnessById(id: string, catalog?: readonly AcpCatalogHarness[]): AcpCatalogHarness | undefined;

@@ -2,8 +2,7 @@
  * OpenMA-managed harness catalog. All current entries use `{ type: "npm", package }`
  * with versions pinned to npm registry releases verified at catalog update time.
  *
- * OpenCode is omitted: there is no official `opencode` npm package for the Anomaly
- * agent (binary-only distribution today).
+ * All entries use npm; versions and bin names are verified on the npm registry.
  */
 export const OPENMA_ACP_HARNESS_CATALOG = [
     {
@@ -24,6 +23,13 @@ export const OPENMA_ACP_HARNESS_CATALOG = [
         version: "0.62.0",
         source: { type: "npm", package: "@google/gemini-cli" },
         launch: { args: ["--acp"] },
+    },
+    {
+        id: "opencode",
+        label: "OpenCode",
+        version: "1.18.34",
+        source: { type: "npm", package: "opencode-ai" },
+        launch: { args: ["acp"] },
     },
     {
         id: "kimi",

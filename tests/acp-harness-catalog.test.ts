@@ -8,6 +8,7 @@ describe("OPENMA_ACP_HARNESS_CATALOG", () => {
       "codex-acp",
       "claude-acp",
       "gemini",
+      "opencode",
       "kimi",
       "dsh-acp",
       "pi-acp",
