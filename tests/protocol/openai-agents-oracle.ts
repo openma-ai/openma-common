@@ -4,8 +4,10 @@
  * `#item`, `#turn`, `#openaiEvent`, `#pending`, `#vendor`, `#event`, and
  * `#wrap`. Tests compare decoder output to this oracle.
  *
- * The fixture is the upstream file, byte for byte. Clock still comes from
- * `new Date()` inside those methods; tests freeze it.
+ * The fixture is the upstream file, byte for byte. `.gitattributes` pins
+ * `tests/fixtures/**` to LF so a Windows checkout does not rewrite it
+ * before this hash. Clock still comes from `new Date()` inside those
+ * methods; tests freeze it.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
