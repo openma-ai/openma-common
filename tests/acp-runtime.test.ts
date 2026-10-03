@@ -7,7 +7,7 @@ import {
   type ContentBlock,
 } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
-import { forkSupport } from "../src/acp-runtime/fork-support.js";
+import { forkSupport } from "../src/acp-fork/index.js";
 import {
   AcpSessionImpl,
   acpForkRequestMeta,

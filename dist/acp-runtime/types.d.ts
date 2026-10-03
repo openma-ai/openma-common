@@ -1,5 +1,5 @@
 import type * as schema from "@agentclientprotocol/sdk";
-import type { AcpForkPoint, AcpForkSupport } from "./fork-support.js";
+import type { AcpForkPoint, AcpForkSupport } from "../acp-fork/index.js";
 export interface AgentSpec {
     command: string;
     args?: string[];
