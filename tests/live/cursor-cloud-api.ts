@@ -103,6 +103,7 @@ export async function createFollowUpRun(
   agentId: string,
   text: string,
   fetchImpl: FetchLike = fetch,
+  signal?: AbortSignal,
 ): Promise<FollowUpResult> {
   const response = await fetchImpl(`${CURSOR_CLOUD_API_ORIGIN}/v1/agents/${encodeURIComponent(agentId)}/runs`, {
     method: "POST",
@@ -112,7 +113,7 @@ export async function createFollowUpRun(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(buildFollowUpRequest(text)),
-    signal: AbortSignal.timeout(120_000),
+    signal,
   });
   const payload = await readJson(response);
   if (!response.ok) {

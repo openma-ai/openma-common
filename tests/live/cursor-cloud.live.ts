@@ -83,10 +83,12 @@ describe("Cursor Cloud live run stream", () => {
           captured.push(event);
           if (steerPromise || event.event === "result" || event.event === "done") return;
           if (event.event === "status" && runStatus(event) === "RUNNING") {
-            steerPromise = createFollowUpRun(apiKey, agent!.agentId, STEER_PROMPT).then((result) => {
+            steerPromise = createFollowUpRun(apiKey, agent!.agentId, STEER_PROMPT, fetch, budgetSignal(deadlineMs)).then((result) => {
               steerWhileStreamOpen = !captured.some((item) => item.event === "done" || item.event === "result");
               return result;
             });
+            // The stream is still being read. A rejection here must not be unhandled.
+            void steerPromise.catch(() => undefined);
           }
         },
       });
@@ -190,7 +192,7 @@ async function streamFollowUp(
     if (steer.status !== 409 || steer.code !== "agent_busy") {
       throw new Error(`mid-run follow-up returned HTTP ${steer.status} ${steer.code ?? ""}`.trim());
     }
-    followUp = await createFollowUpRun(apiKey, agent.agentId, FOLLOW_UP_PROMPT);
+    followUp = await createFollowUpRun(apiKey, agent.agentId, FOLLOW_UP_PROMPT, fetch, budgetSignal(deadlineMs));
     prompt = FOLLOW_UP_PROMPT;
   }
   if (!followUp.accepted || !followUp.runId) {
@@ -381,13 +383,14 @@ async function ensureCleanup(key: string, agent: LiveAgent | undefined, secrets:
   return cleanupPromise;
 }
 
+function budgetSignal(deadlineMs: number): AbortSignal {
+  return AbortSignal.timeout(Math.max(30_000, deadlineMs - Date.now()));
+}
+
 function redactError(error: unknown, secrets: readonly string[]): Error {
+  const message = redactString(error instanceof Error ? error.message : String(error), secrets);
   if (error instanceof CursorCloudApiError) {
-    return new CursorCloudApiError(error.status, error.code, redactString(error.message, secrets));
+    return new CursorCloudApiError(error.status, error.code, message);
   }
-  if (error instanceof Error) {
-    error.message = redactString(error.message, secrets);
-    return error;
-  }
-  return new Error(redactString(String(error), secrets));
+  return new Error(message);
 }
