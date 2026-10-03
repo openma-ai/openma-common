@@ -1,4 +1,4 @@
-import type { AcpRuntime, SessionOptions } from "../src/acp-runtime/index.js";
+import { forkSupport, type AcpRuntime, type SessionOptions } from "../src/acp-runtime/index.js";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -79,6 +79,7 @@ function fakeAcpRuntime(log: string[], hooks: {
         modes: null,
         promptCapabilities: {},
         supportsSessionFork: false,
+        forkSupport: forkSupport({ agentCapabilities: {}, agentInfo: null }),
         supportsSessionList: false,
         supportsSessionDelete: false,
         supportsSessionResume: true,

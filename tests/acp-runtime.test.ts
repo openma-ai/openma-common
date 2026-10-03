@@ -7,6 +7,7 @@ import {
   type ContentBlock,
 } from "@agentclientprotocol/sdk";
 import { describe, expect, it, vi } from "vitest";
+import { forkSupport } from "../src/acp-runtime/fork-support.js";
 import {
   AcpSessionImpl,
   acpForkRequestMeta,
@@ -2723,6 +2724,260 @@ describe("prompt timeout and dispose", () => {
     expect(order).toEqual(["close", "kill"]);
     await session.dispose();
     expect(kill).toHaveBeenCalledOnce();
+  });
+});
+
+describe("forkPoint session start", () => {
+  it("sends session/fork with jetbrains.air.fork merged into the caller meta", async () => {
+    let forkRequest: { _meta?: Record<string, unknown> | null } | undefined;
+    let newSessionCalled = false;
+    const sessionRequestMeta = {
+      claudeCode: { parentToolUseId: "task-1" },
+      jetbrains: { air: { note: "keep", fork: { version: 1, messageId: "stale", trace: "caller" } } },
+    };
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentInfo: { name: "fake-inclusive-fork", version: "0.0.1" },
+          agentCapabilities: {
+            sessionCapabilities: { fork: {} },
+            _meta: { jetbrains: { air: { fork: { version: 1, inclusive: true } } } },
+          },
+        };
+      },
+      async unstable_forkSession(params) {
+        forkRequest = params;
+        return { sessionId: "forked-message" };
+      },
+      async newSession() {
+        newSessionCalled = true;
+        return { sessionId: "should-not-run" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "fork-point-supported",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkFromAcpSessionId: "parent-session",
+        forkPoint: {
+          messageId: "answer-1",
+          messageText: "abc",
+          messageOccurrence: 2,
+        },
+        sessionRequestMeta,
+      },
+    });
+    await session.init();
+    await session.dispose();
+
+    expect(newSessionCalled).toBe(false);
+    expect(session.supportsSessionFork).toBe(true);
+    expect(session.forkSupport).toEqual(forkSupport(session));
+    expect(session.forkSupport).toMatchObject({
+      level: "message",
+      reason: "message-fork-advertised",
+      messageFork: { version: 1, inclusive: true, source: "capability" },
+    });
+    expect(forkRequest?._meta).toEqual({
+      claudeCode: { parentToolUseId: "task-1" },
+      jetbrains: {
+        air: {
+          note: "keep",
+          fork: {
+            version: 1,
+            messageId: "answer-1",
+            messageOccurrence: 2,
+            messageFingerprint: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            trace: "caller",
+          },
+        },
+      },
+    });
+    expect(sessionRequestMeta.jetbrains.air.fork.messageId).toBe("stale");
+    expect(acpForkRequestMeta({
+      messageId: "answer-1",
+      messageText: "abc",
+      messageOccurrence: 2,
+    }).jetbrains).toBeTruthy();
+  });
+
+  it("sends a message fork for a verified adapter that does not advertise the capability key", async () => {
+    let forkCalled = false;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentInfo: { name: "codex-acp", version: "1.10.0" },
+          agentCapabilities: { sessionCapabilities: { fork: {} } },
+        };
+      },
+      async unstable_forkSession() {
+        forkCalled = true;
+        return { sessionId: "forked-verified" };
+      },
+      async newSession() {
+        return { sessionId: "should-not-run" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "fork-point-verified",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkFromAcpSessionId: "parent-session",
+        forkPoint: { messageId: "m", messageText: "abc", messageOccurrence: 1 },
+      },
+    });
+    await session.init();
+    expect(forkCalled).toBe(true);
+    expect(session.forkSupport.reason).toBe("message-fork-verified-adapter");
+    await session.dispose();
+  });
+
+  it("refuses a message fork point without sending session/fork", async () => {
+    let forkCalled = false;
+    let newSessionCalled = false;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: { sessionCapabilities: { fork: {} } },
+        };
+      },
+      async unstable_forkSession() {
+        forkCalled = true;
+        return { sessionId: "should-not-fork" };
+      },
+      async newSession() {
+        newSessionCalled = true;
+        return { sessionId: "should-not-run" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "fork-point-unsupported",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkFromAcpSessionId: "parent-session",
+        forkPoint: { messageId: "m", messageText: "abc", messageOccurrence: 1 },
+      },
+    });
+    await expect(session.init()).rejects.toThrow(
+      "ACP agent does not support message-level fork (message-fork-not-advertised): This agent can fork the whole session but not from a specific message.",
+    );
+    expect(forkCalled).toBe(false);
+    expect(newSessionCalled).toBe(false);
+    await session.dispose();
+  });
+
+  it("refuses a caller-supplied jetbrains.air.fork when message fork is not supported", async () => {
+    let forkCalled = false;
+    const harness = createHarness(() => ({
+      async initialize() {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentInfo: { name: "codex-acp", version: "1.9.9" },
+          agentCapabilities: { sessionCapabilities: { fork: {} } },
+        };
+      },
+      async unstable_forkSession() {
+        forkCalled = true;
+        return { sessionId: "should-not-fork" };
+      },
+      async newSession() {
+        return { sessionId: "should-not-run" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "fork-meta-unsupported",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkFromAcpSessionId: "parent-session",
+        sessionRequestMeta: {
+          claudeCode: { parentToolUseId: "task-1" },
+          jetbrains: { air: { fork: { version: 1, messageId: "m" } } },
+        },
+      },
+    });
+    await expect(session.init()).rejects.toThrow(/message-fork-not-advertised/);
+    expect(forkCalled).toBe(false);
+    await session.dispose();
+  });
+
+  it("rejects forkPoint when forkFromAcpSessionId is absent", async () => {
+    let initialized = false;
+    let forkCalled = false;
+    const harness = createHarness(() => ({
+      async initialize() {
+        initialized = true;
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          agentCapabilities: {
+            sessionCapabilities: { fork: {} },
+            _meta: { jetbrains: { air: { fork: { version: 1, inclusive: true } } } },
+          },
+        };
+      },
+      async unstable_forkSession() {
+        forkCalled = true;
+        return { sessionId: "should-not-fork" };
+      },
+      async newSession() {
+        return { sessionId: "should-not-run" };
+      },
+      async prompt() {
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {},
+      async authenticate() {
+        return {};
+      },
+    }));
+    const session = new AcpSessionImpl({
+      child: harness.child,
+      id: "fork-point-without-parent",
+      options: {
+        agent: { command: "fake-agent", cwd: "/tmp/openma" },
+        forkPoint: { messageId: "m", messageText: "abc", messageOccurrence: 1 },
+      },
+    });
+    await expect(session.init()).rejects.toThrow(
+      "forkPoint can only be used together with forkFromAcpSessionId",
+    );
+    expect(initialized).toBe(false);
+    expect(forkCalled).toBe(false);
+    await session.dispose();
   });
 });
 
