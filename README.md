@@ -93,7 +93,7 @@ Use an immutable release tag in `package.json`:
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.7.2"
+    "@openma/common": "github:openma-ai/openma-common#v0.7.3"
   }
 }
 ```
