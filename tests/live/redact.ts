@@ -34,6 +34,7 @@ const SENSITIVE_KEYS = new Set([
 
 export const FIXTURE_AGENT_ID = "bc-00000000-0000-0000-0000-000000000001";
 export const FIXTURE_RUN_ID = "run-00000000-0000-0000-0000-000000000001";
+export const FIXTURE_RUN_ID_2 = "run-00000000-0000-0000-0000-000000000002";
 
 export function redactString(value: string, secrets: readonly string[]): string {
   let redacted = value;
@@ -90,11 +91,19 @@ function truncateValue(value: unknown, maxLength: number): unknown {
   return value;
 }
 
+export function replaceIdentifiers<T>(value: T, replacements: Readonly<Record<string, string>>): T {
+  let serialized = JSON.stringify(value);
+  const pairs = Object.entries(replacements)
+    .filter(([from]) => from.length > 0)
+    .sort((left, right) => right[0].length - left[0].length);
+  for (const [from, to] of pairs) serialized = serialized.split(from).join(to);
+  return JSON.parse(serialized) as T;
+}
+
 export function replaceLiveIdentifiers<T>(value: T, agentId: string, runId: string): T {
-  const serialized = JSON.stringify(value);
-  const replaced = serialized
-    .split(`https://cursor.com/agents/${agentId}`).join(`https://cursor.com/agents/${FIXTURE_AGENT_ID}`)
-    .split(agentId).join(FIXTURE_AGENT_ID)
-    .split(runId).join(FIXTURE_RUN_ID);
-  return JSON.parse(replaced) as T;
+  return replaceIdentifiers(value, {
+    [`https://cursor.com/agents/${agentId}`]: `https://cursor.com/agents/${FIXTURE_AGENT_ID}`,
+    [agentId]: FIXTURE_AGENT_ID,
+    [runId]: FIXTURE_RUN_ID,
+  });
 }

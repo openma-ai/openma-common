@@ -1,5 +1,6 @@
 /**
- * Live decode of one Cursor Cloud Agents run stream.
+ * Live decode of a Cursor Cloud Agents run, a mid-run follow-up attempt,
+ * and the follow-up run that starts after the first one finishes.
  *
  * Runs only when CURSOR_API_KEY is set. CI sets CURSOR_CLOUD_LIVE_SKIP_IF_UNSET=1
  * so a repository that cannot read the organization secret skips instead of failing.
@@ -12,15 +13,29 @@ import {
   decodeCursorCloudRunStreamEvent,
   type CursorCloudSseEvent,
 } from "../../src/protocol/cursor-cloud/index.js";
-import { assessDecodedFrames, type DecodedFrame, type LiveAssessment } from "./assess.js";
+import { assessDecodedFrames, assessRunBoundaries, userMessageTexts, type DecodedFrame, type LiveAssessment } from "./assess.js";
 import {
   cleanupLiveAgent,
   collectRunEvents,
+  createFollowUpRun,
   createLiveAgent,
   CursorCloudApiError,
+  FOLLOW_UP_PROMPT,
+  LIVE_PROMPT,
+  STEER_PROMPT,
+  type CollectedRunStream,
+  type FollowUpResult,
   type LiveAgent,
 } from "./cursor-cloud-api.js";
-import { FIXTURE_AGENT_ID, FIXTURE_RUN_ID, redactString, redactValue, replaceLiveIdentifiers, truncateStrings } from "./redact.js";
+import {
+  FIXTURE_AGENT_ID,
+  FIXTURE_RUN_ID,
+  FIXTURE_RUN_ID_2,
+  redactString,
+  redactValue,
+  replaceIdentifiers,
+  truncateStrings,
+} from "./redact.js";
 
 const LIVE_BUDGET_MS = 10 * 60 * 1000;
 
@@ -30,7 +45,7 @@ const apiKey = process.env.CURSOR_API_KEY ?? "";
 const skip = apiKey.length === 0 && process.env.CURSOR_CLOUD_LIVE_SKIP_IF_UNSET === "1";
 
 describe("Cursor Cloud live run stream", () => {
-  it.skipIf(skip)("decodes a real Cloud Agents SSE stream", async () => {
+  it.skipIf(skip)("decodes an initial run, a mid-run follow-up attempt, and a completed follow-up", async () => {
     if (apiKey.length === 0) {
       throw new Error("CURSOR_API_KEY is required. Set CURSOR_CLOUD_LIVE_SKIP_IF_UNSET=1 to skip when the secret is unavailable.");
     }
@@ -48,39 +63,68 @@ describe("Cursor Cloud live run stream", () => {
     process.on("SIGTERM", onSignal);
     process.on("SIGINT", onSignal);
     let primary: Error | undefined;
+    let steer: FollowUpResult | undefined;
+    let followUp: FollowUpResult | undefined;
+    let steerPromise: Promise<FollowUpResult> | undefined;
+    const rounds: LiveRound[] = [];
     try {
       const name = `openma-live ${process.env.GITHUB_RUN_ID ?? "local"}`.slice(0, 100);
       agent = await createLiveAgent(apiKey, name);
       writeActiveAgent(agent);
       console.log(`created cloud agent repo=${agent.repoUrl ?? "(no-repo)"} noRepo=${agent.noRepo}`);
-      const stream = await collectRunEvents(apiKey, agent, {
+      // Create A Run is the only documented way to send more text. While the
+      // initial run is CREATING or RUNNING the API returns 409 agent_busy.
+      // The Cloud Agents OpenAPI schema has no steer endpoint. The TypeScript
+      // SDK documents cloud run.steer as always returning revert_to_followup.
+      steerPromise = createFollowUpRun(apiKey, agent.agentId, STEER_PROMPT);
+      const initialStream = await collectRunEvents(apiKey, agent, {
         deadlineMs,
         onEvent: (event) => {
           captured.push(event);
         },
       });
-      const frames = decodeFrames(captured, agent);
-      const assessment = assessDecodedFrames(frames, stream.sawDone);
-      writeSample(agent, captured, assessment, stream, secrets);
-      wroteSample = true;
+      steer = await steerPromise;
+      const initial = finishRound("initial", agent.runId, LIVE_PROMPT, captured, initialStream, agent);
+      rounds.push(initial);
       console.log(redactString(JSON.stringify({
-        eventCount: assessment.eventCount,
-        eventNameCounts: assessment.eventNameCounts,
-        canonicalTypes: collapse(assessment.canonicalTypes),
-        vendorNames: collapse(assessment.vendorNames),
-        unrecognized: assessment.unrecognized,
-        shapeNotes: assessment.shapeNotes,
-        failures: assessment.failures,
-        sawDone: stream.sawDone,
-        reconnects: stream.reconnects,
-        streamExpired: stream.streamExpired,
-        retentionSeconds: stream.retentionSeconds,
-        noRepo: agent.noRepo,
+        steer: { accepted: steer.accepted, status: steer.status, code: steer.code ?? null },
+        initial: summarizeRound(initial),
       }, null, 2), secrets));
-      expect(assessment.failures, assessment.failures.join("\n")).toEqual([]);
+
+      const second = await streamFollowUp(apiKey, agent, steer, deadlineMs, secrets);
+      followUp = second.followUp;
+      if (second.round) rounds.push(second.round);
+      writeRounds(agent, rounds, steer, followUp, secrets);
+      wroteSample = true;
+      const failures = [
+        ...rounds.flatMap((round) => round.assessment?.failures ?? [`${round.label} was not assessed`]),
+        ...boundaryFailures(agent, rounds),
+        ...steerFailures(steer, rounds),
+      ];
+      console.log(redactString(JSON.stringify({
+        steer: { accepted: steer.accepted, status: steer.status, code: steer.code ?? null },
+        followUp: followUp
+          ? { accepted: followUp.accepted, status: followUp.status, code: followUp.code ?? null }
+          : null,
+        rounds: rounds.map(summarizeRound),
+        failures,
+      }, null, 2), secrets));
+      expect(failures, failures.join("\n")).toEqual([]);
     } catch (error) {
-      if (!wroteSample && captured.length > 0 && agent) {
-        writeSample(agent, captured, undefined, undefined, secrets);
+      if (!steer && steerPromise) await steerPromise.catch(() => undefined);
+      if (!wroteSample && agent && (captured.length > 0 || rounds.length > 0)) {
+        if (rounds.length === 0 && captured.length > 0) {
+          rounds.push({
+            label: "initial",
+            runId: agent.runId,
+            prompt: LIVE_PROMPT,
+            events: captured,
+            stream: undefined,
+            frames: undefined,
+            assessment: undefined,
+          });
+        }
+        writeRounds(agent, rounds, steer, followUp, secrets);
       }
       primary = redactError(error, secrets);
     } finally {
@@ -93,6 +137,124 @@ describe("Cursor Cloud live run stream", () => {
   });
 });
 
+interface LiveRound {
+  label: string;
+  runId: string;
+  prompt: string;
+  events: CursorCloudSseEvent[];
+  stream: Pick<CollectedRunStream, "sawDone" | "reconnects" | "streamExpired" | "retentionSeconds"> | undefined;
+  frames: DecodedFrame[] | undefined;
+  assessment: LiveAssessment | undefined;
+}
+
+function finishRound(
+  label: string,
+  runId: string,
+  prompt: string,
+  events: readonly CursorCloudSseEvent[],
+  stream: CollectedRunStream,
+  agent: LiveAgent,
+): LiveRound {
+  const frames = decodeFrames(events, agent.agentId, runId);
+  return {
+    label,
+    runId,
+    prompt,
+    events: [...events],
+    stream,
+    frames,
+    assessment: assessDecodedFrames(frames, stream.sawDone, { requireUserMessage: true }),
+  };
+}
+
+async function streamFollowUp(
+  apiKey: string,
+  agent: LiveAgent,
+  steer: FollowUpResult,
+  deadlineMs: number,
+  secrets: readonly string[],
+): Promise<{ followUp: FollowUpResult; round: LiveRound | undefined }> {
+  let followUp = steer;
+  let prompt = STEER_PROMPT;
+  if (!steer.accepted) {
+    if (steer.status !== 409 || steer.code !== "agent_busy") {
+      throw new Error(`mid-run follow-up returned HTTP ${steer.status} ${steer.code ?? ""}`.trim());
+    }
+    followUp = await createFollowUpRun(apiKey, agent.agentId, FOLLOW_UP_PROMPT);
+    prompt = FOLLOW_UP_PROMPT;
+  }
+  if (!followUp.accepted || !followUp.runId) {
+    throw new Error(`follow-up was not accepted: HTTP ${followUp.status} ${followUp.code ?? ""} ${followUp.message}`);
+  }
+  if (followUp.runId === agent.runId) {
+    throw new Error("follow-up run id matched the initial run id");
+  }
+  agent.runId = followUp.runId;
+  writeActiveAgent(agent);
+  const events: CursorCloudSseEvent[] = [];
+  const stream = await collectRunEvents(apiKey, agent, {
+    deadlineMs,
+    onEvent: (event) => {
+      events.push(event);
+    },
+  });
+  const round = finishRound(steer.accepted ? "mid-run-accepted" : "follow-up", followUp.runId, prompt, events, stream, agent);
+  console.log(redactString(JSON.stringify(summarizeRound(round), null, 2), secrets));
+  return { followUp, round };
+}
+
+function boundaryFailures(agent: LiveAgent, rounds: readonly LiveRound[]): string[] {
+  return assessRunBoundaries(agent.agentId, rounds.flatMap((round) => (
+    round.frames ? [{ label: round.label, turnId: round.runId, frames: round.frames }] : []
+  )));
+}
+
+function steerFailures(steer: FollowUpResult, rounds: readonly LiveRound[]): string[] {
+  const failures: string[] = [];
+  const initial = rounds.find((round) => round.label === "initial");
+  const second = rounds.find((round) => round.label !== "initial");
+  if (!initial?.frames || !second?.frames) return ["missing initial or follow-up round"];
+  const initialText = userMessageTexts(initial.frames).join("\n");
+  const secondText = userMessageTexts(second.frames);
+  if (steer.status === 409 && steer.code === "agent_busy") {
+    if (initialText.includes("steered")) {
+      failures.push("rejected mid-run prompt was still appended to the initial run");
+    }
+    if (!secondText.includes(FOLLOW_UP_PROMPT)) {
+      failures.push("follow-up run did not decode the follow-up prompt as user.message");
+    }
+  } else if (steer.accepted) {
+    const steeredInInitial = initialText.includes(STEER_PROMPT);
+    const steeredInSecond = secondText.includes(STEER_PROMPT);
+    if (!steeredInInitial && !steeredInSecond) {
+      failures.push("accepted mid-run prompt was not decoded as user.message on either run");
+    }
+  } else {
+    failures.push(`unexpected mid-run follow-up result HTTP ${steer.status} ${steer.code ?? ""}`);
+  }
+  if (secondText.includes(LIVE_PROMPT)) {
+    failures.push("follow-up run repeated the initial user prompt");
+  }
+  return failures;
+}
+
+function summarizeRound(round: LiveRound): Record<string, unknown> {
+  return {
+    label: round.label,
+    eventCount: round.assessment?.eventCount ?? round.events.length,
+    eventNameCounts: round.assessment?.eventNameCounts ?? {},
+    canonicalTypes: collapse(round.assessment?.canonicalTypes ?? []),
+    vendorNames: collapse(round.assessment?.vendorNames ?? []),
+    unrecognized: round.assessment?.unrecognized ?? [],
+    shapeNotes: round.assessment?.shapeNotes ?? [],
+    failures: round.assessment?.failures ?? [],
+    sawDone: round.stream?.sawDone ?? false,
+    reconnects: round.stream?.reconnects ?? 0,
+    streamExpired: round.stream?.streamExpired ?? false,
+    retentionSeconds: round.stream?.retentionSeconds ?? null,
+  };
+}
+
 function collapse(values: readonly string[]): string[] {
   const collapsed: string[] = [];
   for (const value of values) {
@@ -101,12 +263,8 @@ function collapse(values: readonly string[]): string[] {
   return collapsed;
 }
 
-function decodeFrames(raw: readonly CursorCloudSseEvent[], agent: LiveAgent): DecodedFrame[] {
-  const context = {
-    sessionId: agent.agentId,
-    turnId: agent.runId,
-    now: () => new Date().toISOString(),
-  };
+function decodeFrames(raw: readonly CursorCloudSseEvent[], sessionId: string, turnId: string): DecodedFrame[] {
+  const context = { sessionId, turnId, now: () => new Date().toISOString() };
   return raw.map((event) => {
     try {
       return { raw: event, events: decodeCursorCloudRunStreamEvent(event, context) };
@@ -117,42 +275,67 @@ function decodeFrames(raw: readonly CursorCloudSseEvent[], agent: LiveAgent): De
   });
 }
 
-function writeSample(
+function writeRounds(
   agent: LiveAgent,
-  events: readonly CursorCloudSseEvent[],
-  assessment: LiveAssessment | undefined,
-  stream: { sawDone: boolean; reconnects: number; streamExpired: boolean; retentionSeconds?: number } | undefined,
+  rounds: readonly LiveRound[],
+  steer: FollowUpResult | undefined,
+  followUp: FollowUpResult | undefined,
   secrets: readonly string[],
 ): void {
   mkdirSync(OUT_DIR, { recursive: true });
-  const anonymized = replaceLiveIdentifiers(
-    truncateStrings(redactValue(events, secrets), 8_000),
-    agent.agentId,
-    agent.runId,
-  );
-  const payload = {
+  const runIds = rounds.map((round) => round.runId);
+  const replacements: Record<string, string> = {
+    [`https://cursor.com/agents/${agent.agentId}`]: `https://cursor.com/agents/${FIXTURE_AGENT_ID}`,
+    [agent.agentId]: FIXTURE_AGENT_ID,
+  };
+  if (runIds[0]) replacements[runIds[0]] = FIXTURE_RUN_ID;
+  if (runIds[1]) replacements[runIds[1]] = FIXTURE_RUN_ID_2;
+  const payload = replaceIdentifiers(truncateStrings(redactValue({
     source: "https://api.cursor.com/v1/agents/{id}/runs/{runId}/stream",
     anonymized: true,
-    placeholders: { agentId: FIXTURE_AGENT_ID, runId: FIXTURE_RUN_ID },
+    placeholders: { agentId: FIXTURE_AGENT_ID, initialRunId: FIXTURE_RUN_ID, followUpRunId: FIXTURE_RUN_ID_2 },
     repoUrl: agent.repoUrl ?? null,
     noRepo: agent.noRepo,
-    sawDone: stream?.sawDone ?? false,
-    reconnects: stream?.reconnects ?? 0,
-    streamExpired: stream?.streamExpired ?? false,
-    retentionSeconds: stream?.retentionSeconds ?? null,
-    assessment: assessment
+    steer: steer
       ? {
-        eventCount: assessment.eventCount,
-        eventNameCounts: assessment.eventNameCounts,
-        canonicalTypes: assessment.canonicalTypes,
-        vendorNames: assessment.vendorNames,
-        unrecognized: assessment.unrecognized,
-        shapeNotes: assessment.shapeNotes,
-        failures: assessment.failures,
+        endpoint: "POST /v1/agents/{id}/runs",
+        sentWhile: "initial run CREATING or RUNNING",
+        accepted: steer.accepted,
+        httpStatus: steer.status,
+        code: steer.code ?? null,
       }
       : null,
-    events: anonymized,
-  };
+    followUp: followUp && followUp !== steer
+      ? {
+        endpoint: "POST /v1/agents/{id}/runs",
+        sentWhile: "after initial run completed",
+        accepted: followUp.accepted,
+        httpStatus: followUp.status,
+        code: followUp.code ?? null,
+      }
+      : null,
+    runs: rounds.map((round, index) => ({
+      label: round.label,
+      runId: index === 0 ? FIXTURE_RUN_ID : FIXTURE_RUN_ID_2,
+      prompt: round.prompt,
+      sawDone: round.stream?.sawDone ?? false,
+      reconnects: round.stream?.reconnects ?? 0,
+      streamExpired: round.stream?.streamExpired ?? false,
+      retentionSeconds: round.stream?.retentionSeconds ?? null,
+      assessment: round.assessment
+        ? {
+          eventCount: round.assessment.eventCount,
+          eventNameCounts: round.assessment.eventNameCounts,
+          canonicalTypes: round.assessment.canonicalTypes,
+          vendorNames: round.assessment.vendorNames,
+          unrecognized: round.assessment.unrecognized,
+          shapeNotes: round.assessment.shapeNotes,
+          failures: round.assessment.failures,
+        }
+        : null,
+      events: round.events,
+    })),
+  }, secrets), 8_000), replacements);
   writeFileSync(resolve(OUT_DIR, "events.json"), `${JSON.stringify(payload, null, 2)}\n`);
 }
 

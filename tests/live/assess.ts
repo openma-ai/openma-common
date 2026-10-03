@@ -53,7 +53,11 @@ export interface LiveAssessment {
   unrecognized: string[];
 }
 
-export function assessDecodedFrames(frames: readonly DecodedFrame[], sawDone: boolean): LiveAssessment {
+export function assessDecodedFrames(
+  frames: readonly DecodedFrame[],
+  sawDone: boolean,
+  options: { requireUserMessage?: boolean } = {},
+): LiveAssessment {
   const failures: string[] = [];
   const unrecognized: string[] = [];
   const eventNameCounts: Record<string, number> = {};
@@ -84,6 +88,14 @@ export function assessDecodedFrames(frames: readonly DecodedFrame[], sawDone: bo
   if (completedAt < 0) failures.push("missing completion (turn.completed)");
   else if (messageAt >= 0 && completedAt < messageAt) failures.push("completion occurred before the assistant message");
   if (!sawDone) failures.push("stream ended without a done event");
+  const userAt = canonicalTypes.findIndex((type) => type === "user.message");
+  if (options.requireUserMessage && userAt < 0) failures.push("missing user message (user.message)");
+  if (userAt >= 0 && messageAt >= 0 && userAt > messageAt) {
+    failures.push("user.message occurred after the assistant message");
+  }
+  if (frames.some((frame) => interactionType(frame.raw) === "user-message-appended") && userAt < 0) {
+    failures.push("user-message-appended did not decode to user.message");
+  }
 
   const toolFrames = frames.filter((frame) => frame.raw.event === "tool_call");
   if (toolFrames.length > 0) {
@@ -161,6 +173,51 @@ function remember(target: Map<string, Set<string>>, key: string, value: string):
   const values = target.get(key) ?? new Set<string>();
   values.add(value);
   target.set(key, values);
+}
+
+export function assessRunBoundaries(
+  sessionId: string,
+  runs: readonly { label: string; turnId: string; frames: readonly DecodedFrame[] }[],
+): string[] {
+  const failures: string[] = [];
+  const turnIds = runs.map((run) => run.turnId);
+  if (new Set(turnIds).size !== turnIds.length) failures.push("runs do not have distinct turn ids");
+  const seen = new Map<string, string>();
+  for (const run of runs) {
+    for (const frame of run.frames) {
+      for (const event of frame.events) {
+        if (event.session_id !== sessionId) {
+          failures.push(`${run.label} event ${event.event_id} session_id ${event.session_id} is not ${sessionId}`);
+        }
+        if (event.turn_id !== run.turnId) {
+          failures.push(`${run.label} event ${event.event_id} turn_id ${String(event.turn_id)} is not ${run.turnId}`);
+        }
+        const previous = seen.get(event.event_id);
+        if (previous !== undefined && previous !== run.turnId) {
+          failures.push(`event_id ${event.event_id} from turn ${previous} repeated in turn ${run.turnId}`);
+        }
+        seen.set(event.event_id, run.turnId);
+      }
+    }
+  }
+  return failures;
+}
+
+export function userMessageTexts(frames: readonly DecodedFrame[]): string[] {
+  const texts: string[] = [];
+  for (const frame of frames) {
+    for (const event of frame.events) {
+      if (event.type !== "user.message") continue;
+      const data = record(event.data);
+      if (typeof data?.text === "string") texts.push(data.text);
+    }
+  }
+  return texts;
+}
+
+function interactionType(event: CursorCloudSseEvent): string {
+  const body = record(event.data);
+  return typeof body?.type === "string" ? body.type : "";
 }
 
 function toolStatus(event: CursorCloudSseEvent): string {

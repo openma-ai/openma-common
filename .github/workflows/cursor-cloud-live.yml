@@ -1,4 +1,5 @@
-# Live decode of a real Cursor Cloud Agents run stream.
+# Live decode of a real Cursor Cloud Agents run stream, including one
+# mid-run follow-up attempt and one follow-up run after the first finishes.
 # This workflow is intentionally separate from ci.yml. Ordinary pull requests
 # must not depend on it: a missing organization secret skips, and a fork
 # pull request never receives secrets. Failures here are the live API check

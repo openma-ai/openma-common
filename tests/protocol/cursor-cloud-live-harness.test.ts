@@ -5,11 +5,13 @@ import {
   decodeCursorCloudRunStreamEvent,
   type CursorCloudSseEvent,
 } from "../../src/protocol/cursor-cloud/index.js";
-import { assessDecodedFrames, DOCUMENTED_SSE_EVENTS } from "../live/assess.js";
+import { assessDecodedFrames, assessRunBoundaries, DOCUMENTED_SSE_EVENTS } from "../live/assess.js";
 import {
   buildCreateAgentRequest,
+  buildFollowUpRequest,
   cleanupLiveAgent,
   collectRunEvents,
+  createFollowUpRun,
   createLiveAgent,
   CursorCloudApiError,
   cursorCloudAuthorization,
@@ -173,6 +175,20 @@ describe("Cursor Cloud live harness", () => {
     expect(cursorCloudAuthorization("test-key")).toBe(`Basic ${Buffer.from("test-key:", "utf8").toString("base64")}`);
   });
 
+  it("records 409 agent_busy for a mid-run follow-up and accepts a later follow-up run", async () => {
+    expect(buildFollowUpRequest("follow up")).toEqual({ prompt: { text: "follow up" } });
+    const busy = await createFollowUpRun("test-key", "bc-1", "steer", async () => (
+      jsonResponse({ error: { code: "agent_busy", message: "a run is active" } }, 409)
+    ));
+    expect(busy).toMatchObject({ accepted: false, status: 409, code: "agent_busy" });
+    const accepted = await createFollowUpRun("test-key", "bc-1", "follow up", async (_input, init) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ prompt: { text: "follow up" } });
+      expect(String(_input)).toBe("https://api.cursor.com/v1/agents/bc-1/runs");
+      return jsonResponse({ run: { id: "run-2", agentId: "bc-1", status: "CREATING" } }, 200);
+    });
+    expect(accepted).toEqual({ accepted: true, status: 200, runId: "run-2", message: "accepted" });
+  });
+
   it("does not create a second agent when authentication fails", async () => {
     let calls = 0;
     const attempt = createLiveAgent("test-key", "probe", async () => {
@@ -278,6 +294,32 @@ describe("Cursor Cloud live harness", () => {
     ], true);
     expect(silent.failures.join("\n")).toContain("assistant");
     expect(silent.failures.join("\n")).not.toContain("heartbeat");
+  });
+
+  it("rejects a follow-up whose events reuse the previous turn", () => {
+    const first = decodeAll([{ event: "status", data: { runId: RUN, status: "RUNNING" } }]);
+    const second = first.map((frame) => ({
+      raw: frame.raw,
+      events: frame.events.map((event) => ({ ...event, turn_id: "run-2" })),
+    }));
+    second[0]?.events[0] && (second[0].events[0] = { ...second[0].events[0], event_id: first[0]?.events[0]?.event_id ?? "" });
+    const failures = assessRunBoundaries(SESSION, [
+      { label: "initial", turnId: RUN, frames: first },
+      { label: "follow-up", turnId: "run-2", frames: second },
+    ]);
+    expect(failures.join("\n")).toContain("repeated");
+    const distinct = assessRunBoundaries(SESSION, [
+      { label: "initial", turnId: RUN, frames: first },
+      {
+        label: "follow-up",
+        turnId: "run-2",
+        frames: [{
+          raw: { event: "status", data: { status: "RUNNING" } },
+          events: [{ ...first[0]!.events[0]!, event_id: `status:run-2:RUNNING`, turn_id: "run-2" }],
+        }],
+      },
+    ]);
+    expect(distinct).toEqual([]);
   });
 
   it("keeps the live workflow outside the ordinary CI checks", () => {

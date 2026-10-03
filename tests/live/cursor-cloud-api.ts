@@ -11,13 +11,20 @@ import { readSseEvents } from "./parse-sse.js";
 
 export const CURSOR_CLOUD_API_ORIGIN = "https://api.cursor.com";
 
-export const LIVE_PROMPT = [
-  "Reply with exactly the word hello and then stop.",
+const READ_ONLY_SUFFIX = [
   "Do not use tools.",
   "Do not read or modify files.",
   "Do not run commands.",
   "Do not commit, push, or open a pull request.",
 ].join(" ");
+
+export const LIVE_PROMPT = `Reply with exactly the word hello and then stop. ${READ_ONLY_SUFFIX}`;
+
+/** Sent with Create A Run while the initial run is still CREATING or RUNNING. */
+export const STEER_PROMPT = `Reply with exactly the word steered and then stop. ${READ_ONLY_SUFFIX}`;
+
+/** Sent with Create A Run only after the initial run has finished. */
+export const FOLLOW_UP_PROMPT = `Reply with exactly the word followup and then stop. ${READ_ONLY_SUFFIX}`;
 
 /** Public repository. Used only when the key's GitHub installation can see it. */
 export const LIVE_REPOSITORY = {
@@ -76,6 +83,54 @@ export interface CollectedRunStream {
 }
 
 type FetchLike = typeof fetch;
+
+export function buildFollowUpRequest(text: string): { prompt: { text: string } } {
+  return { prompt: { text } };
+}
+
+export interface FollowUpResult {
+  accepted: boolean;
+  status: number;
+  code?: string;
+  runId?: string;
+  message: string;
+}
+
+/**
+ * `POST /v1/agents/{id}/runs`. The docs say a follow-up while the agent has
+ * a CREATING or RUNNING run returns 409 `agent_busy`. That response is
+ * returned, not thrown, so the live test can record the mid-run result.
+ * There is no separate steer endpoint in the Cloud Agents OpenAPI schema.
+ */
+export async function createFollowUpRun(
+  apiKey: string,
+  agentId: string,
+  text: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<FollowUpResult> {
+  const response = await fetchImpl(`${CURSOR_CLOUD_API_ORIGIN}/v1/agents/${encodeURIComponent(agentId)}/runs`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      Authorization: cursorCloudAuthorization(apiKey),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(buildFollowUpRequest(text)),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    const error = errorFromPayload(response.status, payload);
+    return { accepted: false, status: error.status, code: error.code, message: error.message };
+  }
+  const body = record(payload);
+  const run = record(body?.run);
+  const runId = typeof run?.id === "string" ? run.id : undefined;
+  if (!runId) {
+    throw new CursorCloudApiError(response.status, "validation_error", "follow-up response did not include run.id");
+  }
+  return { accepted: true, status: response.status, runId, message: "accepted" };
+}
 
 export async function createLiveAgent(apiKey: string, name: string, fetchImpl: FetchLike = fetch): Promise<LiveAgent> {
   try {

@@ -362,6 +362,41 @@ describe("Cursor Cloud run SSE decoder", () => {
     ]);
   });
 
+  it("maps a live user-message-appended update to user.message", () => {
+    // Captured from Actions run 37110762427. The simplified event list has
+    // no user event; the prompt arrives only on this interaction update.
+    const userMessage = {
+      type: "user_message",
+      session_id: RUN,
+      text: "Reply with exactly the word hello and then stop.",
+    };
+    const data = { type: "user-message-appended", userMessage };
+    expect(decode({ event: "interaction_update", id: "1791017141403-0", data })).toEqual([
+      canonical("user.message", "user:1791017141403-0", {
+        message_id: `${RUN}:user:1791017141403-0`,
+        text: userMessage.text,
+        adapter_meta: {
+          cursor_event: "interaction_update",
+          sse_id: "1791017141403-0",
+          interaction_type: "user-message-appended",
+          user_message: userMessage,
+        },
+      }),
+    ]);
+    expect(decode({
+      event: "interaction_update",
+      id: "missing-text",
+      data: { type: "user-message-appended", userMessage: { type: "user_message" } },
+    })).toEqual([
+      vendor(
+        "interaction_update",
+        "interaction_update:missing-text",
+        { type: "user-message-appended", userMessage: { type: "user_message" } },
+        "missing-text",
+      ),
+    ]);
+  });
+
   it("drops heartbeat and done", () => {
     expect(decode({ event: "heartbeat", id: "hb-1", data: {} })).toEqual([]);
     expect(decode({ event: "done", data: { ignored: true } })).toEqual([]);
