@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "private": true,
   "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
@@ -158,7 +158,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm test && pnpm typecheck && pnpm build",
-    "verify:host-parity": "node scripts/verify-host-component-parity.mjs"
+    "verify:host-parity": "node scripts/verify-host-component-parity.mjs",
+    "verify:chat-ui-interactive-surface": "node scripts/verify-chat-ui-interactive-surface.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.120.0",

@@ -339,7 +339,8 @@ export function ChatThoughtEventRow({
         type="button"
         aria-expanded={open}
         onClick={toggleOpen}
-        className="activity-disclosure-row min-h-6 text-[13px]"
+        className="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
+        data-chat-activity-disclosure-trigger="true"
       >
         {resolvedProjection.leading && (
           <span className="grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center">
@@ -511,8 +512,10 @@ export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({
     <CollapsibleTrigger
       ref={triggerRef}
       className={chatClassNames(
-        "chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
-        showIcon && "chat-reasoning-trigger--chip",
+        "chat-interactive-surface chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+        showIcon
+          ? "chat-interactive-surface--chip chat-reasoning-trigger--chip"
+          : "chat-interactive-surface--transcript",
         className,
       )}
       data-chat-reasoning-trigger="true"
@@ -627,7 +630,8 @@ function ChatCollapsibleEventSequenceGroup({
         type="button"
         aria-expanded={open}
         onClick={toggleOpen}
-        className="activity-disclosure-row min-h-6 text-[13px]"
+        className="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
+        data-chat-activity-disclosure-trigger="true"
       >
         {projected.leading && (
           <span className="grid size-[var(--chat-activity-icon-size)] shrink-0 place-items-center">

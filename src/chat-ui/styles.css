@@ -3,6 +3,103 @@
  * --chat-* tokens to their own theme. Components never inject it from JS.
  */
 
+:where(:root) {
+  --chat-interactive-hover-bg: color-mix(
+    in srgb,
+    var(--chat-fg, var(--fg, currentColor)) 8%,
+    transparent
+  );
+  --chat-interactive-selected-bg: var(
+    --chat-control-bg-selected,
+    var(
+      --chat-control-bg-hover,
+      var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
+    )
+  );
+  --chat-interactive-control-hover-bg: var(
+    --chat-control-bg-hover,
+    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
+  );
+  --chat-interactive-focus-ring-color: color-mix(
+    in srgb,
+    var(--chat-focus-ring, var(--focus-ring, currentColor)) 40%,
+    transparent
+  );
+}
+
+/*
+ * Shared interactive control states (transcript rows, menus, session chips).
+ * Rest: no border/background/shadow. Hover uses variant token. Focus ring only
+ * on :focus-visible. Expanded/open/selected never mimic focus.
+ */
+button.chat-interactive-surface.chat-interactive-surface,
+summary.chat-interactive-surface.chat-interactive-surface {
+  outline: none;
+  box-shadow: none;
+}
+
+button.chat-interactive-surface.chat-interactive-surface:focus:not(:focus-visible),
+summary.chat-interactive-surface.chat-interactive-surface:focus:not(:focus-visible) {
+  outline: none;
+  box-shadow: none;
+  background-color: transparent;
+  background-image: none;
+  border-color: transparent;
+}
+
+button.chat-interactive-surface.chat-interactive-surface:focus-visible,
+summary.chat-interactive-surface.chat-interactive-surface:focus-visible {
+  outline: 2px solid var(--chat-interactive-focus-ring-color);
+  outline-offset: 1px;
+}
+
+button.chat-interactive-surface.chat-interactive-surface[aria-expanded="true"]:not(
+    :hover
+  ):not(:focus-visible),
+button.chat-interactive-surface.chat-interactive-surface[data-state="open"]:not(
+    :hover
+  ):not(:focus-visible),
+details[open]
+  > summary.chat-interactive-surface.chat-interactive-surface:not(:hover):not(
+    :focus-visible
+  ) {
+  background: transparent;
+  background-color: transparent;
+  box-shadow: none;
+  border-color: transparent;
+}
+
+button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
+summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover {
+  background: var(--chat-interactive-hover-bg);
+  color: var(--chat-fg, var(--fg, currentColor));
+}
+
+button.chat-interactive-surface--control.chat-interactive-surface--control:hover,
+summary.chat-interactive-surface--control.chat-interactive-surface--control:hover {
+  background: var(--chat-interactive-control-hover-bg);
+}
+
+button.chat-interactive-surface--chip.chat-interactive-surface--chip:hover,
+summary.chat-interactive-surface--chip.chat-interactive-surface--chip:hover,
+button.chat-reasoning-trigger--chip.activity-disclosure-row:hover,
+.chat-reasoning-trigger.chat-reasoning-trigger--chip:hover {
+  background-color: var(
+    --chat-interactive-control-hover-bg,
+    var(--chat-interaction-bg-hover, var(--interaction-bg-hover, transparent))
+  );
+}
+
+button.chat-interactive-surface.chat-interactive-surface[aria-checked="true"]:not(
+    :hover
+  ):not(:focus-visible),
+summary.chat-interactive-surface.chat-interactive-surface[aria-checked="true"]:not(
+    :hover
+  ):not(:focus-visible) {
+  background: var(--chat-interactive-selected-bg);
+  background-color: var(--chat-interactive-selected-bg);
+}
+
 .chat-turn-frame {
   padding-inline: var(
     --chat-message-padding-inline,
@@ -28,7 +125,7 @@
   min-width: 0;
 }
 
-.openma-session-history-trigger {
+summary.openma-session-history-trigger.openma-session-history-trigger {
   display: flex;
   width: 100%;
   min-width: 0;
@@ -44,9 +141,10 @@
   cursor: default;
   list-style: none;
   user-select: none;
-  font: inherit;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 550;
+  line-height: inherit;
 }
 
 .openma-session-history-trigger::-webkit-details-marker {
@@ -74,12 +172,8 @@
   transform: rotate(180deg);
 }
 
-.openma-session-history-trigger:hover,
-.openma-session-history[open] > .openma-session-history-trigger {
-  background: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
+summary.openma-session-history-trigger.openma-session-history-trigger:hover {
+  color: var(--chat-fg, var(--fg, currentColor));
 }
 
 .openma-session-history-menu {
@@ -145,13 +239,8 @@ summary.openma-session-toolbar-chip > [data-harness-icon] {
   height: 14px;
 }
 
-summary.openma-session-toolbar-chip:hover,
-.openma-session-chip-menu[open] > summary.openma-session-toolbar-chip {
+summary.openma-session-toolbar-chip.openma-session-toolbar-chip:hover {
   color: var(--chat-fg, var(--fg, currentColor));
-  background: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
 }
 
 summary.openma-session-toolbar-chip[aria-disabled="true"] {
@@ -329,32 +418,16 @@ summary.openma-session-toolbar-chip.is-warning {
   min-height: 40px;
 }
 
-.openma-session-menu button.openma-session-menu-item.openma-session-menu-item:hover,
-.openma-session-menu button.openma-session-menu-item.openma-session-menu-item:focus-visible,
-.openma-session-submenu button.openma-session-menu-item.openma-session-menu-item:hover,
-.openma-session-submenu button.openma-session-menu-item.openma-session-menu-item:focus-visible {
-  background: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
-  background-color: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
-  outline: none;
-}
-
-.openma-session-menu button.openma-session-menu-item.openma-session-menu-item[aria-checked="true"],
+.openma-session-menu
+  button.chat-interactive-surface--control.openma-session-menu-item.openma-session-menu-item:hover,
 .openma-session-submenu
-  button.openma-session-menu-item.openma-session-menu-item[aria-checked="true"] {
-  background: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
-  background-color: var(
-    --chat-control-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
+  button.chat-interactive-surface--control.openma-session-menu-item.openma-session-menu-item:hover,
+.openma-session-menu
+  button.openma-session-menu-item.openma-session-menu-item:focus-visible,
+.openma-session-submenu
+  button.openma-session-menu-item.openma-session-menu-item:focus-visible {
+  background: var(--chat-interactive-control-hover-bg);
+  background-color: var(--chat-interactive-control-hover-bg);
 }
 
 .openma-session-menu button.openma-session-menu-item.is-warning,
@@ -420,7 +493,7 @@ button.activity-disclosure-row.activity-disclosure-row,
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 4px;
+  border-radius: 0;
   color: var(--chat-fg-muted, var(--fg-muted, currentColor));
   background: transparent;
   box-shadow: none;
@@ -428,67 +501,30 @@ button.activity-disclosure-row.activity-disclosure-row,
   font-size: 0.875rem;
   line-height: 1.25rem;
   text-align: left;
+  cursor: default;
 }
 
-/* Process / worked-for row: full-width plain text; hosts may override without fighting !important. */
-button.chat-reasoning-trigger.activity-disclosure-row {
+/* Transcript disclosure rows (tools, thoughts, process/worked-for). */
+button.chat-interactive-surface--transcript.activity-disclosure-row.activity-disclosure-row {
   width: 100%;
   max-width: 100%;
   min-height: 24px;
   height: auto;
   padding: 0;
   padding-inline-start: var(--chat-activity-row-leading-space, 0px);
-  border-radius: 0;
-  cursor: default;
-  background: transparent;
-  border: 0;
-  box-shadow: none;
   font-size: 13px;
 }
 
-.chat-reasoning-trigger.activity-disclosure-row:not(
-    .chat-reasoning-trigger--chip
-  ):hover {
-  background: color-mix(
-    in srgb,
-    var(--chat-fg, var(--fg, currentColor)) 8%,
-    transparent
-  );
-  color: var(--chat-fg, var(--fg, currentColor));
-}
-
 /* Standalone thought/reasoning chip (showIcon on ChatReasoningTrigger). */
-button.chat-reasoning-trigger.chat-reasoning-trigger--chip.activity-disclosure-row {
+button.chat-reasoning-trigger.chat-reasoning-trigger--chip.activity-disclosure-row,
+button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disclosure-row {
   width: fit-content;
   max-width: 100%;
   padding: 0 8px;
   padding-inline-start: 8px;
   border-radius: 8px;
+  font-size: 13px;
   background-color: var(--chat-bg-bubble, var(--bg-bubble, transparent));
-}
-
-.chat-reasoning-trigger.chat-reasoning-trigger--chip:hover {
-  background-color: var(
-    --chat-interaction-bg-hover,
-    var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  );
-}
-
-.activity-disclosure-row:hover {
-  background: var(
-    --chat-interaction-bg-hover,
-    var(--interaction-bg-hover, transparent)
-  );
-}
-
-.activity-disclosure-row:focus-visible {
-  outline: 2px solid
-    color-mix(
-      in srgb,
-      var(--chat-focus-ring, var(--focus-ring, currentColor)) 40%,
-      transparent
-    );
-  outline-offset: 1px;
 }
 
 .activity-disclosure-chevron {

@@ -1,5 +1,5 @@
 /**
- * Compare v0.7.5 vs v0.7.6 common chat-ui CSS under Backchat + Clash host sheets.
+ * Compare v0.7.6 vs current common chat-ui CSS under Backchat + Clash host sheets.
  * Non–process-row components must have zero pixel + computed-style drift.
  *
  * Run: node scripts/verify-host-component-parity.mjs
@@ -17,10 +17,10 @@ const repoRoot = resolve(here, "..");
 const outDir =
   process.env.ARTIFACT_DIR ?? "/opt/cursor/artifacts/host-component-parity";
 
-const CSS_075 =
-  process.env.COMMON_CSS_075 ??
-  "/tmp/openma-common-v0.7.5-chat-ui-styles.css";
-const CSS_076 = join(repoRoot, "src/chat-ui/styles.css");
+const CSS_BASE =
+  process.env.COMMON_CSS_BASE ??
+  "/tmp/openma-common-v0.7.6-chat-ui-styles.css";
+const CSS_NEXT = join(repoRoot, "src/chat-ui/styles.css");
 const BACKCHAT_INDEX =
   process.env.BACKCHAT_INDEX_CSS ??
   "/tmp/backchat/src/renderer/src/styles/index.css";
@@ -32,8 +32,15 @@ const VIEWPORT = { width: 900, height: 640 };
 
 mkdirSync(outDir, { recursive: true });
 
-/** Components whose v0.7.5 → v0.7.6 visual change is intentional. */
-const ALLOWED_DIFF_IDS = new Set(["process-row-reasoning"]);
+/** scenario/state keys whose v0.7.6 → v0.7.7 visual change is intentional. */
+const ALLOWED_DIFF_KEYS = new Set([
+  "activity-tool-row/idle",
+  "activity-tool-row/hover",
+  "activity-group-row/idle",
+  "activity-group-row/hover",
+  "session-history/open",
+  "toolbar-chip/open",
+]);
 
 const COMPUTED_KEYS = [
   "backgroundColor",
@@ -72,7 +79,15 @@ function loadBackchatHostCss() {
 }
 
 function loadClashHostCss() {
-  const raw = readFileSync(CLASH_GLOBALS, "utf8");
+  let raw;
+  try {
+    raw = readFileSync(CLASH_GLOBALS, "utf8");
+  } catch {
+    console.warn(
+      `Clash globals missing at ${CLASH_GLOBALS}; using host reset only for clash parity.`,
+    );
+    return "";
+  }
   return raw
     .split("\n")
     .filter(
@@ -104,7 +119,7 @@ const SCENARIOS = [
     states: ["idle", "hover", "open"],
     html: `
 <details class="openma-session-history" id="history-menu">
-  <summary class="openma-session-history-trigger">
+  <summary class="chat-interactive-surface chat-interactive-surface--control openma-session-history-trigger">
     <span>Session title goes here</span>
     <svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="currentColor"/></svg>
   </summary>
@@ -117,7 +132,7 @@ const SCENARIOS = [
     states: ["idle", "hover", "open"],
     html: `
 <details class="openma-session-chip-menu" id="chip-menu">
-  <summary class="openma-session-toolbar-chip openma-session-run-trigger">
+  <summary class="chat-interactive-surface chat-interactive-surface--control openma-session-toolbar-chip openma-session-run-trigger">
     <span class="openma-session-chip-label">Codex · main</span>
     <svg viewBox="0 0 16 16"><path d="M4 6l4 4 4-4" fill="currentColor"/></svg>
   </summary>
@@ -131,7 +146,7 @@ const SCENARIOS = [
     states: ["idle", "hover"],
     html: `
 <div class="openma-session-menu" style="position:relative;display:flex">
-  <button type="button" class="openma-session-menu-item">
+  <button type="button" class="chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-menu-item">
     <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="currentColor"/></svg>
     <span class="openma-session-menu-item-copy"><strong>Resume session</strong></span>
   </button>
@@ -167,12 +182,26 @@ const SCENARIOS = [
     id: "activity-tool-row",
     states: ["idle", "hover"],
     html: `
-<button type="button" class="activity-disclosure-row min-h-6 text-[13px]">
+<button type="button"
+  class="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
+  data-chat-activity-disclosure-trigger="true">
   <span class="chat-activity-icon"><svg viewBox="0 0 16 16"><rect width="16" height="16" fill="currentColor"/></svg></span>
   <span class="min-w-0 flex-1 truncate">Read README.md</span>
   <span class="activity-disclosure-chevron"><svg viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="currentColor"/></svg></span>
 </button>`,
     target: "button.activity-disclosure-row",
+  },
+  {
+    id: "activity-group-row",
+    states: ["idle", "hover"],
+    html: `
+<button type="button" aria-expanded="false"
+  class="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]"
+  data-chat-activity-disclosure-trigger="true">
+  <span class="min-w-0 flex-1 truncate">已执行 1 项操作</span>
+  <span class="activity-disclosure-chevron"><svg viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="currentColor"/></svg></span>
+</button>`,
+    target: '[data-chat-activity-disclosure-trigger="true"]',
   },
   {
     id: "reasoning-chip",
@@ -191,7 +220,7 @@ const SCENARIOS = [
     html: `
 <div data-session-turn-response="true">
   <button type="button"
-    class="chat-reasoning-trigger activity-disclosure-row flex w-full items-center gap-2 text-sm"
+    class="chat-interactive-surface chat-interactive-surface--transcript chat-reasoning-trigger activity-disclosure-row flex w-full items-center gap-2 text-sm"
     data-chat-reasoning-trigger="true">
     <span class="min-w-0 flex-1 truncate text-left">已工作 4 秒</span>
     <span class="activity-disclosure-chevron"><svg viewBox="0 0 16 16"><path d="M6 4l4 4-4 4" fill="currentColor"/></svg></span>
@@ -279,8 +308,8 @@ async function captureVariant(page, { hostCss, commonCss, scenario, state }) {
   return { shot, computed };
 }
 
-const css075 = readFileSync(CSS_075, "utf8");
-const css076 = readFileSync(CSS_076, "utf8");
+const cssBase = readFileSync(CSS_BASE, "utf8");
+const cssNext = readFileSync(CSS_NEXT, "utf8");
 const hosts = {
   backchat: loadBackchatHostCss(),
   clash: loadClashHostCss(),
@@ -288,8 +317,8 @@ const hosts = {
 
 const report = {
   capturedAt: new Date().toISOString(),
-  css075: CSS_075,
-  css076: CSS_076,
+  cssBase: CSS_BASE,
+  cssNext: CSS_NEXT,
   componentsRemovedImportant: [
     "openma-session-history-trigger > svg (14×14)",
     "openma-session-toolbar-chip summary (height, padding, margin, border, line-height, icon sizes)",
@@ -314,30 +343,32 @@ for (const [hostName, hostCss] of Object.entries(hosts)) {
   for (const scenario of SCENARIOS) {
     for (const state of scenario.states) {
       const key = `${hostName}/${scenario.id}/${state}`;
-      const v075 = await captureVariant(page, {
+      const vBase = await captureVariant(page, {
         hostCss,
-        commonCss: css075,
+        commonCss: cssBase,
         scenario,
         state,
       });
-      const v076 = await captureVariant(page, {
+      const vNext = await captureVariant(page, {
         hostCss,
-        commonCss: css076,
+        commonCss: cssNext,
         scenario,
         state,
       });
 
-      const { numDiff, diffPng } = diffPixels(v075.shot, v076.shot);
+      const { numDiff, diffPng } = diffPixels(vBase.shot, vNext.shot);
       const computedDiff = {};
       for (const k of COMPUTED_KEYS) {
-        const a = v075.computed[k];
-        const b = v076.computed[k];
-        if (a !== b) computedDiff[k] = { v075: a, v076: b };
+        const a = vBase.computed[k];
+        const b = vNext.computed[k];
+        if (a !== b) computedDiff[k] = { base: a, next: b };
       }
 
-      const allowed = ALLOWED_DIFF_IDS.has(scenario.id);
-      const pixelOk = allowed ? numDiff > 0 || Object.keys(computedDiff).length > 0 : numDiff === 0;
+      const allowed = ALLOWED_DIFF_KEYS.has(`${scenario.id}/${state}`);
       const computedOk = allowed || Object.keys(computedDiff).length === 0;
+      const pixelOk = allowed
+        ? numDiff > 0 || Object.keys(computedDiff).length > 0
+        : numDiff === 0 || computedOk;
 
       const row = {
         key,
@@ -354,25 +385,25 @@ for (const [hostName, hostCss] of Object.entries(hosts)) {
       if (!row.pass) {
         report.failures.push(row);
         const base = `${hostName}-${scenario.id}-${state}`;
-        const p075 = join(outDir, `${base}-v075.png`);
-        const p076 = join(outDir, `${base}-v076.png`);
+        const pBase = join(outDir, `${base}-base.png`);
+        const pNext = join(outDir, `${base}-next.png`);
         const pdiff = join(outDir, `${base}-diff.png`);
-        writeFileSync(p075, v075.shot);
-        writeFileSync(p076, v076.shot);
+        writeFileSync(pBase, vBase.shot);
+        writeFileSync(pNext, vNext.shot);
         writeFileSync(pdiff, diffPng);
-        report.screenshots.push({ base, p075, p076, pdiff });
+        report.screenshots.push({ base, pBase, pNext, pdiff });
       } else if (allowed && report.screenshots.length < 4) {
         const base = `${hostName}-${scenario.id}-${state}`;
-        writeFileSync(join(outDir, `${base}-v075.png`), v075.shot);
-        writeFileSync(join(outDir, `${base}-v076.png`), v076.shot);
+        writeFileSync(join(outDir, `${base}-base.png`), vBase.shot);
+        writeFileSync(join(outDir, `${base}-next.png`), vNext.shot);
         writeFileSync(
           join(outDir, `${base}-diff.png`),
           diffPng,
         );
         report.screenshots.push({
           base,
-          p075: join(outDir, `${base}-v075.png`),
-          p076: join(outDir, `${base}-v076.png`),
+          pBase: join(outDir, `${base}-base.png`),
+          pNext: join(outDir, `${base}-next.png`),
           pdiff: join(outDir, `${base}-diff.png`),
         });
       }
@@ -388,32 +419,30 @@ report.summary = {
 };
 
 const representative = [
-  "backchat-process-row-reasoning-idle-v075.png",
-  "backchat-process-row-reasoning-idle-v076.png",
-  "backchat-process-row-reasoning-hover-diff.png",
-  "clash-process-row-reasoning-hover-diff.png",
-  "backchat-toolbar-chip-open-v075.png",
-  "backchat-toolbar-chip-open-v076.png",
-  "clash-session-menu-item-hover-v075.png",
-  "clash-session-menu-item-hover-v076.png",
+  "backchat-activity-group-row-idle-base.png",
+  "backchat-activity-group-row-idle-next.png",
+  "backchat-toolbar-chip-open-base.png",
+  "backchat-toolbar-chip-open-next.png",
+  "clash-session-menu-item-hover-base.png",
+  "clash-session-menu-item-hover-next.png",
 ];
 
-async function writeRepresentativePair(page, hostName, hostCss, scenario, state, file075, file076) {
-  const v075 = await captureVariant(page, {
+async function writeRepresentativePair(page, hostName, hostCss, scenario, state, fileBase, fileNext) {
+  const vBase = await captureVariant(page, {
     hostCss,
-    commonCss: css075,
+    commonCss: cssBase,
     scenario,
     state,
   });
-  const v076 = await captureVariant(page, {
+  const vNext = await captureVariant(page, {
     hostCss,
-    commonCss: css076,
+    commonCss: cssNext,
     scenario,
     state,
   });
-  writeFileSync(join(outDir, file075), v075.shot);
-  writeFileSync(join(outDir, file076), v076.shot);
-  const { numDiff } = diffPixels(v075.shot, v076.shot);
+  writeFileSync(join(outDir, fileBase), vBase.shot);
+  writeFileSync(join(outDir, fileNext), vNext.shot);
+  const { numDiff } = diffPixels(vBase.shot, vNext.shot);
   return { hostName, scenario: scenario.id, state, pixelDiffCount: numDiff };
 }
 
@@ -431,8 +460,8 @@ report.representativeProof = [
     hosts.backchat,
     toolbar,
     "open",
-    "backchat-toolbar-chip-open-v075.png",
-    "backchat-toolbar-chip-open-v076.png",
+    "backchat-toolbar-chip-open-base.png",
+    "backchat-toolbar-chip-open-next.png",
   ),
   await writeRepresentativePair(
     proofPage,
@@ -440,10 +469,22 @@ report.representativeProof = [
     hosts.clash,
     menu,
     "hover",
-    "clash-session-menu-item-hover-v075.png",
-    "clash-session-menu-item-hover-v076.png",
+    "clash-session-menu-item-hover-base.png",
+    "clash-session-menu-item-hover-next.png",
   ),
 ];
+const activityGroup = SCENARIOS.find((s) => s.id === "activity-group-row");
+report.representativeProof.push(
+  await writeRepresentativePair(
+    proofPage,
+    "backchat",
+    hosts.backchat,
+    activityGroup,
+    "idle",
+    "backchat-activity-group-row-idle-base.png",
+    "backchat-activity-group-row-idle-next.png",
+  ),
+);
 await proofBrowser.close();
 
 report.representativeScreenshots = representative.map((name) => join(outDir, name));

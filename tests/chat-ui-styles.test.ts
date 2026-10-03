@@ -15,6 +15,8 @@ describe("chat UI host style contract", () => {
       ".chat-activity-icon",
       ".activity-disclosure-row",
       ".activity-disclosure-chevron",
+      ".chat-interactive-surface",
+      ".chat-interactive-surface--transcript",
       ".home-empty-stage",
       ".home-empty-stack",
       ".home-composer-stack",

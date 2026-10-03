@@ -13,9 +13,9 @@ export function SessionHistoryMenu({ activeSessionId, sessions, className = "", 
     const menuRef = useRef(null);
     const activeSession = sessions.find(({ id }) => id === activeSessionId)
         ?? sessions[0];
-    return (_jsxs("details", { className: `openma-session-history ${className}`.trim(), ref: menuRef, children: [_jsxs("summary", { className: "openma-session-history-trigger", "data-session-history-trigger": "true", "aria-label": "Chat history", title: activeSession?.title ?? "Chat history", children: [_jsx("span", { children: activeSession?.title ?? "New chat" }), _jsx(ChevronDownIcon, { size: 14, "aria-hidden": "true" })] }), _jsx("div", { className: "openma-session-menu openma-session-history-menu", role: "menu", "aria-label": "Chat history", children: sessions.map((session) => {
+    return (_jsxs("details", { className: `openma-session-history ${className}`.trim(), ref: menuRef, children: [_jsxs("summary", { className: "chat-interactive-surface chat-interactive-surface--control openma-session-history-trigger", "data-session-history-trigger": "true", "aria-label": "Chat history", title: activeSession?.title ?? "Chat history", children: [_jsx("span", { children: activeSession?.title ?? "New chat" }), _jsx(ChevronDownIcon, { size: 14, "aria-hidden": "true" })] }), _jsx("div", { className: "openma-session-menu openma-session-history-menu", role: "menu", "aria-label": "Chat history", children: sessions.map((session) => {
                     const active = session.id === activeSessionId;
-                    return (_jsxs("button", { type: "button", role: "menuitemradio", "aria-checked": active, className: "openma-session-menu-item openma-session-history-item", onClick: () => {
+                    return (_jsxs("button", { type: "button", role: "menuitemradio", "aria-checked": active, className: "chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-history-item", onClick: () => {
                             onSelectSession(session.id);
                             menuRef.current?.removeAttribute("open");
                         }, children: [_jsx("span", { className: "openma-session-menu-item-copy", children: _jsx("strong", { children: session.title }) }), active ? _jsx(CheckIcon, { size: 14, "aria-hidden": "true" }) : null] }, session.id));
@@ -55,14 +55,14 @@ function SessionModeMenu({ harnessId, option, disabled, onSetConfigOption, }) {
         return null;
     const presentation = sessionModePresentation(harnessId, selected);
     const ModeIcon = sessionModeIcon(selected.value);
-    return (_jsxs("details", { className: "openma-session-chip-menu", ref: menuRef, children: [_jsxs("summary", { className: `openma-session-toolbar-chip${presentation.warning ? " is-warning" : ""}`, "data-session-mode-trigger": "true", "aria-label": presentation.label, title: presentation.hint, "aria-disabled": disabled, onClick: (event) => {
+    return (_jsxs("details", { className: "openma-session-chip-menu", ref: menuRef, children: [_jsxs("summary", { className: `chat-interactive-surface chat-interactive-surface--control openma-session-toolbar-chip${presentation.warning ? " is-warning" : ""}`, "data-session-mode-trigger": "true", "aria-label": presentation.label, title: presentation.hint, "aria-disabled": disabled, onClick: (event) => {
                     if (disabled)
                         event.preventDefault();
                 }, children: [_jsx(ModeIcon, { size: 14, "aria-hidden": "true" }), _jsx("span", { className: "openma-session-chip-label", children: presentation.label }), _jsx(ChevronDownIcon, { size: 14, "aria-hidden": "true" })] }), _jsx("div", { className: "openma-session-menu openma-session-menu-align-start", role: "menu", children: options.map((item) => {
                     const itemPresentation = sessionModePresentation(harnessId, item);
                     const ItemIcon = sessionModeIcon(item.value);
                     const active = item.value === option.currentValue;
-                    return (_jsxs("button", { type: "button", role: "menuitemradio", "aria-checked": active, className: `openma-session-menu-item${itemPresentation.warning ? " is-warning" : ""}`, onClick: () => {
+                    return (_jsxs("button", { type: "button", role: "menuitemradio", "aria-checked": active, className: `chat-interactive-surface chat-interactive-surface--control openma-session-menu-item${itemPresentation.warning ? " is-warning" : ""}`, onClick: () => {
                             onSetConfigOption(option.id, item.value);
                             menuRef.current?.removeAttribute("open");
                         }, children: [_jsx(ItemIcon, { size: 15, "aria-hidden": "true" }), _jsxs("span", { className: "openma-session-menu-item-copy", children: [_jsx("strong", { children: itemPresentation.label }), itemPresentation.hint ? _jsx("small", { children: itemPresentation.hint }) : null] }), active ? _jsx(CheckIcon, { size: 14, "aria-hidden": "true" }) : null] }, item.value));
@@ -102,7 +102,7 @@ function SessionRunMenu({ activeHarnessId, activeHarnessLabel, harnesses, config
     };
     const openRootSubmenu = (id) => setSubmenu((current) => current === id ? null : id);
     const activeOption = configOptions.find((option) => option.id === submenu);
-    return (_jsxs("details", { className: "openma-session-chip-menu openma-session-run-menu", ref: menuRef, children: [_jsxs("summary", { className: "openma-session-toolbar-chip openma-session-run-trigger", "data-session-run-trigger": "true", "aria-label": `Run with ${activeHarnessLabel} using ${summary}`, "aria-disabled": disabled, onClick: (event) => {
+    return (_jsxs("details", { className: "openma-session-chip-menu openma-session-run-menu", ref: menuRef, children: [_jsxs("summary", { className: "chat-interactive-surface chat-interactive-surface--control openma-session-toolbar-chip openma-session-run-trigger", "data-session-run-trigger": "true", "aria-label": `Run with ${activeHarnessLabel} using ${summary}`, "aria-disabled": disabled, onClick: (event) => {
                     if (disabled)
                         event.preventDefault();
                     setSubmenu(null);
@@ -121,10 +121,10 @@ function SessionRunMenu({ activeHarnessId, activeHarnessLabel, harnesses, config
                     } }, `${activeOption.id}:${item.group ?? ""}:${item.value}`)))) })) : null] }));
 }
 function SessionSubmenuTrigger({ submenuId, icon, label, value, open, onClick, }) {
-    return (_jsxs("button", { type: "button", role: "menuitem", "aria-haspopup": "menu", "aria-expanded": open, "aria-label": label, "data-session-submenu-trigger": submenuId, className: "openma-session-menu-item openma-session-submenu-trigger", onClick: onClick, children: [icon, _jsx("span", { className: "openma-session-menu-item-copy", children: _jsx("strong", { children: label }) }), _jsx("span", { className: "openma-session-submenu-value", children: value }), _jsx(ChevronRightIcon, { size: 14, "aria-hidden": "true" })] }));
+    return (_jsxs("button", { type: "button", role: "menuitem", "aria-haspopup": "menu", "aria-expanded": open, "aria-label": label, "data-session-submenu-trigger": submenuId, className: "chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-submenu-trigger", onClick: onClick, children: [icon, _jsx("span", { className: "openma-session-menu-item-copy", children: _jsx("strong", { children: label }) }), _jsx("span", { className: "openma-session-submenu-value", children: value }), _jsx(ChevronRightIcon, { size: 14, "aria-hidden": "true" })] }));
 }
 function SessionSubmenuChoice({ icon, label, hint, active, role = "menuitemradio", onClick, }) {
-    return (_jsxs("button", { type: "button", role: role, "aria-checked": active, className: "openma-session-menu-item openma-session-submenu-choice", onClick: onClick, children: [icon ?? _jsx("span", { className: "openma-session-submenu-placeholder", "aria-hidden": "true" }), _jsxs("span", { className: "openma-session-menu-item-copy", children: [_jsx("strong", { children: label }), hint ? _jsx("small", { children: hint }) : null] }), active ? _jsx(CheckIcon, { size: 14, "aria-hidden": "true" }) : null] }));
+    return (_jsxs("button", { type: "button", role: role, "aria-checked": active, className: "chat-interactive-surface chat-interactive-surface--control openma-session-menu-item openma-session-submenu-choice", onClick: onClick, children: [icon ?? _jsx("span", { className: "openma-session-submenu-placeholder", "aria-hidden": "true" }), _jsxs("span", { className: "openma-session-menu-item-copy", children: [_jsx("strong", { children: label }), hint ? _jsx("small", { children: hint }) : null] }), active ? _jsx(CheckIcon, { size: 14, "aria-hidden": "true" }) : null] }));
 }
 function sessionConfigOptionIcon(option) {
     if (option.type === "boolean")
