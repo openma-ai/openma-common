@@ -13,10 +13,9 @@ export interface AcpCatalogHarness {
     };
 }
 /**
- * OpenMA-managed harness catalog. All current entries use `{ type: "npm", package }`
- * with versions pinned to npm registry releases verified at catalog update time.
- *
- * All entries use npm; versions and bin names are verified on the npm registry.
+ * OpenMA-managed harness catalog. Upstream agents use `{ type: "registry" }` and
+ * resolve launch metadata from the public ACP registry at install time.
+ * OpenMA-owned adapters use pinned `{ type: "npm", package }` releases.
  */
 export declare const OPENMA_ACP_HARNESS_CATALOG: readonly AcpCatalogHarness[];
 export declare function catalogHarnessById(id: string, catalog?: readonly AcpCatalogHarness[]): AcpCatalogHarness | undefined;

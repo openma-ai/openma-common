@@ -253,8 +253,9 @@ Work/model credentials and arbitrary host environment variables remain excluded.
 
 `OPENMA_ACP_HARNESS_CATALOG` lists OpenMA-managed harnesses with one entry shape:
 `id`, `label`, pinned `version`, and `source` (`registry`, `npm`, `uvx`, or
-`binary`). Every catalog entry today uses `{ type: "npm", package }` with
-versions verified on the npm registry (including `opencode-ai` for OpenCode).
+`binary`). Upstream harnesses use `{ type: "registry" }`; OpenMA-owned adapters
+use `{ type: "npm", package }` for `@openma/deepseek-harness-acp` and
+`@openma/pi-acp`.
 
 `@openma/common/acp-harnesses/install` prepares releases through the same
 `resolveAcpRelease` / `prepareAcpRelease` path as `@openma/common/acp-artifacts`.

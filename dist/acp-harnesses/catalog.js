@@ -1,42 +1,38 @@
 /**
- * OpenMA-managed harness catalog. All current entries use `{ type: "npm", package }`
- * with versions pinned to npm registry releases verified at catalog update time.
- *
- * All entries use npm; versions and bin names are verified on the npm registry.
+ * OpenMA-managed harness catalog. Upstream agents use `{ type: "registry" }` and
+ * resolve launch metadata from the public ACP registry at install time.
+ * OpenMA-owned adapters use pinned `{ type: "npm", package }` releases.
  */
 export const OPENMA_ACP_HARNESS_CATALOG = [
     {
         id: "codex-acp",
         label: "Codex",
         version: "2.1.1",
-        source: { type: "npm", package: "@agentclientprotocol/codex-acp" },
+        source: { type: "registry" },
     },
     {
         id: "claude-acp",
         label: "Claude",
         version: "0.85.1",
-        source: { type: "npm", package: "@agentclientprotocol/claude-agent-acp" },
+        source: { type: "registry" },
     },
     {
         id: "gemini",
         label: "Gemini CLI",
         version: "0.62.0",
-        source: { type: "npm", package: "@google/gemini-cli" },
-        launch: { args: ["--acp"] },
+        source: { type: "registry" },
     },
     {
         id: "opencode",
         label: "OpenCode",
         version: "1.18.34",
-        source: { type: "npm", package: "opencode-ai" },
-        launch: { args: ["acp"] },
+        source: { type: "registry" },
     },
     {
         id: "kimi",
         label: "Kimi Code",
-        version: "2.1.1",
-        source: { type: "npm", package: "@moonshot-ai/kimi-code" },
-        launch: { args: ["acp"] },
+        version: "1.52.0",
+        source: { type: "registry" },
     },
     {
         id: "dsh-acp",
