@@ -1,21 +1,42 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { injectEvent, injectSession, launchApp } from "./helpers";
 
 const outDir = process.env.ARTIFACT_DIR ?? "/opt/cursor/artifacts/process-row-evidence";
 const prefix = process.env.SNAPSHOT_PREFIX ?? "backchat";
 
-async function captureTurn(page: import("@playwright/test").Page, name: string, hover: boolean) {
-  const trigger = page
+async function pointerState(
+  page: import("@playwright/test").Page,
+  trigger: import("@playwright/test").Locator,
+  hover: boolean,
+) {
+  if (hover) {
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger.hover();
+  } else {
+    await page.getByTestId("new-chat-button").hover();
+  }
+  await page.waitForTimeout(350);
+}
+
+async function readBg(trigger: import("@playwright/test").Locator) {
+  return trigger.evaluate((el) => getComputedStyle(el).backgroundColor);
+}
+
+async function captureTurn(
+  page: import("@playwright/test").Page,
+  turn: import("@playwright/test").Locator,
+  name: string,
+  hover: boolean,
+) {
+  const trigger = turn
     .locator(
-      '[data-chat-reasoning-trigger="true"], [data-session-process-state] [data-slot="collapsible-trigger"]',
+      '[data-chat-reasoning-trigger="true"], [data-slot="collapsible-trigger"]',
     )
     .first();
   await trigger.waitFor({ state: "visible", timeout: 20_000 });
-  if (hover) await trigger.hover();
-  else await page.mouse.move(0, 0);
-  const turn = page.locator('[data-session-turn-response="true"]').first();
+  await pointerState(page, trigger, hover);
   await turn.waitFor({ state: "visible" });
   const fileName = `${prefix}-${name}.png`;
   const path = join(outDir, fileName);
@@ -34,7 +55,7 @@ async function captureTurn(page: import("@playwright/test").Page, name: string, 
       height: Math.min(560, box.height + 160),
     },
   });
-  return path;
+  return { path, backgroundColor: await readBg(trigger) };
 }
 
 test(`hidpi process row (${prefix})`, async () => {
@@ -84,8 +105,13 @@ test(`hidpi process row (${prefix})`, async () => {
       sessionUpdate: "agent_message_chunk",
       content: { type: "text", text: "正在整理 README 里的安装步骤…" },
     });
-    await captureTurn(page, "running-idle", false);
-    await captureTurn(page, "running-hover", true);
+    const runningTurn = page
+      .locator('[data-session-turn-response]')
+      .filter({ hasText: "工作中" })
+      .last();
+    const runningIdle = await captureTurn(page, runningTurn, "running-idle", false);
+    const runningHover = await captureTurn(page, runningTurn, "running-hover", true);
+    expect(runningIdle.backgroundColor).not.toBe(runningHover.backgroundColor);
 
     await injectEvent(page, {
       type: "session.complete",
@@ -113,8 +139,13 @@ test(`hidpi process row (${prefix})`, async () => {
       turn_id: "turn-done",
     });
 
-    await captureTurn(page, "complete-idle", false);
-    await captureTurn(page, "complete-hover", true);
+    const completeTurn = page
+      .locator('[data-session-turn-response]')
+      .filter({ hasText: "已工作" })
+      .last();
+    const completeIdle = await captureTurn(page, completeTurn, "complete-idle", false);
+    const completeHover = await captureTurn(page, completeTurn, "complete-hover", true);
+    expect(completeIdle.backgroundColor).not.toBe(completeHover.backgroundColor);
   } finally {
     await launched.cleanup();
   }

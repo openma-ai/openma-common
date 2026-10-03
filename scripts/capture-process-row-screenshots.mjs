@@ -196,8 +196,13 @@ async function captureFixtureStates({ css, extraCss, filePrefix }) {
       );
       const trigger = page.locator("[data-chat-reasoning-trigger=true]");
       await trigger.waitFor({ state: "visible" });
-      if (hover) await trigger.hover();
-      else await page.mouse.move(0, 0);
+      if (hover) {
+        await trigger.scrollIntoViewIfNeeded();
+        await trigger.hover();
+      } else {
+        await page.locator("[data-hover-reset=true]").hover();
+      }
+      await page.waitForTimeout(350);
       const panel = page.locator("[data-chat-evidence-panel=true]");
       const fileName = `${filePrefix}-${processState}-${hoverLabel}.png`;
       const path = await capturePanel(page, panel, fileName);
