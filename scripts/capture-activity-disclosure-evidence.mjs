@@ -99,11 +99,17 @@ function pageShell({ variant, version, css, bodyInner, panelSelector = "[data-pa
   const panel = isDark ? "#27272a" : "#ffffff";
   const fg = isDark ? "#fafafa" : "#242424";
   const muted = isDark ? "#a1a1aa" : "#898885";
+  const border = isDark ? "#3f3f46" : "#e4e4e7";
+  const menuBg = panel;
   return {
     html: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8" />
 <style>
 :root {
   --fg: ${fg}; --chat-fg: ${fg}; --fg-muted: ${muted};
+  --border: ${border};
+  --chat-border: ${border};
+  --bg: ${panel};
+  --chat-menu-bg: ${menuBg};
   --chat-activity-row-leading-space: 8px;
   --chat-control-bg-hover: color-mix(in srgb, ${fg} 8%, transparent);
   --interaction-bg-hover: color-mix(in srgb, ${fg} 8%, transparent);
