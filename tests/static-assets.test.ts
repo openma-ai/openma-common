@@ -16,7 +16,7 @@ describe("static asset build", () => {
   it("updates file-package consumers without breaking their hard links", () => {
     const fixture = mkdtempSync(join(tmpdir(), "openma-static-assets-"));
     try {
-      for (const directory of ["src/brand", "src/chat-ui", "dist/brand", "dist/chat-ui", "consumer"]) {
+      for (const directory of ["src/brand", "src/chat-ui", "src/project-ui", "dist/brand", "dist/chat-ui", "dist/project-ui", "consumer"]) {
         mkdirSync(join(fixture, directory), { recursive: true });
       }
       const assets = [
@@ -24,6 +24,7 @@ describe("static asset build", () => {
         ["brand/website.css", "new website styles"],
         ["brand/openma-logo-mark.svg", "new mark"],
         ["chat-ui/styles.css", "new chat styles"],
+        ["project-ui/projects.css", "new project styles"],
       ] as const;
       for (const [asset, contents] of assets) {
         writeFileSync(join(fixture, "src", asset), contents);

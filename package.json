@@ -140,7 +140,12 @@
     "./acp-artifacts": {
       "types": "./dist/acp-artifacts/index.d.ts",
       "import": "./dist/acp-artifacts/index.js"
-    }
+    },
+    "./project-ui": {
+      "types": "./dist/project-ui/index.d.ts",
+      "import": "./dist/project-ui/index.js"
+    },
+    "./project-ui/styles.css": "./dist/project-ui/styles.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static-assets.mjs",
