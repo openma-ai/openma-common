@@ -70,16 +70,33 @@ details[open]
 }
 
 button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
-summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover {
+summary.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover,
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row:hover {
   background: transparent;
   background-color: transparent;
   color: var(--chat-fg, var(--fg, currentColor));
 }
 
-button.chat-interactive-surface--transcript.chat-interactive-surface--transcript:hover
-  :where(.text-fg-muted, .text-muted-foreground, .chat-activity-icon),
 button.chat-interactive-surface--transcript.activity-disclosure-row:hover
-  .activity-disclosure-chevron {
+  :is(
+    .chat-transcript-disclosure-summary,
+    .text-fg-muted,
+    .text-muted-foreground,
+    .turn-muted,
+    .chat-activity-icon
+  ),
+button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row:hover
+  :is(
+    .chat-transcript-disclosure-summary,
+    .text-fg-muted,
+    .text-muted-foreground,
+    .turn-muted
+  ),
+button.chat-interactive-surface--transcript.activity-disclosure-row:hover
+  .activity-disclosure-chevron,
+button.chat-interactive-surface--transcript.activity-disclosure-row:hover
+  .activity-disclosure-chevron
+  :is(svg, .text-fg-subtle) {
   color: var(--chat-fg, var(--fg, currentColor));
 }
 

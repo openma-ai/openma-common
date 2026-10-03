@@ -368,7 +368,7 @@ export function ChatThoughtEventRow({
         )}
         <span
           className={chatClassNames(
-            "min-w-0 flex-1 text-left text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1 text-left text-fg-muted",
             !resolvedProjection.multiline && "truncate",
           )}
         >
@@ -668,7 +668,7 @@ function ChatCollapsibleEventSequenceGroup({
         )}
         <span
           className={chatClassNames(
-            "min-w-0 flex-1 text-fg-muted",
+            "chat-transcript-disclosure-summary min-w-0 flex-1 text-fg-muted",
             !projected.multiline && "truncate",
           )}
         >
@@ -1343,7 +1343,7 @@ export function AgentUITurnView({
               getThinkingMessage={() => (
                 <>
                   {slots.renderProcessLeading?.(renderContext)}
-                  <span className="min-w-0 flex-1 truncate text-left text-fg-muted">
+                  <span className="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left text-fg-muted">
                     {isCancelled && labels.cancelled !== undefined ? (
                       <>
                         <span data-session-process-status="cancelled">

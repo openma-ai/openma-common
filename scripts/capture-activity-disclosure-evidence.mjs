@@ -51,12 +51,12 @@ function turnMarkup({ version }) {
   return `
     <button type="button" data-chat-reasoning-trigger="true" aria-expanded="false"
       class="${reasoningClass}" data-turn-reasoning="true">
-      <span class="min-w-0 flex-1 truncate text-left turn-muted">已工作 4 秒</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left turn-muted">已工作 4 秒</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <button type="button" aria-expanded="false"${activityAttr}
       class="${activityClass}" data-turn-activity="true">
-      <span class="min-w-0 flex-1 truncate turn-muted">已执行 1 项操作</span>
+      <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate turn-muted">已执行 1 项操作</span>
       <span class="activity-disclosure-chevron" aria-hidden="true">›</span>
     </button>
     <div class="activity-body" data-activity-body="true" hidden>
@@ -193,6 +193,17 @@ async function captureTurnStates(page, { variant, version, css }) {
     await page.waitForTimeout(150);
     const file = join(outDir, `${label}-${variant}-turn-${state.name}.png`);
     await page.locator("[data-panel=true]").screenshot({ path: file, scale: "device" });
+    if (
+      version === "head" &&
+      (state.name === "idle" || state.name === "hover")
+    ) {
+      const activity = await readTurnSummaryColor(page, "activity");
+      const process = await readTurnSummaryColor(page, "process");
+      manifest.computedTextColors[`${label}-${variant}-turn-${state.name}`] = {
+        activitySummary: activity,
+        processSummary: process,
+      };
+    }
   }
 }
 
@@ -218,7 +229,18 @@ async function captureSessionPanels(page, { variant, version, css }) {
   }
 }
 
-const manifest = { outDir, files: [] };
+const manifest = { outDir, files: [], computedTextColors: {} };
+
+async function readTurnSummaryColor(page, which) {
+  return page.evaluate((target) => {
+    const el = document.querySelector(
+      target === "activity"
+        ? "[data-turn-activity=true] .chat-transcript-disclosure-summary, [data-turn-activity=true] .turn-muted"
+        : "[data-turn-reasoning=true] .chat-transcript-disclosure-summary, [data-turn-reasoning=true] .turn-muted",
+    );
+    return el ? getComputedStyle(el).color : null;
+  }, which);
+}
 
 const browser = await chromium.launch();
 const page = await browser.newPage();

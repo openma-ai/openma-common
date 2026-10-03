@@ -41,7 +41,7 @@ const FIXTURES = [
 <button type="button" aria-expanded="false"
   data-chat-activity-disclosure-trigger="true"
   class="chat-interactive-surface chat-interactive-surface--transcript activity-disclosure-row min-h-6 text-[13px]">
-  <span class="min-w-0 flex-1 truncate">已执行 1 项操作</span>
+  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-fg-muted">已执行 1 项操作</span>
   <span class="activity-disclosure-chevron">›</span>
 </button>`,
   },
@@ -51,7 +51,7 @@ const FIXTURES = [
     html: `
 <button type="button" aria-expanded="false" data-chat-reasoning-trigger="true"
   class="chat-interactive-surface chat-interactive-surface--transcript chat-reasoning-trigger activity-disclosure-row flex w-full items-center gap-2 text-sm">
-  <span class="min-w-0 flex-1 truncate text-left">已工作 4 秒</span>
+  <span class="chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left text-fg-muted">已工作 4 秒</span>
   <span class="activity-disclosure-chevron">›</span>
 </button>`,
   },
@@ -128,6 +128,17 @@ await page.setViewportSize({ width: 900, height: 640 });
 
 const report = { rows: [], failures: [], alignment: null };
 const idleColors = new Map();
+const idleSummaryTextColors = new Map();
+
+async function readSummaryTextColor(page, buttonSelector) {
+  return page.$eval(buttonSelector, (btn) => {
+    const summary = btn.querySelector(
+      ".chat-transcript-disclosure-summary, .text-fg-muted, .turn-muted",
+    );
+    if (!(summary instanceof HTMLElement)) return null;
+    return getComputedStyle(summary).color;
+  });
+}
 
 for (const fixture of FIXTURES) {
   for (const state of [
@@ -176,10 +187,21 @@ for (const fixture of FIXTURES) {
 
     await page.waitForTimeout(120);
 
+    const transcriptFixture =
+      fixture.id === "activity-group" ||
+      fixture.id === "process-row" ||
+      fixture.id === "activity-tool-row";
+
     const computed = await readSurfaceComputed(page, fixture.target);
     const key = `${fixture.id}/${state}`;
     if (state === "idle") {
       idleColors.set(fixture.id, computed.color);
+      if (transcriptFixture) {
+        idleSummaryTextColors.set(
+          fixture.id,
+          await readSummaryTextColor(page, fixture.target),
+        );
+      }
     }
     const shotPath = join(outDir, `${key}.png`);
     await page.locator("[data-parity-panel=true]").screenshot({
@@ -198,18 +220,21 @@ for (const fixture of FIXTURES) {
         isTransparentBg(computed.backgroundColor) &&
         (computed.outlineWidth === "0px" || computed.outlineStyle === "none"));
 
-    const transcriptFixture =
-      fixture.id === "activity-group" ||
-      fixture.id === "process-row" ||
-      fixture.id === "activity-tool-row";
-
     const expectHoverColor = state === "hover" && transcriptFixture;
     const idleColor = idleColors.get(fixture.id);
+    const idleSummaryColor = idleSummaryTextColors.get(fixture.id);
+    let summaryTextColor = null;
+    if (transcriptFixture) {
+      summaryTextColor = await readSummaryTextColor(page, fixture.target);
+    }
     const hoverColorOk =
       !expectHoverColor ||
       (isTransparentBg(computed.backgroundColor) &&
         idleColor !== undefined &&
-        computed.color !== idleColor);
+        computed.color !== idleColor &&
+        idleSummaryColor !== null &&
+        summaryTextColor !== null &&
+        summaryTextColor !== idleSummaryColor);
 
     const expectHoverControlBg = state === "hover" && !transcriptFixture;
     const hoverControlOk =
@@ -223,7 +248,18 @@ for (const fixture of FIXTURES) {
       (computed.outlineWidth !== "0px" && computed.outlineStyle !== "none");
 
     const pass = plainOk && hoverOk && focusOk;
-    const row = { key, computed, pass, plainOk, hoverOk, hoverColorOk, hoverControlOk, focusOk, shotPath };
+    const row = {
+      key,
+      computed,
+      summaryTextColor,
+      pass,
+      plainOk,
+      hoverOk,
+      hoverColorOk,
+      hoverControlOk,
+      focusOk,
+      shotPath,
+    };
     report.rows.push(row);
     if (!pass) report.failures.push(row);
   }
