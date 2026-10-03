@@ -216,6 +216,7 @@ export async function collectRunEvents(
       throw new CursorCloudApiError(response.status, "stream_unavailable", "run stream response had no body");
     }
 
+    let resumeAfterUnavailable = false;
     try {
       for await (const event of readSseEvents(response.body)) {
         if (Date.now() > deadlineMs) {
@@ -227,7 +228,13 @@ export async function collectRunEvents(
         seen.add(key);
         events.push(event);
         options.onEvent?.(event);
+        if (event.event === "error" && record(event.data)?.code === "stream_unavailable") {
+          resumeAfterUnavailable = true;
+        } else if (event.event === "result") {
+          resumeAfterUnavailable = false;
+        }
         if (event.event === "done") {
+          if (resumeAfterUnavailable) break;
           sawDone = true;
           break;
         }

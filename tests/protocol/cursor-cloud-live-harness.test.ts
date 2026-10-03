@@ -249,6 +249,40 @@ describe("Cursor Cloud live harness", () => {
     })).rejects.toMatchObject({ status: 409, code: "agent_busy" });
   });
 
+  it("reconnects when the stream emits error stream_unavailable and then done", async () => {
+    let calls = 0;
+    const stream = await collectRunEvents("test-key", { agentId: "bc-1", runId: "run-1" }, {
+      sleep: async () => undefined,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return sseResponse([
+            `event: status\ndata: ${JSON.stringify({ runId: "run-1", status: "RUNNING" })}\n\n`,
+            `event: error\ndata: ${JSON.stringify({ code: "stream_unavailable", message: "Run stream is no longer available" })}\n\n`,
+            "event: done\ndata: {}\n\n",
+          ].join(""));
+        }
+        return sseResponse([
+          `event: status\ndata: ${JSON.stringify({ runId: "run-1", status: "RUNNING" })}\n\n`,
+          `id: a\nevent: assistant\ndata: ${JSON.stringify({ text: "ok" })}\n\n`,
+          `id: r\nevent: result\ndata: ${JSON.stringify({ runId: "run-1", status: "FINISHED" })}\n\n`,
+          "id: r\nevent: done\ndata: {}\n\n",
+        ].join(""));
+      },
+    });
+    expect(calls).toBe(2);
+    expect(stream.sawDone).toBe(true);
+    expect(stream.reconnects).toBe(1);
+    expect(stream.events.map((event) => event.event)).toEqual([
+      "status",
+      "error",
+      "done",
+      "assistant",
+      "result",
+      "done",
+    ]);
+  });
+
   it("records stream expiry instead of inventing events from another endpoint", async () => {
     const stream = await collectRunEvents("test-key", { agentId: "bc-1", runId: "run-1" }, {
       sleep: async () => undefined,

@@ -1,0 +1,33 @@
+{
+  "source": "https://api.cursor.com/v1/agents/{id}/runs/{runId}/stream",
+  "anonymized": true,
+  "capturedFrom": "https://github.com/openma-ai/openma-common/actions/runs/37111668387",
+  "note": "Follow-up run stream closed immediately with error stream_unavailable and done. The live client reconnects after this prefix.",
+  "events": [
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000002",
+        "status": "CREATING"
+      }
+    },
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000002",
+        "status": "RUNNING"
+      }
+    },
+    {
+      "event": "error",
+      "data": {
+        "code": "stream_unavailable",
+        "message": "Run stream is no longer available"
+      }
+    },
+    {
+      "event": "done",
+      "data": {}
+    }
+  ]
+}

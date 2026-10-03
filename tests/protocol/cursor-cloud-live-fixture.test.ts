@@ -5,15 +5,14 @@ import {
   decodeCursorCloudRunStreamEvent,
   type CursorCloudSseEvent,
 } from "../../src/protocol/cursor-cloud/index.js";
-import { FIXTURE_AGENT_ID, FIXTURE_RUN_ID } from "../live/redact.js";
+import { FIXTURE_AGENT_ID, FIXTURE_RUN_ID, FIXTURE_RUN_ID_2 } from "../live/redact.js";
 
 const NOW = "2026-04-13T18:30:00.000Z";
 
 /**
  * Real `GET /v1/agents/{id}/runs/{runId}/stream` capture from
  * https://github.com/openma-ai/openma-common/actions/runs/37110762427.
- * Agent and run ids are placeholders. The follow-up run fixture is added
- * beside this file after the multi-run live job.
+ * Agent and run ids are placeholders.
  */
 describe("Cursor Cloud live fixture", () => {
   it("decodes the 2026-10-03 initial run, including the user prompt", () => {
@@ -69,7 +68,59 @@ describe("Cursor Cloud live fixture", () => {
       expect(JSON.stringify(event)).not.toMatch(/crsr_|ghp_|ghs_|github_pat_|Bearer /);
     }
   });
+
+  it("decodes the read-only README run, including tool calls and no user-message event", () => {
+    const decoded = decodeFixture("2026-10-03-read-readme-run.events.json", FIXTURE_RUN_ID);
+    const types = decoded.map((event) => event.type);
+    expect(types.indexOf("turn.queued")).toBeGreaterThanOrEqual(0);
+    expect(types.indexOf("turn.started")).toBeGreaterThan(types.indexOf("turn.queued"));
+    expect(types.indexOf("tool.started")).toBeGreaterThan(types.indexOf("turn.started"));
+    expect(types.indexOf("tool.completed")).toBeGreaterThan(types.indexOf("tool.started"));
+    expect(types.indexOf("agent.message_chunk")).toBeGreaterThan(types.indexOf("tool.completed"));
+    expect(types.lastIndexOf("turn.completed")).toBeGreaterThan(types.indexOf("agent.message_chunk"));
+    expect(types.filter((type) => type === "turn.completed")).toHaveLength(1);
+    expect(types).not.toContain("user.message");
+    const completed = decoded.find((event) => event.type === "tool.completed");
+    expect(completed).toMatchObject({
+      data: {
+        tool_name: "read_file",
+        raw_output: {
+          success: {
+            path: "/workspace/README.md",
+            readRange: { startLine: 1, endLine: 5 },
+          },
+        },
+      },
+    });
+  });
+
+  it("decodes the follow-up stream that closed with stream_unavailable", () => {
+    const decoded = decodeFixture("2026-10-03-follow-up-stream-unavailable.events.json", FIXTURE_RUN_ID_2);
+    expect(decoded.map((event) => event.type)).toEqual([
+      "turn.queued",
+      "turn.started",
+      "session.error",
+    ]);
+    expect(decoded[2]).toMatchObject({
+      data: {
+        code: "stream_unavailable",
+        message: "Run stream is no longer available",
+      },
+    });
+  });
 });
+
+function decodeFixture(name: string, turnId: string) {
+  const fixture = JSON.parse(readFileSync(
+    resolve(import.meta.dirname, "../fixtures/cursor-cloud", name),
+    "utf8",
+  )) as { events: CursorCloudSseEvent[] };
+  return fixture.events.flatMap((event) => decodeCursorCloudRunStreamEvent(event, {
+    sessionId: FIXTURE_AGENT_ID,
+    turnId,
+    now: () => NOW,
+  }));
+}
 
 function vendorName(event: { data: unknown }): string {
   const data = event.data;

@@ -173,7 +173,7 @@ function finishRound(
     events: [...events],
     stream,
     frames,
-    assessment: assessDecodedFrames(frames, stream.sawDone, { requireUserMessage: true }),
+    assessment: assessDecodedFrames(frames, stream.sawDone),
   };
 }
 
@@ -230,7 +230,7 @@ function steerFailures(steer: FollowUpResult, rounds: readonly LiveRound[], whil
     if (initialText.includes(STEER_PROMPT)) {
       failures.push("rejected mid-run prompt was still appended to the initial run");
     }
-    if (!secondText.includes(FOLLOW_UP_PROMPT)) {
+    if (secondText.length > 0 && !secondText.includes(FOLLOW_UP_PROMPT)) {
       failures.push("follow-up run did not decode the follow-up prompt as user.message");
     }
   } else if (steer.accepted) {

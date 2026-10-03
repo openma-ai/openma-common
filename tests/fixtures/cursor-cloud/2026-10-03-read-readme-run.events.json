@@ -1,0 +1,665 @@
+{
+  "source": "https://api.cursor.com/v1/agents/{id}/runs/{runId}/stream",
+  "anonymized": true,
+  "capturedFrom": "https://github.com/openma-ai/openma-common/actions/runs/37111668387",
+  "repoUrl": "https://github.com/openma-ai/openma-common",
+  "note": "Read-only initial run that read the first lines of README.md. Mid-run POST /v1/agents/{id}/runs returned 409 agent_busy. Identifiers are placeholders.",
+  "events": [
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "CREATING"
+      }
+    },
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "RUNNING"
+      }
+    },
+    {
+      "event": "tool_call",
+      "id": "1791018135568-0",
+      "data": {
+        "callId": "call-c0b623c6-4306-4124-874d-2d8d16bfe799-0\nfc_8f9c477b-0489-92cd-bf0c-af3c2fc7cb80_0",
+        "name": "read_file",
+        "status": "running"
+      }
+    },
+    {
+      "event": "tool_call",
+      "id": "1791018135578-0",
+      "data": {
+        "callId": "call-c0b623c6-4306-4124-874d-2d8d16bfe799-0\nfc_8f9c477b-0489-92cd-bf0c-af3c2fc7cb80_0",
+        "name": "read_file",
+        "status": "running",
+        "args": {
+          "path": "/workspace/README.md",
+          "limit": 5
+        }
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018135578-0",
+      "data": {
+        "type": "tool-call-started",
+        "callId": "call-c0b623c6-4306-4124-874d-2d8d16bfe799-0\nfc_8f9c477b-0489-92cd-bf0c-af3c2fc7cb80_0",
+        "toolCall": {
+          "type": "read",
+          "args": {
+            "path": "/workspace/README.md"
+          }
+        },
+        "modelCallId": "34ca2201-9bb4-40dd-b51b-62cfa23530d5-0-8dxh"
+      }
+    },
+    {
+      "event": "tool_call",
+      "id": "1791018135621-0",
+      "data": {
+        "callId": "call-c0b623c6-4306-4124-874d-2d8d16bfe799-0\nfc_8f9c477b-0489-92cd-bf0c-af3c2fc7cb80_0",
+        "name": "read_file",
+        "status": "completed",
+        "args": {
+          "path": "/workspace/README.md",
+          "limit": 5
+        },
+        "result": {
+          "success": {
+            "content": "# OpenMA Common\n\nShared, product-agnostic contracts used by OpenMA Desktop and Open Managed Agents.\nThis repository is consumed directly from Git; it is intentionally not published\nto npm.",
+            "totalLines": 244,
+            "fileSize": 15013,
+            "path": "/workspace/README.md",
+            "readRange": {
+              "startLine": 1,
+              "endLine": 5
+            }
+          }
+        }
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018135621-0",
+      "data": {
+        "type": "tool-call-completed",
+        "callId": "call-c0b623c6-4306-4124-874d-2d8d16bfe799-0\nfc_8f9c477b-0489-92cd-bf0c-af3c2fc7cb80_0",
+        "toolCall": {
+          "type": "read",
+          "args": {
+            "path": "/workspace/README.md"
+          },
+          "result": {
+            "status": "success",
+            "value": {
+              "content": "# OpenMA Common\n\nShared, product-agnostic contracts used by OpenMA Desktop and Open Managed Agents.\nThis repository is consumed directly from Git; it is intentionally not published\nto npm.",
+              "totalLines": 244,
+              "fileSize": 15013
+            }
+          }
+        },
+        "modelCallId": "34ca2201-9bb4-40dd-b51b-62cfa23530d5-0-8dxh"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018135626-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 54
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018135760-0",
+      "data": {
+        "type": "step-completed",
+        "stepId": 0,
+        "stepDurationMs": 13427
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018136395-0",
+      "data": {
+        "type": "step-started",
+        "stepId": 38
+      }
+    },
+    {
+      "event": "thinking",
+      "id": "1791018143966-0",
+      "data": {
+        "text": "正在读取 README.md 的第一行，不会修改文件。\n\nREADME.md 第一行是 \"# OpenMA Common\"。"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143966-0",
+      "data": {
+        "type": "thinking-delta",
+        "text": "正在读取 README.md 的第一行，不会修改文件。\n\nREADME.md 第一行是 \"# OpenMA Common\"。"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143970-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 15
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143975-0",
+      "data": {
+        "type": "thinking-completed",
+        "thinkingDurationMs": 8
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018143981-0",
+      "data": {
+        "text": "`"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143981-0",
+      "data": {
+        "type": "text-delta",
+        "text": "`"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018143985-0",
+      "data": {
+        "text": "README"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143985-0",
+      "data": {
+        "type": "text-delta",
+        "text": "README"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143989-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 2
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018143993-0",
+      "data": {
+        "text": ".md"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143993-0",
+      "data": {
+        "type": "text-delta",
+        "text": ".md"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018143997-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018144001-0",
+      "data": {
+        "text": "`"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018144001-0",
+      "data": {
+        "type": "text-delta",
+        "text": "`"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018144008-0",
+      "data": {
+        "text": " "
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018144008-0",
+      "data": {
+        "type": "text-delta",
+        "text": " "
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147938-0",
+      "data": {
+        "text": "的"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147938-0",
+      "data": {
+        "type": "text-delta",
+        "text": "的"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147942-0",
+      "data": {
+        "text": "第一"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147942-0",
+      "data": {
+        "type": "text-delta",
+        "text": "第一"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147946-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147950-0",
+      "data": {
+        "text": "行"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147950-0",
+      "data": {
+        "type": "text-delta",
+        "text": "行"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147954-0",
+      "data": {
+        "text": "是"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147954-0",
+      "data": {
+        "type": "text-delta",
+        "text": "是"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147958-0",
+      "data": {
+        "text": "："
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147958-0",
+      "data": {
+        "type": "text-delta",
+        "text": "："
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147961-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147966-0",
+      "data": {
+        "text": "\n\n"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147966-0",
+      "data": {
+        "type": "text-delta",
+        "text": "\n\n"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147970-0",
+      "data": {
+        "text": "```"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147970-0",
+      "data": {
+        "type": "text-delta",
+        "text": "```"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147973-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147977-0",
+      "data": {
+        "text": "\n"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147977-0",
+      "data": {
+        "type": "text-delta",
+        "text": "\n"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147981-0",
+      "data": {
+        "text": "#"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147981-0",
+      "data": {
+        "type": "text-delta",
+        "text": "#"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147985-0",
+      "data": {
+        "text": " Open"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147985-0",
+      "data": {
+        "type": "text-delta",
+        "text": " Open"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147988-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 2
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147992-0",
+      "data": {
+        "text": "MA"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147992-0",
+      "data": {
+        "type": "text-delta",
+        "text": "MA"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018147996-0",
+      "data": {
+        "text": " Common"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018147996-0",
+      "data": {
+        "type": "text-delta",
+        "text": " Common"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148000-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 2
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148007-0",
+      "data": {
+        "text": "\n"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148007-0",
+      "data": {
+        "type": "text-delta",
+        "text": "\n"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148012-0",
+      "data": {
+        "text": "```"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148012-0",
+      "data": {
+        "type": "text-delta",
+        "text": "```"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148015-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148020-0",
+      "data": {
+        "text": "\n\n"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148020-0",
+      "data": {
+        "type": "text-delta",
+        "text": "\n\n"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148024-0",
+      "data": {
+        "text": "没有"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148024-0",
+      "data": {
+        "type": "text-delta",
+        "text": "没有"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148028-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148032-0",
+      "data": {
+        "text": "改"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148032-0",
+      "data": {
+        "type": "text-delta",
+        "text": "改"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148036-0",
+      "data": {
+        "text": "任何"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148036-0",
+      "data": {
+        "type": "text-delta",
+        "text": "任何"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148040-0",
+      "data": {
+        "type": "token-delta",
+        "tokens": 1
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148044-0",
+      "data": {
+        "text": "文件"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148044-0",
+      "data": {
+        "type": "text-delta",
+        "text": "文件"
+      }
+    },
+    {
+      "event": "assistant",
+      "id": "1791018148048-0",
+      "data": {
+        "text": "。"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148048-0",
+      "data": {
+        "type": "text-delta",
+        "text": "。"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148192-0",
+      "data": {
+        "type": "turn-ended"
+      }
+    },
+    {
+      "event": "interaction_update",
+      "id": "1791018148196-0",
+      "data": {
+        "type": "step-completed",
+        "stepId": 38,
+        "stepDurationMs": 11798
+      }
+    },
+    {
+      "event": "status",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "FINISHED"
+      }
+    },
+    {
+      "event": "result",
+      "id": "1791018149662-0",
+      "data": {
+        "runId": "run-00000000-0000-0000-0000-000000000001",
+        "status": "FINISHED",
+        "text": "`README.md` 的第一行是：\n\n```\n# OpenMA Common\n```\n\n没有改任何文件。",
+        "durationMs": 22597,
+        "git": {
+          "branches": [
+            {
+              "repoUrl": "github.com/openma-ai/openma-common",
+              "branch": "cursor/openma-live-37111668387-9c7f"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "event": "done",
+      "id": "1791018149662-0",
+      "data": {}
+    }
+  ]
+}
