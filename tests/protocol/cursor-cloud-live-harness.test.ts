@@ -228,6 +228,27 @@ describe("Cursor Cloud live harness", () => {
     expect(stream.events.map((event) => event.event)).toEqual(["status", "assistant", "result", "done"]);
   });
 
+  it("retries 409 stream_unavailable and does not retry a different 409", async () => {
+    let calls = 0;
+    const stream = await collectRunEvents("test-key", { agentId: "bc-1", runId: "run-1" }, {
+      sleep: async () => undefined,
+      fetchImpl: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return jsonResponse({ error: { code: "stream_unavailable", message: "Run stream is no longer available" } }, 409);
+        }
+        return sseResponse("event: done\ndata: {}\n\n");
+      },
+    });
+    expect(calls).toBe(2);
+    expect(stream.sawDone).toBe(true);
+    expect(stream.reconnects).toBe(1);
+    await expect(collectRunEvents("test-key", { agentId: "bc-1", runId: "run-1" }, {
+      sleep: async () => undefined,
+      fetchImpl: async () => jsonResponse({ error: { code: "agent_busy", message: "busy" } }, 409),
+    })).rejects.toMatchObject({ status: 409, code: "agent_busy" });
+  });
+
   it("records stream expiry instead of inventing events from another endpoint", async () => {
     const stream = await collectRunEvents("test-key", { agentId: "bc-1", runId: "run-1" }, {
       sleep: async () => undefined,

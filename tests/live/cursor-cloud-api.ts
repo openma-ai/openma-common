@@ -11,20 +11,17 @@ import { readSseEvents } from "./parse-sse.js";
 
 export const CURSOR_CLOUD_API_ORIGIN = "https://api.cursor.com";
 
-const READ_ONLY_SUFFIX = [
-  "Do not use tools.",
-  "Do not read or modify files.",
-  "Do not run commands.",
-  "Do not commit, push, or open a pull request.",
-].join(" ");
+/**
+ * Slightly longer than the other prompts so the run is still active when the
+ * mid-run follow-up is sent. Still read-only: one file read, no edits.
+ */
+export const LIVE_PROMPT = "读 README.md 的第一行。不要改文件。";
 
-export const LIVE_PROMPT = `Reply with exactly the word hello and then stop. ${READ_ONLY_SUFFIX}`;
+/** Sent with Create A Run only after the initial run has reported RUNNING. */
+export const STEER_PROMPT = "只回复 ok";
 
-/** Sent with Create A Run while the initial run is still CREATING or RUNNING. */
-export const STEER_PROMPT = `Reply with exactly the word steered and then stop. ${READ_ONLY_SUFFIX}`;
-
-/** Sent with Create A Run only after the initial run has finished. */
-export const FOLLOW_UP_PROMPT = `Reply with exactly the word followup and then stop. ${READ_ONLY_SUFFIX}`;
+/** Sent with Create A Run after the initial run has finished. */
+export const FOLLOW_UP_PROMPT = "只回复 ok";
 
 /** Public repository. Used only when the key's GitHub installation can see it. */
 export const LIVE_REPOSITORY = {
@@ -97,10 +94,9 @@ export interface FollowUpResult {
 }
 
 /**
- * `POST /v1/agents/{id}/runs`. The docs say a follow-up while the agent has
- * a CREATING or RUNNING run returns 409 `agent_busy`. That response is
- * returned, not thrown, so the live test can record the mid-run result.
- * There is no separate steer endpoint in the Cloud Agents OpenAPI schema.
+ * `POST /v1/agents/{id}/runs`. A follow-up while the agent has a CREATING
+ * or RUNNING run returns 409 `agent_busy`. That response is returned, not
+ * thrown. The Cloud Agents OpenAPI schema has no steer endpoint.
  */
 export async function createFollowUpRun(
   apiKey: string,
@@ -166,6 +162,7 @@ export async function collectRunEvents(
   let streamExpired = false;
   let retentionSeconds: number | undefined;
   let lastRetryable = 0;
+  let lastStreamError: CursorCloudApiError | undefined;
 
   for (let attempt = 0; !sawDone && attempt <= MAX_RECONNECTS; attempt += 1) {
     if (Date.now() > deadlineMs) {
@@ -201,6 +198,17 @@ export async function collectRunEvents(
       lastRetryable = response.status;
       continue;
     }
+    if (response.status === 409) {
+      // A live run returned 409 stream_unavailable while the run was still
+      // active. Retry; a persistent 409 is reported below.
+      const unavailable = await errorFromResponse(response);
+      if (unavailable.code === "stream_unavailable") {
+        lastStreamError = unavailable;
+        lastRetryable = 409;
+        continue;
+      }
+      throw unavailable;
+    }
     if (!response.ok) throw await errorFromResponse(response);
     const contentType = response.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) throw await errorFromResponse(response);
@@ -230,6 +238,7 @@ export async function collectRunEvents(
     }
   }
 
+  if (!sawDone && !streamExpired && events.length === 0 && lastStreamError) throw lastStreamError;
   if (!sawDone && !streamExpired && events.length === 0 && lastRetryable !== 0) {
     const code = lastRetryable === 429 ? "rate_limit_exceeded" : "upstream_error";
     throw new CursorCloudApiError(lastRetryable, code, `run stream failed with HTTP ${lastRetryable}`);

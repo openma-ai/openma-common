@@ -66,23 +66,33 @@ describe("Cursor Cloud live run stream", () => {
     let steer: FollowUpResult | undefined;
     let followUp: FollowUpResult | undefined;
     let steerPromise: Promise<FollowUpResult> | undefined;
+    let steerWhileStreamOpen = false;
     const rounds: LiveRound[] = [];
     try {
       const name = `openma-live ${process.env.GITHUB_RUN_ID ?? "local"}`.slice(0, 100);
       agent = await createLiveAgent(apiKey, name);
       writeActiveAgent(agent);
       console.log(`created cloud agent repo=${agent.repoUrl ?? "(no-repo)"} noRepo=${agent.noRepo}`);
-      // Create A Run is the only documented way to send more text. While the
-      // initial run is CREATING or RUNNING the API returns 409 agent_busy.
-      // The Cloud Agents OpenAPI schema has no steer endpoint. The TypeScript
-      // SDK documents cloud run.steer as always returning revert_to_followup.
-      steerPromise = createFollowUpRun(apiKey, agent.agentId, STEER_PROMPT);
+      // Create A Run is the only documented way to send more text. The
+      // OpenAPI schema has no steer endpoint, and the TypeScript SDK says
+      // cloud run.steer always returns revert_to_followup. Send the short
+      // follow-up only after status RUNNING, while this run is still open.
       const initialStream = await collectRunEvents(apiKey, agent, {
         deadlineMs,
         onEvent: (event) => {
           captured.push(event);
+          if (steerPromise || event.event === "result" || event.event === "done") return;
+          if (event.event === "status" && runStatus(event) === "RUNNING") {
+            steerPromise = createFollowUpRun(apiKey, agent!.agentId, STEER_PROMPT).then((result) => {
+              steerWhileStreamOpen = !captured.some((item) => item.event === "done" || item.event === "result");
+              return result;
+            });
+          }
         },
       });
+      if (!steerPromise) {
+        throw new Error("initial run ended before status RUNNING, so the mid-run follow-up was not sent");
+      }
       steer = await steerPromise;
       const initial = finishRound("initial", agent.runId, LIVE_PROMPT, captured, initialStream, agent);
       rounds.push(initial);
@@ -99,7 +109,7 @@ describe("Cursor Cloud live run stream", () => {
       const failures = [
         ...rounds.flatMap((round) => round.assessment?.failures ?? [`${round.label} was not assessed`]),
         ...boundaryFailures(agent, rounds),
-        ...steerFailures(steer, rounds),
+        ...steerFailures(steer, rounds, steerWhileStreamOpen),
       ];
       console.log(redactString(JSON.stringify({
         steer: { accepted: steer.accepted, status: steer.status, code: steer.code ?? null },
@@ -209,7 +219,7 @@ function boundaryFailures(agent: LiveAgent, rounds: readonly LiveRound[]): strin
   )));
 }
 
-function steerFailures(steer: FollowUpResult, rounds: readonly LiveRound[]): string[] {
+function steerFailures(steer: FollowUpResult, rounds: readonly LiveRound[], whileStreamOpen: boolean): string[] {
   const failures: string[] = [];
   const initial = rounds.find((round) => round.label === "initial");
   const second = rounds.find((round) => round.label !== "initial");
@@ -217,13 +227,16 @@ function steerFailures(steer: FollowUpResult, rounds: readonly LiveRound[]): str
   const initialText = userMessageTexts(initial.frames).join("\n");
   const secondText = userMessageTexts(second.frames);
   if (steer.status === 409 && steer.code === "agent_busy") {
-    if (initialText.includes("steered")) {
+    if (initialText.includes(STEER_PROMPT)) {
       failures.push("rejected mid-run prompt was still appended to the initial run");
     }
     if (!secondText.includes(FOLLOW_UP_PROMPT)) {
       failures.push("follow-up run did not decode the follow-up prompt as user.message");
     }
   } else if (steer.accepted) {
+    if (!whileStreamOpen) {
+      failures.push("mid-run follow-up was accepted only after the initial run stream had already finished");
+    }
     const steeredInInitial = initialText.includes(STEER_PROMPT);
     const steeredInSecond = secondText.includes(STEER_PROMPT);
     if (!steeredInInitial && !steeredInSecond) {
@@ -253,6 +266,12 @@ function summarizeRound(round: LiveRound): Record<string, unknown> {
     streamExpired: round.stream?.streamExpired ?? false,
     retentionSeconds: round.stream?.retentionSeconds ?? null,
   };
+}
+
+function runStatus(event: CursorCloudSseEvent): string {
+  const data = event.data;
+  if (typeof data !== "object" || data === null || Array.isArray(data) || !("status" in data)) return "";
+  return typeof data.status === "string" ? data.status : "";
 }
 
 function collapse(values: readonly string[]): string[] {
