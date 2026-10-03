@@ -24,6 +24,8 @@ or wire-event shapes into product state.
 - `@openma/common/brand/openma-logo-mark.svg` — canonical OpenMA vector mark.
 - `@openma/common/protocol/managed` — v2 Managed Agents ↔ OpenMA codec, typed against the official Anthropic SDK event unions.
 - `@openma/common/protocol/acp` — ACP v1 ↔ OpenMA codec, typed against the official Agent Client Protocol SDK message unions.
+- `@openma/common/protocol/openai-agents` — OpenAI Agents items, turns, and session stream events decoded into OpenMA events. The mapping matches backchat `direct-agent-runtime` at `64fd74d`.
+- `@openma/common/protocol/cursor-cloud` — Cursor Cloud Agents API v1 run SSE events decoded into OpenMA events.
 - `@openma/common/session-events/managed` — deprecated legacy Managed event projector plus a compatibility re-export of the v2 codec.
 - `@openma/common/session-events/acp` — deprecated ACP parser/turn projector plus a compatibility re-export of the SDK codec.
 - `@openma/common/session-events/openma` — OpenMA canonical event envelope, Vendor/raw records, and WorkItem lifecycle reducer.

@@ -1,0 +1,3 @@
+# Byte-pinned fixtures. Windows runners set core.autocrlf=true, which rewrites
+# LF to CRLF on checkout and changes the SHA-256 of the backchat 64fd74d source.
+tests/fixtures/** text eol=lf
