@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 jobs:
   verify:
@@ -31,6 +32,15 @@ jobs:
         run: pnpm exec playwright install chromium
       - name: Verify chat UI interactive surface states
         run: pnpm verify:chat-ui-interactive-surface
+        env:
+          ARTIFACT_DIR: ${{ github.workspace }}/artifacts/chat-ui-interactive-surface
+      - name: Upload chat UI interactive surface screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-ui-interactive-surface-${{ github.run_id }}
+          path: artifacts/chat-ui-interactive-surface/
+          if-no-files-found: warn
       - name: Verify acp-fork browser bundle
         run: node scripts/verify-acp-fork-browser.mjs
       - name: Verify committed build output is current
