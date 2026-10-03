@@ -47,6 +47,14 @@
       "types": "./dist/protocol/acp/index.d.ts",
       "import": "./dist/protocol/acp/index.js"
     },
+    "./protocol/openai-agents": {
+      "types": "./dist/protocol/openai-agents/index.d.ts",
+      "import": "./dist/protocol/openai-agents/index.js"
+    },
+    "./protocol/cursor-cloud": {
+      "types": "./dist/protocol/cursor-cloud/index.d.ts",
+      "import": "./dist/protocol/cursor-cloud/index.js"
+    },
     "./session-events/openma": {
       "types": "./dist/session-events/openma.d.ts",
       "import": "./dist/session-events/openma.js"
