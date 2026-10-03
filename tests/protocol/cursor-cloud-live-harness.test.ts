@@ -386,6 +386,11 @@ describe("Cursor Cloud live harness", () => {
     expect(live).toContain("workflow_dispatch:");
     expect(live).toContain("schedule:");
     expect(live).toContain("pull_request:");
+    expect(live).toContain("src/protocol/cursor-cloud/**");
+    expect(live).toContain("tests/live/**");
+    expect(live).toContain("tests/fixtures/cursor-cloud/**");
+    expect(live).toContain("src/session-events/**");
+    expect(live).toContain(".github/workflows/cursor-cloud-live.yml");
     expect(live).toContain("branches: [main]");
     expect(live).toContain("secrets.CURSOR_API_KEY");
     expect(live).toContain("Skipping the live Cloud Agents run.");

@@ -8,6 +8,12 @@ name: Cursor Cloud live
 
 on:
   pull_request:
+    paths:
+      - "src/protocol/cursor-cloud/**"
+      - "tests/live/**"
+      - "tests/fixtures/cursor-cloud/**"
+      - "src/session-events/**"
+      - ".github/workflows/cursor-cloud-live.yml"
   push:
     branches: [main]
   workflow_dispatch:

@@ -353,6 +353,11 @@ describe("Cursor Cloud run SSE decoder", () => {
     expect(decode({ event: "error", data: { code: "unavailable" } })).toEqual([
       vendor("error", `error:${RUN}`, { code: "unavailable" }),
     ]);
+    const transport = { code: "stream_unavailable", message: "Run stream is no longer available" };
+    expect(decode({ event: "error", data: transport })).toEqual([
+      vendor("error", `error:${RUN}`, transport),
+    ]);
+    expect(decode({ event: "error", data: transport })[0]?.type).not.toBe("session.error");
   });
 
   it("keeps interaction_update as a vendor event and passes the payload through", () => {

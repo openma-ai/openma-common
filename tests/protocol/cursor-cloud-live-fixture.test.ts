@@ -100,12 +100,19 @@ describe("Cursor Cloud live fixture", () => {
     expect(decoded.map((event) => event.type)).toEqual([
       "turn.queued",
       "turn.started",
-      "session.error",
+      "vendor.event",
     ]);
+    expect(decoded.some((event) => event.type === "session.error")).toBe(false);
     expect(decoded[2]).toMatchObject({
+      type: "vendor.event",
       data: {
-        code: "stream_unavailable",
-        message: "Run stream is no longer available",
+        name: "error",
+        data: {
+          payload: {
+            code: "stream_unavailable",
+            message: "Run stream is no longer available",
+          },
+        },
       },
     });
   });
@@ -134,6 +141,7 @@ describe("Cursor Cloud live fixture", () => {
     expect(assessRunBoundaries(FIXTURE_AGENT_ID, decoded)).toEqual([]);
     const followUp = decoded.find((run) => run.label === "follow-up");
     const types = followUp?.frames.flatMap((frame) => frame.events).map((event) => event.type) ?? [];
+    expect(types).not.toContain("session.error");
     expect(types.indexOf("turn.started")).toBeGreaterThanOrEqual(0);
     expect(types.indexOf("user.message")).toBeGreaterThan(types.indexOf("turn.started"));
     expect(types.indexOf("agent.message_chunk")).toBeGreaterThan(types.indexOf("user.message"));

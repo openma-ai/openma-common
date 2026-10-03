@@ -31,6 +31,13 @@
  *   in that payload was the run id, so it is kept on `adapter_meta` and
  *   is not used as the OpenMA `session_id`. Other `userMessage` fields
  *   are preserved on `adapter_meta.user_message`.
+ * - `error` with string `code` and `message` is `session.error`, except
+ *   `code: "stream_unavailable"`. Live runs on 2026-10-03 showed that
+ *   code is a transient transport close: the run keeps going, and a
+ *   reconnect still delivers `user.message` and `turn.completed`.
+ *   A canonical `session.error` would make a GUI report a false failure,
+ *   so this code stays a vendor event. Other error codes stay
+ *   `session.error`.
  * - `heartbeat` and `done` produce nothing.
  * - The SSE `id` is an opaque `Last-Event-ID` cursor. It is copied to
  *   `adapter_meta.sse_id` on canonical events and to `data.sse_id` on
