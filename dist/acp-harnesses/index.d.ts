@@ -1,6 +1,3 @@
-export type { AcpHarnessInstallSource } from "./source.js";
-export type { AcpCatalogHarness } from "./catalog.js";
-export { OPENMA_ACP_HARNESS_CATALOG, catalogHarnessById, selectCatalogHarnesses } from "./catalog.js";
 export interface AcpHarnessSpec {
     /** Stable id persisted by products and attached to sessions. */
     id: string;

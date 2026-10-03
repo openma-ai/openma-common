@@ -28,6 +28,10 @@ export type AcpReleaseSource = {
 export declare function parseAcpReleaseSource(value: unknown): AcpReleaseSource;
 export declare function validateAcpRelease(value: unknown): AcpRelease;
 export declare function acpReleaseMatchesSource(release: AcpRelease, input: AcpReleaseSource): boolean;
+export declare function resolveAcpReleaseFromManifest(selection: {
+    id: string;
+    version: string;
+}, manifest: Record<string, unknown>, input?: AcpReleaseSource, options?: ArtifactOptions): Promise<AcpRelease>;
 export declare function resolveAcpRelease(selection: {
     id: string;
     version: string;

@@ -95,9 +95,17 @@
       "types": "./dist/acp-harnesses/index.d.ts",
       "import": "./dist/acp-harnesses/index.js"
     },
-    "./acp-harnesses/install": {
-      "types": "./dist/acp-harnesses/install.d.ts",
-      "import": "./dist/acp-harnesses/install.js"
+    "./acp-harnesses/registry": {
+      "types": "./dist/acp-harnesses/registry.d.ts",
+      "import": "./dist/acp-harnesses/registry.js"
+    },
+    "./acp-harnesses/installer": {
+      "types": "./dist/acp-harnesses/installer.d.ts",
+      "import": "./dist/acp-harnesses/installer.js"
+    },
+    "./acp-harnesses/agent-setup": {
+      "types": "./dist/acp-harnesses/agent-setup.d.ts",
+      "import": "./dist/acp-harnesses/agent-setup.js"
     },
     "./session-ui": {
       "types": "./dist/session-ui/index.d.ts",
