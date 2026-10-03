@@ -422,32 +422,56 @@
   border: 0 !important;
   border-radius: 4px;
   color: var(--chat-fg-muted, var(--fg-muted, currentColor));
-  background: transparent !important;
-  box-shadow: none !important;
+  background: transparent;
+  box-shadow: none;
   font-family: inherit;
   font-size: 0.875rem;
   line-height: 1.25rem;
   text-align: left;
 }
 
-.chat-reasoning-trigger {
-  width: fit-content !important;
+/* Process / worked-for row: full-width plain text; hosts may override without fighting !important. */
+button.chat-reasoning-trigger.activity-disclosure-row {
+  width: 100%;
   max-width: 100%;
   min-height: 24px;
-  height: auto !important;
-  padding: 0 8px !important;
-  border-radius: 8px;
+  height: auto;
+  padding: 0;
+  padding-inline-start: var(--chat-activity-row-leading-space, 0px);
+  border-radius: 0;
   cursor: default;
-  opacity: 1 !important;
-  background: var(--chat-bg-bubble, var(--bg-bubble, transparent)) !important;
-  font-size: 13px !important;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  font-size: 13px;
 }
 
-.chat-reasoning-trigger:hover {
-  background: var(
+.chat-reasoning-trigger.activity-disclosure-row:not(
+    .chat-reasoning-trigger--chip
+  ):hover {
+  background: color-mix(
+    in srgb,
+    var(--chat-fg, var(--fg, currentColor)) 8%,
+    transparent
+  );
+  color: var(--chat-fg, var(--fg, currentColor));
+}
+
+/* Standalone thought/reasoning chip (showIcon on ChatReasoningTrigger). */
+button.chat-reasoning-trigger.chat-reasoning-trigger--chip.activity-disclosure-row {
+  width: fit-content;
+  max-width: 100%;
+  padding: 0 8px;
+  padding-inline-start: 8px;
+  border-radius: 8px;
+  background-color: var(--chat-bg-bubble, var(--bg-bubble, transparent));
+}
+
+.chat-reasoning-trigger.chat-reasoning-trigger--chip:hover {
+  background-color: var(
     --chat-interaction-bg-hover,
     var(--interaction-bg-hover, var(--chat-bg-bubble, transparent))
-  ) !important;
+  );
 }
 
 .activity-disclosure-row:hover {

@@ -512,6 +512,7 @@ export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({
       ref={triggerRef}
       className={chatClassNames(
         "chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+        showIcon && "chat-reasoning-trigger--chip",
         className,
       )}
       data-chat-reasoning-trigger="true"

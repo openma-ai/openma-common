@@ -201,7 +201,7 @@ const defaultThinkingMessage = (isStreaming, duration) => {
 export const ChatReasoningTrigger = memo(function ChatReasoningTrigger({ className, children, getThinkingMessage = defaultThinkingMessage, showIcon = true, ...props }) {
     const { collapsible, isStreaming, isOpen, duration, triggerRef } = useChatReasoning();
     const CollapsibleTrigger = collapsible.Trigger;
-    return (_jsx(CollapsibleTrigger, { ref: triggerRef, className: chatClassNames("chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", className), "data-chat-reasoning-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
+    return (_jsx(CollapsibleTrigger, { ref: triggerRef, className: chatClassNames("chat-reasoning-trigger activity-disclosure-row flex w-full select-none items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground", showIcon && "chat-reasoning-trigger--chip", className), "data-chat-reasoning-trigger": "true", ...props, children: children ?? (_jsxs(_Fragment, { children: [showIcon && _jsx(BrainIcon, { className: "size-4" }), getThinkingMessage(isStreaming, duration), _jsx(ChatDisclosureChevron, { open: isOpen })] })) }));
 });
 export const ChatReasoningContent = memo(function ChatReasoningContent({ className, children, ...props }) {
     const { collapsible, isOpen } = useChatReasoning();
