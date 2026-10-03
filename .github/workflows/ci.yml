@@ -27,6 +27,8 @@ jobs:
         run: uv python install 3.12
       - run: pnpm install --frozen-lockfile
       - run: pnpm verify
+      - name: Install Playwright Chromium for chat UI surface checks
+        run: pnpm exec playwright install chromium
       - name: Verify chat UI interactive surface states
         run: pnpm verify:chat-ui-interactive-surface
       - name: Verify acp-fork browser bundle
