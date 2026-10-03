@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "private": true,
   "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
@@ -157,7 +157,8 @@
     "test:live:cursor-cloud": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm test && pnpm typecheck && pnpm build"
+    "verify": "pnpm test && pnpm typecheck && pnpm build",
+    "verify:host-parity": "node scripts/verify-host-component-parity.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.120.0",
@@ -165,6 +166,9 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "jsdom": "29.1.1",
+    "pixelmatch": "^7.2.0",
+    "playwright": "1.58.2",
+    "pngjs": "^7.0.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "typescript": "^5.8.0",
@@ -176,8 +180,8 @@
     "@tanstack/react-virtual": "^3.14.11",
     "clsx": "^2.1.1",
     "fflate": "^0.8.3",
-    "npm": "^11.6.0",
     "lucide-react": "^1.17.0",
+    "npm": "^11.6.0",
     "streamdown": "^2.5.0",
     "streaming-markdown": "^0.2.15",
     "tailwind-merge": "^3.6.0",

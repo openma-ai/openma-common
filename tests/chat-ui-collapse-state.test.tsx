@@ -94,10 +94,12 @@ describe("nested chat disclosure state", () => {
 
     await act(async () => {
       root.render(
-        <ChatReasoning isStreaming>
-          <ChatReasoningTrigger aria-label="Working" />
-          <ChatReasoningContent>Thinking</ChatReasoningContent>
-        </ChatReasoning>,
+        <div data-session-turn-response="true">
+          <ChatReasoning isStreaming data-session-process-state="running">
+            <ChatReasoningTrigger aria-label="Working" showIcon={false} />
+            <ChatReasoningContent>Thinking</ChatReasoningContent>
+          </ChatReasoning>
+        </div>,
       );
     });
 
@@ -111,10 +113,54 @@ describe("nested chat disclosure state", () => {
       expect(computed.borderTopWidth).toBe("0px");
       expect(computed.boxShadow).toBe("none");
       expect(computed.paddingTop).toBe("0px");
-      expect(computed.paddingRight).toBe("8px");
-      expect(computed.paddingLeft).toBe("8px");
+      expect(computed.paddingRight).toBe("0px");
+      expect(computed.paddingLeft).toBe("0px");
+      expect(
+        computed.paddingInlineStart || computed.getPropertyValue("padding-inline-start"),
+      ).toMatch(/8px|0px/);
       expect(computed.fontSize).toBe("13px");
-      expect(computed.width).toBe("fit-content");
+      expect(computed.width).not.toBe("fit-content");
+    }
+
+    act(() => root.unmount());
+    style.remove();
+  });
+
+  it("paints the thought chip with the bubble surface when showIcon is enabled", async () => {
+    const style = document.createElement("style");
+    style.textContent = `
+      :root {
+        --bg-bubble: rgb(233, 233, 233);
+        --chat-bg-bubble: rgb(233, 233, 233);
+      }
+      ${readFileSync(resolve(import.meta.dirname, "../src/chat-ui/styles.css"), "utf8")}
+    `;
+    document.head.append(style);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => {
+      root.render(
+        <ChatReasoning>
+          <ChatReasoningTrigger aria-label="Thought" />
+          <ChatReasoningContent>Body</ChatReasoningContent>
+        </ChatReasoning>,
+      );
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '[data-chat-reasoning-trigger="true"]',
+    );
+    expect(trigger?.classList.contains("chat-reasoning-trigger--chip")).toBe(true);
+    if (trigger) {
+      const chipComputed = getComputedStyle(trigger);
+      expect(chipComputed.width).toBe("fit-content");
+      expect(chipComputed.backgroundColor).not.toBe("rgb(255, 255, 255)");
+      expect(
+        chipComputed.backgroundColor.includes("233") ||
+          chipComputed.backgroundColor.includes("--chat-bg-bubble"),
+      ).toBe(true);
     }
 
     act(() => root.unmount());
