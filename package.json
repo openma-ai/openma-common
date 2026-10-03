@@ -75,6 +75,10 @@
       "types": "./dist/agent-ui/react.d.ts",
       "import": "./dist/agent-ui/react.js"
     },
+    "./acp-fork": {
+      "types": "./dist/acp-fork/index.d.ts",
+      "import": "./dist/acp-fork/index.js"
+    },
     "./acp-runtime": {
       "types": "./dist/acp-runtime/index.d.ts",
       "import": "./dist/acp-runtime/index.js"

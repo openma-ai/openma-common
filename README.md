@@ -34,12 +34,19 @@ or wire-event shapes into product state.
 - `@openma/common/agent-contract/managed` — Claude Managed wire events translated into Agent facts.
 - `@openma/common/agent-ui` — replayable headless Agent UI reducer and subscribable framework-neutral store.
 - `@openma/common/session-kernel` — canonical local/cloud lifecycle, relay commands, and wire conversion.
+<<<<<<< HEAD
 - `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1), `forkSupport()` (the only client entry for session and inclusive message fork), `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
 - `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown. A pure Node process with no other listener for that `SIGHUP`, `SIGINT`, or `SIGTERM` re-raises the signal after cleanup, so the process still exits with it. The Electron main process keeps its own handlers; children are reaped from the `exit` hook when that process actually quits.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`) and persisted-catalog cloning and validation.
 - `@openma/common/acp-harnesses/registry` — official ACP registry fetch/cache plus OpenMA overlay (`known-agents`), and managed-bin / PATH detection.
 - `@openma/common/acp-harnesses/installer` — registry-backed npm/uvx/binary installs into a managed bin directory (host-agnostic `npmCommand` / `npmEnv`).
 - `@openma/common/acp-harnesses/agent-setup` — install/upgrade/uninstall and capability inspection service used by Backchat. See [Managed ACP harness installation](#managed-acp-harness-installation).
+=======
+- `@openma/common/acp-fork` — browser-safe inclusive ACP fork client API: `forkSupport()`, `acpForkPointsFromMessages()`, `ACP_INCLUSIVE_FORK_CAPABILITY`, capability metadata helpers, and `AcpForkPoint` types. No Node built-ins and no SHA-256 fingerprinting; pass the selected `forkPoint` to the Node runtime (for example via `@openma/common/acp-runtime`) which builds `jetbrains.air.fork` request meta. See [docs/fork-support.md](./docs/fork-support.md).
+- `@openma/common/acp-runtime` — shared ACP session/runtime implementation used by both Backchat and OpenManaged. It exports `sessionConfigOptionsFromResponse()` (legacy `models` catalog → model select), `acpForkRequestMeta()` (`jetbrains.air.fork` v1, Node-only), re-exports the `acp-fork` client helpers, `probeAgentAuthStatus()`, and `authenticateAgent()`. Sessions expose `legacyModels` and `forkSupport`, and accept an optional `clientCapabilityOverlay` and `forkPoint`. See [docs/fork-support.md](./docs/fork-support.md).
+- `@openma/common/acp-runtime/node-spawner` — shared Node subprocess adapter for the ACP runtime. On POSIX it starts each agent in its own process group and signals that group on kill and on host shutdown.
+- `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog plus persisted-catalog cloning and validation.
+>>>>>>> 60f70a3 (feat(acp-fork): add browser-safe client entry for inclusive fork)
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`

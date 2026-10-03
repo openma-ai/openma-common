@@ -3,7 +3,7 @@
 `openma-common` owns the shared inclusive-fork contract. Clients (backchat, clash) call `forkSupport()` and do not hardcode harness names or versions. Adapters that we ship (dsh-acp, pi-acp) copy `ACP_INCLUSIVE_FORK_CAPABILITY` and advertise it from `initialize`. They do not depend on this private package.
 
 ```ts
-// Contract owned by openma-ai/openma-common (src/acp-runtime/fork-support.ts, ACP_INCLUSIVE_FORK_CAPABILITY). Keep byte-identical.
+// Contract owned by openma-ai/openma-common (src/acp-fork/index.ts, ACP_INCLUSIVE_FORK_CAPABILITY). Keep byte-identical.
 ```
 
 This document is the contract those four repositories keep byte-identical. Sections B, C, and D below are the source text.
@@ -16,12 +16,14 @@ This document is the contract those four repositories keep byte-identical. Secti
 
 ## Client usage
 
+Browser and renderer clients import the client-safe entry (no `node:` imports, no hashing):
+
 ```ts
 import {
   acpForkPointsFromMessages,
   forkSupport,
   type AcpForkPoint,
-} from "@openma/common/acp-runtime";
+} from "@openma/common/acp-fork";
 
 const support = forkSupport(initializeResponse);
 if (support.level !== "message") {
@@ -39,6 +41,8 @@ await runtime.start({
 ```
 
 `topLevelAssistantMessages` is in time order. The caller has already merged `<id>:segment:<n>` chunks into `<id>` and concatenated that message's `agent_message_chunk` text. `messageOccurrence` is the 1-based count of identical text in that prefix.
+
+`acpForkRequestMeta()` (SHA-256 fingerprint and `jetbrains.air.fork` meta) lives in `@openma/common/acp-runtime` only. The runtime computes it when `SessionOptions.forkPoint` is set; browser clients do not call it.
 
 `SessionOptions.forkPoint` is valid only together with `forkFromAcpSessionId`. The runtime calls `forkSupport()` on the initialize result after initialize and before `session/fork`. When the level is not `"message"`, start throws an `Error` whose message contains both `reason` and `message`, and it does not send `session/fork`. The same throw happens when the caller placed `jetbrains.air.fork` on `sessionRequestMeta` and the agent cannot fork from a message. A supported `forkPoint` is deep-merged into `sessionRequestMeta` for the fork request only.
 

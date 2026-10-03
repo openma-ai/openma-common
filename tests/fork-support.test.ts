@@ -7,13 +7,13 @@ import {
   ACP_INCLUSIVE_FORK_CAPABILITY,
   ACP_INCLUSIVE_FORK_VERSION,
   acpForkPointsFromMessages,
-  acpForkRequestMeta,
   acpInclusiveForkCapabilityMeta,
   forkSupport,
   type AcpForkSupportLevel,
   type AcpForkSupportReason,
   type AcpForkSupportSource,
-} from "../src/acp-runtime/fork-support.js";
+} from "../src/acp-fork/index.js";
+import { acpForkRequestMeta } from "../src/acp-runtime/fork-support.js";
 import {
   ACP_INCLUSIVE_FORK_VERSION as versionFromIndex,
   acpForkRequestMeta as acpForkRequestMetaFromIndex,
