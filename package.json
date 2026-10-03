@@ -157,7 +157,8 @@
     "test:live:cursor-cloud": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "pnpm test && pnpm typecheck && pnpm build"
+    "verify": "pnpm test && pnpm typecheck && pnpm build",
+    "verify:host-parity": "node scripts/verify-host-component-parity.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.120.0",
@@ -165,7 +166,9 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "jsdom": "29.1.1",
+    "pixelmatch": "^7.2.0",
     "playwright": "1.58.2",
+    "pngjs": "^7.0.0",
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "typescript": "^5.8.0",
