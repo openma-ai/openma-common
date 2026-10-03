@@ -133,6 +133,7 @@
     "link:consumers": "node scripts/consumers.mjs link",
     "unlink:consumers": "node scripts/consumers.mjs unlink",
     "test": "vitest run",
+    "test:live:cursor-cloud": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "pnpm test && pnpm typecheck && pnpm build"
