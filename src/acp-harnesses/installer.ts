@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rm, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import {
+  latestNpmPackageVersion,
+  npmVersionFromSpec,
+} from "./install-state.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -87,6 +91,7 @@ export interface InstallManagedAdapterOptions {
 
 export interface InstallResult {
   commandPath: string;
+  version?: string;
 }
 
 export interface AcpRegistryInstallMetadata {
@@ -270,10 +275,18 @@ function rawBinaryFileName(url: string): string {
   return name;
 }
 
-function versionedInstallDir(root: string, registryId: string, version: string | undefined, archiveUrl: string): string {
-  const versionLabel = sanitizePathComponent(version ?? "unknown");
-  const hash = createHash("sha256").update(`${version ?? ""}\0${archiveUrl}`).digest("hex").slice(0, 16);
+function versionedInstallDir(root: string, registryId: string, version: string, archiveUrl: string): string {
+  const versionLabel = sanitizePathComponent(version);
+  const hash = createHash("sha256").update(`${version}\0${archiveUrl}`).digest("hex").slice(0, 16);
   return join(root, "registry", sanitizePathComponent(registryId), `v_${versionLabel}_${hash}`);
+}
+
+function requireInstallVersion(version: string | undefined, context: string): string {
+  const trimmed = version?.trim();
+  if (!trimmed) {
+    throw new Error(`${context}: install version is required and could not be resolved`);
+  }
+  return trimmed;
 }
 
 function registryInstallMetadataPath(root: string, registryId: string): string {
@@ -386,7 +399,8 @@ async function installBinaryDistribution(
 ): Promise<InstallResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const installRoot = options.installRoot ?? options.binDir;
-  const finalDir = versionedInstallDir(installRoot, options.registryId, agent.version, target.archive);
+  const binaryVersion = requireInstallVersion(agent.version, `${agent.name ?? agent.id} binary install`);
+  const finalDir = versionedInstallDir(installRoot, options.registryId, binaryVersion, target.archive);
   const commandRelativePath = assertSafeRelativeCommand(target.cmd);
   const commandPath = resolve(finalDir, commandRelativePath);
 
@@ -432,7 +446,7 @@ async function installBinaryDistribution(
     ...(target.env ?? {}),
     ...(options.shimEnv ?? {}),
   });
-  return { commandPath: shimPath };
+  return { commandPath: shimPath, version: binaryVersion };
 }
 
 function packageNameFromSpec(packageSpec: string): string {
@@ -456,6 +470,16 @@ function isNpmTargetMissing(error: unknown): boolean {
   return /\bETARGET\b|No matching version found/i.test(`${message}\n${stderr}`);
 }
 
+async function resolvePackageVersion(prefixDir: string, packageSpec: string): Promise<string> {
+  const packageName = packageNameFromSpec(packageSpec);
+  const packageJsonPath = join(prefixDir, "node_modules", ...packagePathParts(packageName), "package.json");
+  const pkg = JSON.parse(await readFile(packageJsonPath, "utf8")) as { version?: unknown };
+  if (typeof pkg.version === "string" && pkg.version.length > 0) {
+    return pkg.version;
+  }
+  throw new Error(`${packageSpec} is installed but package.json is missing a version`);
+}
+
 async function resolvePackageBin(prefixDir: string, packageSpec: string): Promise<string> {
   const packageName = packageNameFromSpec(packageSpec);
   const packageJsonPath = join(prefixDir, "node_modules", ...packagePathParts(packageName), "package.json");
@@ -472,17 +496,43 @@ async function resolvePackageBin(prefixDir: string, packageSpec: string): Promis
   return join(prefixDir, "node_modules", ".bin", process.platform === "win32" ? `${binName}.cmd` : binName);
 }
 
+async function resolveNpmInstallVersion(
+  packageSpec: string,
+  options: {
+    explicitVersion?: string;
+    npmRegistryUrls?: string[];
+    fetchImpl?: typeof fetch;
+  },
+): Promise<string> {
+  if (options.explicitVersion?.trim()) return options.explicitVersion.trim();
+  const fromSpec = npmVersionFromSpec(packageSpec);
+  if (fromSpec) return fromSpec;
+  const latest = await latestNpmPackageVersion(packageNameFromSpec(packageSpec), {
+    npmRegistryUrls: options.npmRegistryUrls,
+    fetchImpl: options.fetchImpl,
+  });
+  return requireInstallVersion(
+    latest,
+    `Could not resolve npm version for ${packageNameFromSpec(packageSpec)}`,
+  );
+}
+
 async function installNpxDistribution(
   npx: AcpRegistryNpxDistribution,
   options: Required<Pick<InstallAcpRegistryAgentOptions, "binDir" | "registryId" | "shimName">> &
-    Pick<InstallAcpRegistryAgentOptions, "installRoot" | "npmCommand" | "npmCommandArgs" | "npmEnv" | "npmRegistryUrls" | "env" | "shimArgs" | "shimEnv"> &
+    Pick<InstallAcpRegistryAgentOptions, "installRoot" | "npmCommand" | "npmCommandArgs" | "npmEnv" | "npmRegistryUrls" | "env" | "shimArgs" | "shimEnv" | "fetchImpl"> &
     { version?: string },
 ): Promise<InstallResult> {
   const installRoot = options.installRoot ?? options.binDir;
+  const resolvedVersion = await resolveNpmInstallVersion(npx.package, {
+    explicitVersion: options.version,
+    npmRegistryUrls: options.npmRegistryUrls,
+    fetchImpl: options.fetchImpl,
+  });
   const prefixDir = versionedInstallDir(
     installRoot,
     options.registryId,
-    options.version,
+    resolvedVersion,
     `npx:${npx.package}`,
   );
   let packageBin: string;
@@ -569,21 +619,66 @@ async function installNpxDistribution(
     packageBin = await resolvePackageBin(prefixDir, npx.package);
   }
 
+  const installedVersion = await resolvePackageVersion(prefixDir, npx.package);
   const shimPath = join(options.binDir, options.shimName);
   await writeExecutableShim(shimPath, packageBin, options.shimArgs ?? npx.args ?? [], {
     ...(npx.env ?? {}),
     ...(options.shimEnv ?? {}),
   });
-  return { commandPath: shimPath };
+  return { commandPath: shimPath, version: installedVersion };
+}
+
+function pythonVersionFromSpec(packageSpec: string): string | undefined {
+  const name = pythonPackageNameFromSpec(packageSpec);
+  const remainder = packageSpec.slice(name.length).trim();
+  if (!remainder.startsWith("@")) return undefined;
+  const version = remainder.slice(1).trim();
+  return version.length > 0 ? version : undefined;
+}
+
+async function readInstalledUvxVersion(toolDir: string, packageName: string): Promise<string | undefined> {
+  const normalizedName = packageName.replace(/-/g, "_").toLowerCase();
+  let entries: string[];
+  try {
+    entries = await readdir(toolDir, { recursive: true }) as string[];
+  } catch {
+    return undefined;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith(".dist-info/METADATA") && !entry.endsWith(".dist-info\\METADATA")) continue;
+    if (!entry.toLowerCase().includes(normalizedName)) continue;
+    try {
+      const metadata = await readFile(join(toolDir, entry), "utf8");
+      const versionLine = metadata
+        .split("\n")
+        .find((line) => line.startsWith("Version:"));
+      const version = versionLine?.slice("Version:".length).trim();
+      if (version) return version;
+    } catch {
+      // Keep scanning other dist-info directories.
+    }
+  }
+  return undefined;
 }
 
 async function installUvxDistribution(
   uvx: AcpRegistryUvxDistribution,
   options: Required<Pick<InstallAcpRegistryAgentOptions, "binDir" | "registryId" | "shimName">> &
-    Pick<InstallAcpRegistryAgentOptions, "installRoot" | "env" | "shimArgs" | "shimEnv">,
+    Pick<InstallAcpRegistryAgentOptions, "installRoot" | "env" | "shimArgs" | "shimEnv"> &
+    { version?: string },
 ): Promise<InstallResult> {
   const installRoot = options.installRoot ?? options.binDir;
-  const prefixDir = join(installRoot, "registry", sanitizePathComponent(options.registryId), "uvx");
+  const packageName = pythonPackageNameFromSpec(uvx.package);
+  const resolvedVersion = requireInstallVersion(
+    options.version ?? pythonVersionFromSpec(uvx.package),
+    `${packageName} uvx install`,
+  );
+  const prefixDir = versionedInstallDir(
+    installRoot,
+    options.registryId,
+    resolvedVersion,
+    `uvx:${uvx.package}`,
+  );
   const toolDir = join(prefixDir, "tools");
   const toolBinDir = join(prefixDir, "bin");
   await mkdir(toolBinDir, { recursive: true });
@@ -603,13 +698,14 @@ async function installUvxDistribution(
     },
   );
 
-  const packageBin = await firstExecutableInDir(toolBinDir, pythonPackageNameFromSpec(uvx.package));
+  const packageBin = await firstExecutableInDir(toolBinDir, packageName);
+  const installedVersion = await readInstalledUvxVersion(toolDir, packageName) ?? resolvedVersion;
   const shimPath = join(options.binDir, options.shimName);
   await writeExecutableShim(shimPath, packageBin, options.shimArgs ?? uvx.args ?? [], {
     ...(uvx.env ?? {}),
     ...(options.shimEnv ?? {}),
   });
-  return { commandPath: shimPath };
+  return { commandPath: shimPath, version: installedVersion };
 }
 
 function pythonPackageNameFromSpec(packageSpec: string): string {
@@ -672,6 +768,7 @@ export async function installAcpRegistryAgent(options: InstallAcpRegistryAgentOp
       npmCommandArgs: options.npmCommandArgs,
       npmEnv: options.npmEnv,
       npmRegistryUrls: options.npmRegistryUrls,
+      fetchImpl,
       env: options.env,
       shimArgs: options.shimArgs,
       shimEnv: options.shimEnv,
@@ -686,20 +783,36 @@ export async function installAcpRegistryAgent(options: InstallAcpRegistryAgentOp
       env: options.env,
       shimArgs: options.shimArgs,
       shimEnv: options.shimEnv,
+      version: agent.version,
     });
   } else {
     throw new Error(`${agent.name ?? agent.id} has no registry install for ${platformKey}`);
   }
 
+  const installedVersion = result.version ?? agent.version;
   await writeRegistryInstallMetadata(options, {
     source: "registry",
     registryId: options.registryId,
     shimName: options.shimName,
-    ...(agent.version ? { version: agent.version } : {}),
+    ...(installedVersion ? { version: installedVersion } : {}),
     installedAt: new Date().toISOString(),
   });
   return result;
 }
+
+export {
+  readAcpHarnessInstallState,
+  type AcpHarnessInstallState,
+  type ReadAcpHarnessInstallStateOptions,
+  OPENMA_NPM_HARNESS_IDS,
+  usesOpenMaNpmLatestSource,
+  latestNpmPackageVersion,
+  npmPackageNameFromSpec,
+  npmVersionFromSpec,
+  readInstalledNpmPackageVersion,
+  installedNpmPackageVersionFromShim,
+  isStrictlyNewerVersion,
+} from "./install-state.js";
 
 export async function installManagedAdapter(options: InstallManagedAdapterOptions): Promise<InstallResult> {
   const fetchImpl = options.fetchImpl ?? fetch;

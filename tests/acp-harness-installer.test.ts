@@ -1,13 +1,16 @@
 import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ACP_NPM_INSTALL_TIMEOUT_MS,
   installAcpRegistryAgent,
   listAcpRegistryCatalog,
+  readAcpHarnessInstallState,
+  readAcpRegistryInstallMetadata,
 } from "../src/acp-harnesses/installer.js";
+import type { KnownAgentEntry } from "../src/acp-harnesses/known-agents.js";
 
 /** Backchat installer tests use POSIX shell shims and fake npm scripts. */
 const unixIt = process.platform === "win32" ? it.skip : it;
@@ -62,7 +65,9 @@ import { basename, join } from "node:path";
 const args = process.argv.slice(2);
 const prefix = args[args.indexOf("--prefix") + 1];
 const spec = args.at(-1);
-const packageName = spec.startsWith("@") ? spec.slice(0, spec.indexOf("@", 1)) : spec.split("@")[0];
+const packageName = spec.startsWith("@")
+  ? ((versionAt) => versionAt > 0 ? spec.slice(0, versionAt) : spec)(spec.indexOf("@", 1))
+  : spec.split("@")[0];
 const parts = packageName.split("/");
 const binName = basename(packageName);
 await rm(prefix, { recursive: true, force: true });
@@ -76,7 +81,10 @@ if (process.env.TEST_INSTALL_STARTED) {
 const packageDir = join(prefix, "node_modules", ...parts);
 await mkdir(join(prefix, "node_modules", ".bin"), { recursive: true });
 await mkdir(packageDir, { recursive: true });
-await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" } }));
+const pkgVersion = spec.startsWith("@")
+  ? (spec.indexOf("@", 1) > 0 ? spec.slice(spec.indexOf("@", 1) + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"))
+  : (spec.includes("@") ? spec.slice(spec.lastIndexOf("@") + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"));
+await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" }, version: pkgVersion }));
 await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit 0\\n", { mode: 0o755 });
 `, "utf8");
     await chmod(fakeNpm, 0o755);
@@ -245,13 +253,18 @@ if (args.includes("--prefer-offline")) {
 }
 const prefix = args[args.indexOf("--prefix") + 1];
 const spec = args.at(-1);
-const packageName = spec.startsWith("@") ? spec.slice(0, spec.indexOf("@", 1)) : spec.split("@")[0];
+const packageName = spec.startsWith("@")
+  ? ((versionAt) => versionAt > 0 ? spec.slice(0, versionAt) : spec)(spec.indexOf("@", 1))
+  : spec.split("@")[0];
 const parts = packageName.split("/");
 const binName = basename(packageName);
 const packageDir = join(prefix, "node_modules", ...parts);
 await mkdir(join(prefix, "node_modules", ".bin"), { recursive: true });
 await mkdir(packageDir, { recursive: true });
-await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" } }));
+const pkgVersion = spec.startsWith("@")
+  ? (spec.indexOf("@", 1) > 0 ? spec.slice(spec.indexOf("@", 1) + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"))
+  : (spec.includes("@") ? spec.slice(spec.lastIndexOf("@") + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"));
+await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" }, version: pkgVersion }));
 await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit 0\\n", { mode: 0o755 });
 `, "utf8");
     await chmod(fakeNpm, 0o755);
@@ -301,13 +314,18 @@ if (registry !== "https://registry.npmjs.org") {
 }
 const prefix = args[args.indexOf("--prefix") + 1];
 const spec = args.at(-1);
-const packageName = spec.startsWith("@") ? spec.slice(0, spec.indexOf("@", 1)) : spec.split("@")[0];
+const packageName = spec.startsWith("@")
+  ? ((versionAt) => versionAt > 0 ? spec.slice(0, versionAt) : spec)(spec.indexOf("@", 1))
+  : spec.split("@")[0];
 const parts = packageName.split("/");
 const binName = basename(packageName);
 const packageDir = join(prefix, "node_modules", ...parts);
 await mkdir(join(prefix, "node_modules", ".bin"), { recursive: true });
 await mkdir(packageDir, { recursive: true });
-await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" } }));
+const pkgVersion = spec.startsWith("@")
+  ? (spec.indexOf("@", 1) > 0 ? spec.slice(spec.indexOf("@", 1) + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"))
+  : (spec.includes("@") ? spec.slice(spec.lastIndexOf("@") + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"));
+await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" }, version: pkgVersion }));
 await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit 0\\n", { mode: 0o755 });
 `, "utf8");
     await chmod(fakeNpm, 0o755);
@@ -339,6 +357,108 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     );
     await rm(root, { recursive: true, force: true });
   });
+
+  unixIt("records the resolved npm version in install.json and avoids v_unknown directories", async () => {
+    const root = join(tmpdir(), `openma-acp-version-metadata-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const fakeNpm = await writeFakeNpm(root);
+    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.includes("registry.example.test")) {
+        return new Response(JSON.stringify({
+          "dist-tags": { latest: "0.1.6" },
+        }), { status: 200 });
+      }
+      throw new Error(`Unexpected fetch: ${href}`);
+    }) as typeof fetch;
+
+    await installAcpRegistryAgent({
+      registryId: "pi-acp",
+      shimName: "openma-acp-pi-acp",
+      binDir,
+      installRoot: root,
+      npmCommand: fakeNpm,
+      npmRegistryUrls: ["https://registry.example.test"],
+      fetchImpl,
+      env: {
+        ...process.env,
+        TEST_DEFAULT_PKG_VERSION: "0.1.6",
+      },
+      registryAgent: {
+        id: "pi-acp",
+        distribution: { npx: { package: "@openma/pi-acp" } },
+      },
+    });
+
+    const metadata = await readAcpRegistryInstallMetadata({
+      registryId: "pi-acp",
+      binDir,
+      installRoot: root,
+    });
+    expect(metadata?.version).toBe("0.1.6");
+    const { readdir } = await import("node:fs/promises");
+    const versionDirs = await readdir(join(root, "registry", "pi-acp"));
+    expect(versionDirs.some((entry) => /^v_0\.1\.6_/.test(entry))).toBe(true);
+    expect(versionDirs.some((entry) => /v_unknown/.test(entry))).toBe(false);
+    await rm(root, { recursive: true, force: true });
+  });
+
+  unixIt("reads legacy v_unknown installs through readAcpHarnessInstallState", async () => {
+    const root = join(tmpdir(), `openma-acp-legacy-unknown-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const installDir = join(root, "registry", "pi-acp", "v_unknown_legacyhash");
+    const packageDir = join(installDir, "node_modules", "@openma", "pi-acp");
+    const packageBin = join(installDir, "node_modules", ".bin", "pi-acp");
+    await mkdir(packageDir, { recursive: true });
+    await mkdir(join(installDir, "node_modules", ".bin"), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(packageDir, "package.json"),
+      JSON.stringify({ name: "@openma/pi-acp", version: "0.1.6", bin: { "pi-acp": "cli.js" } }),
+    );
+    await writeFile(packageBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await writeFile(
+      join(binDir, "openma-acp-pi-acp"),
+      `#!/bin/sh\nexec '${packageBin}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    await writeFile(
+      join(root, "registry", "pi-acp", "install.json"),
+      JSON.stringify({
+        source: "registry",
+        registryId: "pi-acp",
+        shimName: "openma-acp-pi-acp",
+        installedAt: "2026-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
+
+    const entry: KnownAgentEntry = {
+      id: "pi-acp",
+      label: "Pi",
+      spec: { command: "openma-acp-pi-acp" },
+      registryId: "pi-acp",
+      installSource: "registry",
+      registryDistribution: { npx: { package: "@openma/pi-acp" } },
+    };
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      "dist-tags": { latest: "0.1.6" },
+    }), { status: 200 })) as typeof fetch;
+
+    await expect(readAcpHarnessInstallState({
+      entry,
+      binDir,
+      installRoot: root,
+      fetchImpl,
+      npmRegistryUrls: ["https://registry.example.test"],
+    })).resolves.toEqual({
+      installed: true,
+      installedVersion: "0.1.6",
+      latestVersion: "0.1.6",
+    });
+
+    await rm(root, { recursive: true, force: true });
+  });
 });
 
 async function writeFakeNpm(root: string): Promise<string> {
@@ -350,7 +470,9 @@ import { basename, join } from "node:path";
 const args = process.argv.slice(2);
 const prefix = args[args.indexOf("--prefix") + 1];
 const spec = args.at(-1);
-const packageName = spec.startsWith("@") ? spec.slice(0, spec.indexOf("@", 1)) : spec.split("@")[0];
+const packageName = spec.startsWith("@")
+  ? ((versionAt) => versionAt > 0 ? spec.slice(0, versionAt) : spec)(spec.indexOf("@", 1))
+  : spec.split("@")[0];
 const parts = packageName.split("/");
 const binName = basename(packageName);
 if (process.env.TEST_REJECT_SEED) {
@@ -364,7 +486,10 @@ if (process.env.TEST_REJECT_SEED) {
 const packageDir = join(prefix, "node_modules", ...parts);
 await mkdir(join(prefix, "node_modules", ".bin"), { recursive: true });
 await mkdir(packageDir, { recursive: true });
-await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" } }));
+const pkgVersion = spec.startsWith("@")
+  ? (spec.indexOf("@", 1) > 0 ? spec.slice(spec.indexOf("@", 1) + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"))
+  : (spec.includes("@") ? spec.slice(spec.lastIndexOf("@") + 1) : (process.env.TEST_DEFAULT_PKG_VERSION ?? "0.0.0"));
+await writeFile(join(packageDir, "package.json"), JSON.stringify({ bin: { [binName]: "cli.js" }, version: pkgVersion }));
 await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit 0\\n", { mode: 0o755 });
 `, "utf8");
   await chmod(fakeNpm, 0o755);
