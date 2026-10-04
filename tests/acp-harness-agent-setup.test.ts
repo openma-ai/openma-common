@@ -229,6 +229,86 @@ describe("acp agent setup sdk", () => {
     );
   });
 
+  it("uses npm latest for OpenMA harnesses even when the registry snapshot pins an older version", async () => {
+    const root = join(tmpdir(), `openma-acp-registry-vs-npm-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const installDir = join(root, "registry", "dsh-acp", "v_1.0.2_abc");
+    const packageDir = join(
+      installDir,
+      "node_modules",
+      "@openma",
+      "deepseek-harness-acp",
+    );
+    const packageBin = join(installDir, "node_modules", ".bin", "dsh-acp");
+    await mkdir(packageDir, { recursive: true });
+    await mkdir(join(installDir, "node_modules", ".bin"), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(packageDir, "package.json"),
+      JSON.stringify({
+        name: "@openma/deepseek-harness-acp",
+        version: "1.0.2",
+      }),
+    );
+    await writeFile(packageBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await writeFile(
+      join(binDir, "dsh-acp"),
+      `#!/bin/sh\nexec '${packageBin}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    getKnownAgentsMock.mockReturnValue([{
+      ...fakeEntry,
+      id: "dsh-acp",
+      label: "DeepSeek Harness",
+      spec: { command: "dsh-acp" },
+      registryId: "dsh-acp",
+      version: "1.0.0",
+      registryDistribution: {
+        npx: { package: "@openma/deepseek-harness-acp@1.0.0" },
+      },
+    }]);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      "dist-tags": { latest: "1.0.2" },
+    }), { status: 200 })) as typeof fetch;
+    const service = createAcpAgentSetupService({
+      acpBinDir: binDir,
+      acpInstallRoot: root,
+      registryCachePath: join(root, "registry.json"),
+      refreshRegistry: async () => undefined,
+      npmRegistryUrls: ["https://registry.example.test"],
+      fetchImpl,
+    });
+
+    installAcpRegistryAgentMock.mockClear();
+    await service.installAgent("dsh-acp");
+    expect(installAcpRegistryAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registryAgent: expect.objectContaining({
+          version: "1.0.2",
+          distribution: {
+            npx: { package: "@openma/deepseek-harness-acp@1.0.2" },
+          },
+        }),
+      }),
+    );
+
+    installAcpRegistryAgentMock.mockClear();
+    const agents = await service.upgradeAgent("dsh-acp");
+    expect(installAcpRegistryAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registryAgent: expect.objectContaining({
+          version: "1.0.2",
+        }),
+      }),
+    );
+    expect(agents[0]).toMatchObject({
+      installedVersion: "1.0.2",
+      latestVersion: "1.0.2",
+    });
+    expect(agents[0]).not.toHaveProperty("updateAvailable");
+    await rm(root, { recursive: true, force: true });
+  });
+
   it("passes the host npm registry fallback chain to registry installs", async () => {
     const service = createAcpAgentSetupService({
       acpBinDir: "/tmp/sdk-acp-bin",

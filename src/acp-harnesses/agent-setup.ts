@@ -416,18 +416,8 @@ class AcpAgentSetupServiceImpl implements AcpAgentSetupService {
   async installAgent(id: string): Promise<AcpAgentSetupInfo[]> {
     await this.refreshRegistry({ refresh: true });
     const entry = this.requireEntry(id);
-    const npmPackageName = !entry.version
-      && usesOpenMaNpmLatestSource(entry)
-      && entry.registryDistribution?.npx
-      ? npmPackageNameFromSpec(entry.registryDistribution.npx.package)
-      : undefined;
-    const npmLatestVersion = npmPackageName
-      ? await latestNpmPackageVersion(npmPackageName, {
-          fetchImpl: this.deps.fetchImpl,
-          npmRegistryUrls: this.deps.npmRegistryUrls,
-        })
-      : undefined;
-    await this.installEntry(entry, npmLatestVersion);
+    const targetVersion = await this.resolveManagedInstallTargetVersion(entry);
+    await this.installEntry(entry, targetVersion);
     return this.collectAgentSnapshot({
       trigger: "install",
       refreshRegistry: false,
@@ -449,13 +439,35 @@ class AcpAgentSetupServiceImpl implements AcpAgentSetupService {
     if (!installInfo.installed) {
       throw new Error(`${entry.label} is not installed by ${this.managedByName()}`);
     }
-    await this.installEntry(entry, installInfo.latestVersion);
+    const targetVersion = await this.resolveManagedInstallTargetVersion(
+      entry,
+      installInfo.latestVersion,
+    );
+    await this.installEntry(entry, targetVersion);
     return this.collectAgentSnapshot({
       trigger: "update",
       refreshRegistry: false,
       auth: { target: "ids", ids: [id] },
       capabilities: { target: "ids", ids: [id] },
     });
+  }
+
+  private async resolveManagedInstallTargetVersion(
+    entry: SetupAgentEntry,
+    registryLatestVersion?: string,
+  ): Promise<string | undefined> {
+    if (usesOpenMaNpmLatestSource(entry) && entry.registryDistribution?.npx) {
+      const packageName = npmPackageNameFromSpec(entry.registryDistribution.npx.package);
+      const latest = await latestNpmPackageVersion(packageName, {
+        fetchImpl: this.deps.fetchImpl,
+        npmRegistryUrls: this.deps.npmRegistryUrls,
+      });
+      if (!latest) {
+        throw new Error(`Could not resolve npm latest version for ${packageName}`);
+      }
+      return latest;
+    }
+    return registryLatestVersion ?? entry.version;
   }
 
   private async installEntry(
@@ -481,9 +493,11 @@ class AcpAgentSetupServiceImpl implements AcpAgentSetupService {
           registryAgent: {
             id: entry.registryId,
             name: entry.label,
-            ...(targetVersion || entry.version
-              ? { version: targetVersion ?? entry.version }
-              : {}),
+            ...(targetVersion
+              ? { version: targetVersion }
+              : entry.version
+                ? { version: entry.version }
+                : {}),
             distribution: registryDistribution,
           },
         } : {}),
