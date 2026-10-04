@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, delimiter, dirname, join } from "node:path";
 import { detectEntry, getKnownAgents, loadRegistry, } from "./registry.js";
-import { installAcpRegistryAgent, installManagedAdapter, readAcpRegistryInstallMetadata, repairRelocatedAcpRegistryShim, uninstallAcpRegistryAgent, uninstallManagedAdapter, } from "./installer.js";
+import { installAcpRegistryAgent, installManagedAdapter, latestNpmPackageVersion, npmPackageNameFromSpec, readAcpHarnessInstallState, repairRelocatedAcpRegistryShim, uninstallAcpRegistryAgent, uninstallManagedAdapter, usesOpenMaNpmLatestSource, } from "./installer.js";
 import { authenticateAgent, disposeAllAcpProbes, probeAgentSessionConfig, probeAgentAuthStatus, } from "../acp-runtime/probe.js";
 const NO_LIVE_PROBE_PLAN = {
     trigger: "list",
@@ -198,7 +198,13 @@ class AcpAgentSetupServiceImpl {
                 cachedProbe?.available_commands;
             const sessionModes = usableSessionConfig?.modes ??
                 cachedProbe?.session_modes;
-            const installInfo = await this.managedInstallInfo(entry);
+            const installInfo = await readAcpHarnessInstallState({
+                entry,
+                binDir: this.deps.acpBinDir,
+                installRoot: this.deps.acpInstallRoot,
+                fetchImpl: this.deps.fetchImpl,
+                npmRegistryUrls: this.deps.npmRegistryUrls,
+            });
             return {
                 id: entry.id,
                 label: entry.label,
@@ -240,13 +246,8 @@ class AcpAgentSetupServiceImpl {
     async installAgent(id) {
         await this.refreshRegistry({ refresh: true });
         const entry = this.requireEntry(id);
-        const npmPackageName = !entry.version && entry.registryDistribution?.npx
-            ? npmPackageNameFromSpec(entry.registryDistribution.npx.package)
-            : undefined;
-        const npmLatestVersion = npmPackageName
-            ? await this.latestNpmPackageVersion(npmPackageName)
-            : undefined;
-        await this.installEntry(entry, npmLatestVersion);
+        const targetVersion = await this.resolveManagedInstallTargetVersion(entry);
+        await this.installEntry(entry, targetVersion);
         return this.collectAgentSnapshot({
             trigger: "install",
             refreshRegistry: false,
@@ -257,17 +258,38 @@ class AcpAgentSetupServiceImpl {
     async upgradeAgent(id) {
         await this.refreshRegistry({ refresh: false });
         const entry = this.requireEntry(id);
-        const installInfo = await this.managedInstallInfo(entry);
+        const installInfo = await readAcpHarnessInstallState({
+            entry,
+            binDir: this.deps.acpBinDir,
+            installRoot: this.deps.acpInstallRoot,
+            fetchImpl: this.deps.fetchImpl,
+            npmRegistryUrls: this.deps.npmRegistryUrls,
+        });
         if (!installInfo.installed) {
             throw new Error(`${entry.label} is not installed by ${this.managedByName()}`);
         }
-        await this.installEntry(entry, installInfo.latestVersion);
+        const targetVersion = await this.resolveManagedInstallTargetVersion(entry, installInfo.latestVersion);
+        await this.installEntry(entry, targetVersion);
         return this.collectAgentSnapshot({
             trigger: "update",
             refreshRegistry: false,
             auth: { target: "ids", ids: [id] },
             capabilities: { target: "ids", ids: [id] },
         });
+    }
+    async resolveManagedInstallTargetVersion(entry, registryLatestVersion) {
+        if (usesOpenMaNpmLatestSource(entry) && entry.registryDistribution?.npx) {
+            const packageName = npmPackageNameFromSpec(entry.registryDistribution.npx.package);
+            const latest = await latestNpmPackageVersion(packageName, {
+                fetchImpl: this.deps.fetchImpl,
+                npmRegistryUrls: this.deps.npmRegistryUrls,
+            });
+            if (!latest) {
+                throw new Error(`Could not resolve npm latest version for ${packageName}`);
+            }
+            return latest;
+        }
+        return registryLatestVersion ?? entry.version;
     }
     async installEntry(entry, targetVersion) {
         if (entry.installSource === "registry") {
@@ -288,9 +310,11 @@ class AcpAgentSetupServiceImpl {
                     registryAgent: {
                         id: entry.registryId,
                         name: entry.label,
-                        ...(targetVersion || entry.version
-                            ? { version: targetVersion ?? entry.version }
-                            : {}),
+                        ...(targetVersion
+                            ? { version: targetVersion }
+                            : entry.version
+                                ? { version: entry.version }
+                                : {}),
                         distribution: registryDistribution,
                     },
                 } : {}),
@@ -445,91 +469,6 @@ class AcpAgentSetupServiceImpl {
             return null;
         return await detectEntry(entry, this.resolveOptions());
     }
-    async managedInstallInfo(entry) {
-        const registryLatestVersion = entry.version;
-        if (!entry.installSource) {
-            return {
-                installed: false,
-                ...(registryLatestVersion ? { latestVersion: registryLatestVersion } : {}),
-            };
-        }
-        const shimPath = join(this.deps.acpBinDir, basename(entry.spec.command));
-        const installed = await access(shimPath).then(() => true, () => false);
-        if (!installed) {
-            return {
-                installed: false,
-                ...(registryLatestVersion ? { latestVersion: registryLatestVersion } : {}),
-            };
-        }
-        const npmPackageName = entry.registryDistribution?.npx?.package
-            ? npmPackageNameFromSpec(entry.registryDistribution.npx.package)
-            : undefined;
-        const [metadata, installedNpmVersion, npmLatestVersion] = await Promise.all([
-            entry.installSource === "registry" && entry.registryId
-                ? readAcpRegistryInstallMetadata({
-                    registryId: entry.registryId,
-                    binDir: this.deps.acpBinDir,
-                    installRoot: this.deps.acpInstallRoot,
-                })
-                : Promise.resolve(null),
-            npmPackageName
-                ? this.installedNpmPackageVersion(shimPath, npmPackageName)
-                : Promise.resolve(undefined),
-            !registryLatestVersion && npmPackageName
-                ? this.latestNpmPackageVersion(npmPackageName)
-                : Promise.resolve(undefined),
-        ]);
-        const installedVersion = installedNpmVersion ?? metadata?.version;
-        const latestVersion = registryLatestVersion ?? npmLatestVersion;
-        const updateAvailable = entry.installSource === "registry"
-            && Boolean(latestVersion)
-            && (!installedVersion || isStrictlyNewerVersion(latestVersion, installedVersion));
-        return {
-            installed: true,
-            ...(installedVersion ? { installedVersion } : {}),
-            ...(latestVersion ? { latestVersion } : {}),
-            ...(updateAvailable ? { updateAvailable: true } : {}),
-        };
-    }
-    async installedNpmPackageVersion(shimPath, packageName) {
-        try {
-            const shim = await readFile(shimPath, "utf8");
-            const commandPath = shim.match(/^exec\s+'([^']+)'(?:\s|$)/m)?.[1];
-            if (!commandPath)
-                return undefined;
-            const normalized = commandPath.replaceAll("\\", "/");
-            const marker = "/node_modules/.bin/";
-            const markerIndex = normalized.lastIndexOf(marker);
-            if (markerIndex < 0)
-                return undefined;
-            const installDir = normalized.slice(0, markerIndex);
-            const parsed = JSON.parse(await readFile(join(installDir, "node_modules", ...packageName.split("/"), "package.json"), "utf8"));
-            return typeof parsed.version === "string" && parsed.version.length > 0
-                ? parsed.version
-                : undefined;
-        }
-        catch {
-            return undefined;
-        }
-    }
-    async latestNpmPackageVersion(packageName) {
-        try {
-            const response = await (this.deps.fetchImpl ?? fetch)(`https://registry.npmjs.org/${encodeURIComponent(packageName)}`, {
-                headers: { accept: "application/vnd.npm.install-v1+json" },
-                signal: AbortSignal.timeout(5_000),
-            });
-            if (!response.ok)
-                return undefined;
-            const parsed = await response.json();
-            const latest = parsed["dist-tags"]?.latest;
-            return typeof latest === "string" && latest.length > 0
-                ? latest
-                : undefined;
-        }
-        catch {
-            return undefined;
-        }
-    }
     async probeAuth(entry) {
         const status = await probeAgentAuthStatus({
             agent: entry.spec,
@@ -587,70 +526,6 @@ class AcpAgentSetupServiceImpl {
     managedByName() {
         return this.deps.managedByName?.trim() || "this host";
     }
-}
-function npmPackageNameFromSpec(packageSpec) {
-    if (packageSpec.startsWith("@")) {
-        const versionIndex = packageSpec.indexOf("@", 1);
-        return versionIndex > 0 ? packageSpec.slice(0, versionIndex) : packageSpec;
-    }
-    const versionIndex = packageSpec.lastIndexOf("@");
-    return versionIndex > 0 ? packageSpec.slice(0, versionIndex) : packageSpec;
-}
-function isStrictlyNewerVersion(candidate, current) {
-    if (!candidate || !current)
-        return false;
-    const parsedCandidate = parseSemver(candidate);
-    const parsedCurrent = parseSemver(current);
-    if (!parsedCandidate || !parsedCurrent)
-        return false;
-    return compareSemver(parsedCandidate, parsedCurrent) > 0;
-}
-function parseSemver(version) {
-    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/);
-    if (!match)
-        return null;
-    const core = match.slice(1, 4).map(Number);
-    if (core.some((part) => !Number.isSafeInteger(part)))
-        return null;
-    return {
-        core: core,
-        prerelease: match[4]?.split(".") ?? [],
-    };
-}
-function compareSemver(left, right) {
-    for (let index = 0; index < left.core.length; index += 1) {
-        const difference = left.core[index] - right.core[index];
-        if (difference !== 0)
-            return difference;
-    }
-    if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-        return right.prerelease.length - left.prerelease.length;
-    }
-    const length = Math.max(left.prerelease.length, right.prerelease.length);
-    for (let index = 0; index < length; index += 1) {
-        const leftPart = left.prerelease[index];
-        const rightPart = right.prerelease[index];
-        if (leftPart === undefined)
-            return -1;
-        if (rightPart === undefined)
-            return 1;
-        if (leftPart === rightPart)
-            continue;
-        const leftIsNumeric = /^\d+$/.test(leftPart);
-        const rightIsNumeric = /^\d+$/.test(rightPart);
-        if (leftIsNumeric && rightIsNumeric) {
-            const normalizedLeft = leftPart.replace(/^0+(?=\d)/, "");
-            const normalizedRight = rightPart.replace(/^0+(?=\d)/, "");
-            if (normalizedLeft.length !== normalizedRight.length) {
-                return normalizedLeft.length - normalizedRight.length;
-            }
-            return normalizedLeft < normalizedRight ? -1 : 1;
-        }
-        if (leftIsNumeric !== rightIsNumeric)
-            return leftIsNumeric ? -1 : 1;
-        return leftPart < rightPart ? -1 : 1;
-    }
-    return 0;
 }
 function parseProbeCache(raw) {
     const parsed = JSON.parse(raw);

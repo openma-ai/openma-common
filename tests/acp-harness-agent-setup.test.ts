@@ -194,11 +194,13 @@ describe("acp agent setup sdk", () => {
     expect(agents[0]?.config_options).toEqual(configOptions);
   });
 
-  it("installs an unversioned npx agent from npm's latest dist-tag", async () => {
+  it("installs an unversioned OpenMA npm harness from npm's latest dist-tag", async () => {
     getKnownAgentsMock.mockReturnValue([{
       ...fakeEntry,
+      id: "pi-acp",
+      registryId: "pi-acp",
       registryDistribution: {
-        npx: { package: "@test/fake-agent" },
+        npx: { package: "@openma/pi-acp" },
       },
     }]);
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
@@ -209,21 +211,102 @@ describe("acp agent setup sdk", () => {
       acpInstallRoot: "/tmp/sdk-acp-root",
       registryCachePath: "/tmp/sdk-registry.json",
       refreshRegistry: async () => undefined,
+      npmRegistryUrls: ["https://registry.example.test"],
       fetchImpl,
     });
 
-    await service.installAgent("fake-agent");
+    await service.installAgent("pi-acp");
 
     expect(installAcpRegistryAgentMock).toHaveBeenCalledWith(
       expect.objectContaining({
         registryAgent: expect.objectContaining({
           version: "1.0.2",
           distribution: {
-            npx: { package: "@test/fake-agent@1.0.2" },
+            npx: { package: "@openma/pi-acp@1.0.2" },
           },
         }),
       }),
     );
+  });
+
+  it("uses npm latest for OpenMA harnesses even when the registry snapshot pins an older version", async () => {
+    const root = join(tmpdir(), `openma-acp-registry-vs-npm-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const installDir = join(root, "registry", "dsh-acp", "v_1.0.2_abc");
+    const packageDir = join(
+      installDir,
+      "node_modules",
+      "@openma",
+      "deepseek-harness-acp",
+    );
+    const packageBin = join(installDir, "node_modules", ".bin", "dsh-acp");
+    await mkdir(packageDir, { recursive: true });
+    await mkdir(join(installDir, "node_modules", ".bin"), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(packageDir, "package.json"),
+      JSON.stringify({
+        name: "@openma/deepseek-harness-acp",
+        version: "1.0.2",
+      }),
+    );
+    await writeFile(packageBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    await writeFile(
+      join(binDir, "dsh-acp"),
+      `#!/bin/sh\nexec '${packageBin}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    getKnownAgentsMock.mockReturnValue([{
+      ...fakeEntry,
+      id: "dsh-acp",
+      label: "DeepSeek Harness",
+      spec: { command: "dsh-acp" },
+      registryId: "dsh-acp",
+      version: "1.0.0",
+      registryDistribution: {
+        npx: { package: "@openma/deepseek-harness-acp@1.0.0" },
+      },
+    }]);
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      "dist-tags": { latest: "1.0.2" },
+    }), { status: 200 })) as typeof fetch;
+    const service = createAcpAgentSetupService({
+      acpBinDir: binDir,
+      acpInstallRoot: root,
+      registryCachePath: join(root, "registry.json"),
+      refreshRegistry: async () => undefined,
+      npmRegistryUrls: ["https://registry.example.test"],
+      fetchImpl,
+    });
+
+    installAcpRegistryAgentMock.mockClear();
+    await service.installAgent("dsh-acp");
+    expect(installAcpRegistryAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registryAgent: expect.objectContaining({
+          version: "1.0.2",
+          distribution: {
+            npx: { package: "@openma/deepseek-harness-acp@1.0.2" },
+          },
+        }),
+      }),
+    );
+
+    installAcpRegistryAgentMock.mockClear();
+    const agents = await service.upgradeAgent("dsh-acp");
+    expect(installAcpRegistryAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        registryAgent: expect.objectContaining({
+          version: "1.0.2",
+        }),
+      }),
+    );
+    expect(agents[0]).toMatchObject({
+      installedVersion: "1.0.2",
+      latestVersion: "1.0.2",
+    });
+    expect(agents[0]).not.toHaveProperty("updateAvailable");
+    await rm(root, { recursive: true, force: true });
   });
 
   it("passes the host npm registry fallback chain to registry installs", async () => {
@@ -863,6 +946,18 @@ describe("acp agent setup sdk", () => {
     );
     const binDir = join(root, "bin");
     await mkdir(binDir, { recursive: true });
+    await mkdir(join(root, "registry", "fake-agent"), { recursive: true });
+    await writeFile(
+      join(root, "registry", "fake-agent", "install.json"),
+      JSON.stringify({
+        source: "registry",
+        registryId: "fake-agent",
+        shimName: "fake-agent",
+        version: "1.0.0",
+        installedAt: "2026-01-01T00:00:00.000Z",
+      }),
+      "utf8",
+    );
     await writeFile(
       join(binDir, "fake-agent"),
       "#!/bin/sh\nexit 0\n",
@@ -876,9 +971,6 @@ describe("acp agent setup sdk", () => {
         npx: { package: "@test/fake-agent" },
       },
     }]);
-    readAcpRegistryInstallMetadataMock.mockResolvedValue({
-      version: "1.0.0",
-    });
     const fetchImpl = vi.fn(async (url: string | URL | Request) => {
       throw new Error(`Unexpected non-registry version request: ${String(url)}`);
     }) as typeof fetch;
@@ -901,30 +993,32 @@ describe("acp agent setup sdk", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("compares an unversioned npx agent with npm's latest dist-tag", async () => {
+  it("compares an unversioned OpenMA npm harness with npm's latest dist-tag", async () => {
     const root = join(tmpdir(), `openma-acp-npx-latest-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");
-    const installDir = join(root, "registry", "fake-agent", "v_unknown_test");
-    const packageDir = join(installDir, "node_modules", "@test", "fake-agent");
-    const packageBin = join(installDir, "node_modules", ".bin", "fake-agent");
+    const installDir = join(root, "registry", "pi-acp", "v_unknown_test");
+    const packageDir = join(installDir, "node_modules", "@openma", "pi-acp");
+    const packageBin = join(installDir, "node_modules", ".bin", "pi-acp");
     await mkdir(packageDir, { recursive: true });
     await mkdir(join(installDir, "node_modules", ".bin"), { recursive: true });
     await mkdir(binDir, { recursive: true });
     await writeFile(
       join(packageDir, "package.json"),
-      JSON.stringify({ name: "@test/fake-agent", version: "1.0.1" }),
+      JSON.stringify({ name: "@openma/pi-acp", version: "1.0.1" }),
     );
     await writeFile(packageBin, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     await writeFile(
-      join(binDir, "fake-agent"),
+      join(binDir, "openma-acp-pi-acp"),
       `#!/bin/sh\nexec '${packageBin}' "$@"\n`,
       { mode: 0o755 },
     );
     getKnownAgentsMock.mockReturnValue([{
       ...fakeEntry,
-      spec: { command: "fake-agent" },
+      id: "pi-acp",
+      registryId: "pi-acp",
+      spec: { command: "openma-acp-pi-acp" },
       registryDistribution: {
-        npx: { package: "@test/fake-agent" },
+        npx: { package: "@openma/pi-acp" },
       },
     }]);
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
@@ -935,6 +1029,7 @@ describe("acp agent setup sdk", () => {
       acpInstallRoot: root,
       registryCachePath: join(root, "registry.json"),
       refreshRegistry: async () => undefined,
+      npmRegistryUrls: ["https://registry.example.test"],
       fetchImpl,
     });
 
@@ -946,11 +1041,47 @@ describe("acp agent setup sdk", () => {
       }),
     ]);
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://registry.npmjs.org/%40test%2Ffake-agent",
+      "https://registry.example.test/%40openma%2Fpi-acp",
       expect.objectContaining({
         headers: { accept: "application/vnd.npm.install-v1+json" },
       }),
     );
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("does not flag updates when latest is unknown for a non-OpenMA harness", async () => {
+    const root = join(tmpdir(), `openma-acp-unknown-latest-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(binDir, "fake-agent"),
+      "#!/bin/sh\nexit 0\n",
+      { mode: 0o755 },
+    );
+    getKnownAgentsMock.mockReturnValue([{
+      ...fakeEntry,
+      spec: { command: "fake-agent" },
+      registryDistribution: {
+        npx: { package: "@test/fake-agent" },
+      },
+    }]);
+    readAcpRegistryInstallMetadataMock.mockResolvedValue(null);
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("npm should not be queried");
+    }) as typeof fetch;
+    const service = createAcpAgentSetupService({
+      acpBinDir: binDir,
+      acpInstallRoot: root,
+      registryCachePath: join(root, "registry.json"),
+      refreshRegistry: async () => undefined,
+      fetchImpl,
+    });
+
+    const agents = await service.listAgents();
+    expect(agents[0]).toMatchObject({ installed: true });
+    expect(agents[0]).not.toHaveProperty("latestVersion");
+    expect(agents[0]).not.toHaveProperty("updateAvailable");
+    expect(fetchImpl).not.toHaveBeenCalled();
     await rm(root, { recursive: true, force: true });
   });
 

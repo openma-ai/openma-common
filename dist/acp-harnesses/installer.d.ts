@@ -65,6 +65,7 @@ export interface InstallManagedAdapterOptions {
 }
 export interface InstallResult {
     commandPath: string;
+    version?: string;
 }
 export interface AcpRegistryInstallMetadata {
     source: "registry";
@@ -103,8 +104,8 @@ export declare function repairRelocatedAcpRegistryShim(options: {
     installRoot?: string;
 }): Promise<boolean>;
 export declare function installAcpRegistryAgent(options: InstallAcpRegistryAgentOptions): Promise<InstallResult>;
+export { readAcpHarnessInstallState, type AcpHarnessInstallState, type ReadAcpHarnessInstallStateOptions, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
 export declare function installManagedAdapter(options: InstallManagedAdapterOptions): Promise<InstallResult>;
 export declare function uninstallAcpRegistryAgent(options: UninstallAcpRegistryAgentOptions): Promise<void>;
 export declare function uninstallManagedAdapter(options: UninstallManagedAdapterOptions): Promise<void>;
-export {};
 //# sourceMappingURL=installer.d.ts.map
