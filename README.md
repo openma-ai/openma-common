@@ -40,6 +40,7 @@ or wire-event shapes into product state.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`) and persisted-catalog cloning and validation.
 - `@openma/common/acp-harnesses/registry` — official ACP registry fetch/cache plus OpenMA overlay (`known-agents`), and managed-bin / PATH detection.
 - `@openma/common/acp-harnesses/installer` — registry-backed npm/uvx/binary installs into a managed bin directory (host-agnostic `npmCommand` / `npmEnv`).
+- `@openma/common/acp-harnesses/headless-launch` — `buildAcpHeadlessLaunch(entry, options)`: the launch arguments and variables for one unattended run, built from the harness's own recipe (`KnownAgentEntry.headless`). See [Unattended runs and pinned installs](#unattended-runs-and-pinned-installs).
 - `@openma/common/acp-harnesses/agent-setup` — install/upgrade/uninstall and capability inspection service used by Backchat. See [Managed ACP harness installation](#managed-acp-harness-installation).
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
@@ -291,3 +292,44 @@ const setup = createAcpAgentSetupService({
 await setup.warmup();
 await setup.installAgent("pi");
 ```
+
+## Unattended runs and pinned installs
+
+A host that runs a harness without a person at the keyboard (a benchmark trial,
+a CI job) names the harness id and passes generic options. Flags and variable
+names stay in the registry entry:
+
+```ts
+import { resolveKnownAgent } from "@openma/common/acp-harnesses/registry";
+import { buildAcpHeadlessLaunch } from "@openma/common/acp-harnesses/headless-launch";
+import { installPinnedAcpHarness, readAcpHarnessPinState } from "@openma/common/acp-harnesses/installer";
+
+const entry = resolveKnownAgent("pi-acp")!;
+const { commandPath } = await installPinnedAcpHarness({ entry, binDir });
+const { args, env, unsupported } = buildAcpHeadlessLaunch(entry, {
+  agentDir,        // the agent's user-level configuration directory
+  sessionDir,
+  trustProject: true,
+  provider: "deepseek",
+  model: "deepseek-v4-pro",
+  thinkingLevel: "medium",
+});
+```
+
+`unsupported` lists the requested options the recipe cannot express. The launch
+does not carry them, so a host that depends on one, such as `agentDir` for
+isolation, must stop instead of running. An entry without a recipe throws.
+
+`installPinnedAcpHarness` installs `entry.pinned`: the adapter package at one
+exact version, with `entry.pinned.dependencies` written as npm `overrides` in
+the install prefix and checked against what npm installed. It fails when a
+pinned package is missing or at another version, including when it reuses an
+existing install directory. `readAcpHarnessPinState({ entry, shimPath })`
+compares an existing install with the pins from local files only. Product
+installs are unchanged: `installAcpRegistryAgent` and `AcpAgentSetupService`
+still follow `registryDistribution` and npm's latest.
+
+Only `pi-acp` has a recipe and pins today. The pins cover `@openma/pi-acp` and
+the `@earendil-works/*` packages it resolves. Other transitive dependencies
+still follow their own ranges. Update the pins in the same PR that moves the
+adapter to a new Pi SDK.

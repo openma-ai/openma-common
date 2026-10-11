@@ -89,6 +89,43 @@ export async function readAcpHarnessInstallState(
   };
 }
 
+export interface AcpHarnessPinState {
+  package: { name: string; pinned: string; installed?: string };
+  dependencies: Array<{ name: string; pinned: string; installed?: string }>;
+  /** Every pinned package is installed at exactly its pinned version. */
+  satisfied: boolean;
+}
+
+/**
+ * Compares the install a managed shim points at with the exact versions the
+ * registry entry pins. Reads only local files. Null when the entry pins
+ * nothing.
+ */
+export async function readAcpHarnessPinState(options: {
+  entry: KnownAgentEntry;
+  shimPath: string;
+}): Promise<AcpHarnessPinState | null> {
+  const pinned = options.entry.pinned;
+  if (!pinned) return null;
+  const name = npmPackageNameFromSpec(pinned.package);
+  const installedPackage = await installedNpmPackageVersionFromShim(options.shimPath, name);
+  const dependencies = await Promise.all(
+    Object.entries(pinned.dependencies)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(async ([dependency, version]) => {
+        const installed = await installedNpmPackageVersionFromShim(options.shimPath, dependency);
+        return { name: dependency, pinned: version, ...(installed ? { installed } : {}) };
+      }),
+  );
+  const packagePin = npmVersionFromSpec(pinned.package) ?? "";
+  return {
+    package: { name, pinned: packagePin, ...(installedPackage ? { installed: installedPackage } : {}) },
+    dependencies,
+    satisfied: installedPackage === packagePin
+      && dependencies.every((dependency) => dependency.installed === dependency.pinned),
+  };
+}
+
 export function npmPackageNameFromSpec(packageSpec: string): string {
   if (packageSpec.startsWith("@")) {
     const versionIndex = packageSpec.indexOf("@", 1);

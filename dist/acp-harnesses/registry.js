@@ -86,6 +86,8 @@ function mergeOverlay(official, overlay) {
                 downloadUrl: ov.downloadUrl ?? o.downloadUrl,
                 downloadKind: ov.downloadKind ?? o.downloadKind,
                 configOptions: ov.configOptions ?? o.configOptions,
+                headless: ov.headless ?? o.headless,
+                pinned: ov.pinned ?? o.pinned,
             });
         }
         else {

@@ -16,6 +16,29 @@ export interface ReadAcpHarnessInstallStateOptions {
 }
 export declare function usesOpenMaNpmLatestSource(entry: KnownAgentEntry): boolean;
 export declare function readAcpHarnessInstallState(options: ReadAcpHarnessInstallStateOptions): Promise<AcpHarnessInstallState>;
+export interface AcpHarnessPinState {
+    package: {
+        name: string;
+        pinned: string;
+        installed?: string;
+    };
+    dependencies: Array<{
+        name: string;
+        pinned: string;
+        installed?: string;
+    }>;
+    /** Every pinned package is installed at exactly its pinned version. */
+    satisfied: boolean;
+}
+/**
+ * Compares the install a managed shim points at with the exact versions the
+ * registry entry pins. Reads only local files. Null when the entry pins
+ * nothing.
+ */
+export declare function readAcpHarnessPinState(options: {
+    entry: KnownAgentEntry;
+    shimPath: string;
+}): Promise<AcpHarnessPinState | null>;
 export declare function npmPackageNameFromSpec(packageSpec: string): string;
 export declare function npmVersionFromSpec(packageSpec: string): string | undefined;
 export declare function latestNpmPackageVersion(packageName: string, options?: {

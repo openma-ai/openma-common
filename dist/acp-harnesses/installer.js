@@ -185,6 +185,7 @@ export async function readAcpRegistryInstallMetadata(options) {
             registryId: parsed.registryId,
             shimName: parsed.shimName,
             ...(typeof parsed.version === "string" && parsed.version.length > 0 ? { version: parsed.version } : {}),
+            ...(isStringRecord(parsed.dependencies) ? { dependencies: parsed.dependencies } : {}),
             installedAt: typeof parsed.installedAt === "string" ? parsed.installedAt : "",
         };
     }
@@ -345,14 +346,53 @@ async function resolveNpmInstallVersion(packageSpec, options) {
     });
     return requireInstallVersion(latest, `Could not resolve npm version for ${packageNameFromSpec(packageSpec)}`);
 }
+function isStringRecord(value) {
+    return value !== null
+        && typeof value === "object"
+        && !Array.isArray(value)
+        && Object.values(value).every((item) => typeof item === "string");
+}
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+function sortedOverrides(overrides) {
+    const entries = Object.entries(overrides ?? {}).sort(([left], [right]) => left.localeCompare(right));
+    for (const [name, version] of entries) {
+        if (!EXACT_VERSION.test(version)) {
+            throw new Error(`npm override for ${name} must be an exact version, got ${JSON.stringify(version)}`);
+        }
+    }
+    return entries;
+}
+/** npm reads `overrides` only from the package.json at the install prefix. */
+async function writeOverridesManifest(prefixDir, overrides) {
+    if (overrides.length === 0)
+        return;
+    await mkdir(prefixDir, { recursive: true });
+    await writeFile(join(prefixDir, "package.json"), JSON.stringify({ private: true, overrides: Object.fromEntries(overrides) }, null, 2), "utf8");
+}
+async function installedOverrideVersions(prefixDir, overrides) {
+    const installed = {};
+    for (const [name, pinned] of overrides) {
+        const actual = await resolvePackageVersion(prefixDir, name).catch(() => undefined);
+        if (actual !== pinned) {
+            throw new Error(`${name} is pinned to ${pinned} but ${actual ?? "nothing"} is installed in ${prefixDir}`);
+        }
+        installed[name] = actual;
+    }
+    return installed;
+}
 async function installNpxDistribution(npx, options) {
     const installRoot = options.installRoot ?? options.binDir;
+    const overrides = sortedOverrides(options.npmOverrides);
     const resolvedVersion = await resolveNpmInstallVersion(npx.package, {
         explicitVersion: options.version,
         npmRegistryUrls: options.npmRegistryUrls,
         fetchImpl: options.fetchImpl,
     });
-    const prefixDir = versionedInstallDir(installRoot, options.registryId, resolvedVersion, `npx:${npx.package}`);
+    const prefixDir = versionedInstallDir(installRoot, options.registryId, resolvedVersion, 
+    // A pinned tree and a floating tree of the same package never share a directory.
+    overrides.length > 0
+        ? `npx:${npx.package}\0overrides:${JSON.stringify(overrides)}`
+        : `npx:${npx.package}`);
     let packageBin;
     try {
         packageBin = await resolvePackageBin(prefixDir, npx.package);
@@ -387,6 +427,7 @@ async function installNpxDistribution(npx, options) {
             for (const registryUrl of registryUrls) {
                 const registryArgs = registryUrl ? ["--registry", registryUrl] : [];
                 try {
+                    await writeOverridesManifest(stagedDir, overrides);
                     await execFileAsync(options.npmCommand ?? "npm", [
                         ...(options.npmCommandArgs ?? []),
                         ...installArgs,
@@ -402,6 +443,7 @@ async function installNpxDistribution(npx, options) {
                     if (isNpmTargetMissing(error)) {
                         await rm(stagedDir, { recursive: true, force: true });
                         try {
+                            await writeOverridesManifest(stagedDir, overrides);
                             await execFileAsync(options.npmCommand ?? "npm", [
                                 ...(options.npmCommandArgs ?? []),
                                 ...installArgs,
@@ -434,12 +476,17 @@ async function installNpxDistribution(npx, options) {
         packageBin = await resolvePackageBin(prefixDir, npx.package);
     }
     const installedVersion = await resolvePackageVersion(prefixDir, npx.package);
+    const dependencies = await installedOverrideVersions(prefixDir, overrides);
     const shimPath = join(options.binDir, options.shimName);
     await writeExecutableShim(shimPath, packageBin, options.shimArgs ?? npx.args ?? [], {
         ...(npx.env ?? {}),
         ...(options.shimEnv ?? {}),
     });
-    return { commandPath: shimPath, version: installedVersion };
+    return {
+        commandPath: shimPath,
+        version: installedVersion,
+        ...(overrides.length > 0 ? { dependencies } : {}),
+    };
 }
 function pythonVersionFromSpec(packageSpec) {
     const name = pythonPackageNameFromSpec(packageSpec);
@@ -570,6 +617,7 @@ export async function installAcpRegistryAgent(options) {
             env: options.env,
             shimArgs: options.shimArgs,
             shimEnv: options.shimEnv,
+            npmOverrides: options.npmOverrides,
             version: agent.version,
         });
     }
@@ -594,11 +642,41 @@ export async function installAcpRegistryAgent(options) {
         registryId: options.registryId,
         shimName: options.shimName,
         ...(installedVersion ? { version: installedVersion } : {}),
+        ...(result.dependencies ? { dependencies: result.dependencies } : {}),
         installedAt: new Date().toISOString(),
     });
     return result;
 }
-export { readAcpHarnessInstallState, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
+/**
+ * Installs a harness at the exact versions its registry entry pins
+ * (`KnownAgentEntry.pinned`), for hosts that need the same agent on every
+ * machine. Product installs keep using `installAcpRegistryAgent`.
+ */
+export async function installPinnedAcpHarness(options) {
+    const { entry, ...install } = options;
+    if (!entry.pinned || !entry.registryId) {
+        throw new Error(`${entry.label} (${entry.id}) has no pinned install`);
+    }
+    const version = npmVersionFromSpec(entry.pinned.package);
+    if (!version || !EXACT_VERSION.test(version)) {
+        throw new Error(`${entry.label} (${entry.id}) pins ${entry.pinned.package}, which is not an exact version`);
+    }
+    return installAcpRegistryAgent({
+        ...install,
+        registryId: entry.registryId,
+        registryAgent: {
+            id: entry.registryId,
+            name: entry.label,
+            version,
+            distribution: { npx: { package: entry.pinned.package } },
+        },
+        shimName: basename(entry.spec.command),
+        shimArgs: entry.spec.args,
+        shimEnv: entry.spec.env,
+        npmOverrides: entry.pinned.dependencies,
+    });
+}
+export { readAcpHarnessInstallState, readAcpHarnessPinState, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
 export async function installManagedAdapter(options) {
     const fetchImpl = options.fetchImpl ?? fetch;
     const bytes = await fetchBytes(options.downloadUrl, fetchImpl);

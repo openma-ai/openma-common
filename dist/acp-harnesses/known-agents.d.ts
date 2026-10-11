@@ -48,6 +48,46 @@ export interface KnownAgentConfigOption {
     currentValue?: string;
     options?: KnownAgentConfigSelectValue[];
 }
+/**
+ * How a harness is started for one unattended run (a benchmark trial, a CI
+ * job): which of its own flags and variables carry the generic options in
+ * `AcpHeadlessLaunchOptions`. Hosts name the harness id and pass those
+ * options to `buildAcpHeadlessLaunch`; they never spell a harness flag.
+ */
+export interface KnownAgentHeadlessLaunch {
+    /** Flags that turn off interactive behaviour. Always passed. */
+    args?: string[];
+    /** Flag that takes the directory for the harness's own session files. */
+    sessionDir?: {
+        flag: string;
+    };
+    /** Where the agent's user-level configuration directory is set. */
+    agentDir?: {
+        flag?: string;
+        env?: string;
+    };
+    /** Flag that loads project-level resources without a stored trust decision. */
+    trustProject?: {
+        flag: string;
+    };
+    /** Model selection. The value is `[provider<sep>]model[<sep>thinking]`. */
+    model?: {
+        flag: string;
+        providerSeparator?: string;
+        thinkingSeparator?: string;
+    };
+}
+/**
+ * A reproducible npm install of a harness: the adapter package and the
+ * dependencies that decide the agent's behaviour, each at one exact version.
+ * `installPinnedAcpHarness` enforces `dependencies` through npm `overrides`.
+ */
+export interface KnownAgentPinnedInstall {
+    /** Exact package spec, `name@x.y.z`. */
+    package: string;
+    /** Dependency name to exact version. */
+    dependencies: Record<string, string>;
+}
 export interface KnownAgentEntry {
     /** Canonical id used by hosts and dropdowns. Slug-only, no spaces. */
     id: string;
@@ -102,6 +142,11 @@ export interface KnownAgentEntry {
         }>>;
         downloadUrl?: string;
     };
+    /** Unattended launch recipe. Absent when the harness has none recorded. */
+    headless?: KnownAgentHeadlessLaunch;
+    /** Exact versions for hosts that need a reproducible install. Product
+     *  installs keep following `registryDistribution`. */
+    pinned?: KnownAgentPinnedInstall;
 }
 export declare function registryShimName(id: string): string;
 export declare const OVERLAY_AGENTS: KnownAgentEntry[];

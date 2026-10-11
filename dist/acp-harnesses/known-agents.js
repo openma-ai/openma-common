@@ -53,6 +53,35 @@ export const OVERLAY_AGENTS = [
         registryDistribution: { npx: { package: "@openma/pi-acp" } },
         installHint: "npm install -g @openma/pi-acp@latest",
         homepage: "https://github.com/openma-ai/pi-acp",
+        headless: {
+            // No editor is attached, so tools run in the agent's own process, and
+            // the startup banner would be recorded as an assistant message.
+            args: ["--no-delegation", "--quiet-startup"],
+            sessionDir: { flag: "--session-dir" },
+            agentDir: { flag: "--agent-dir", env: "PI_CODING_AGENT_DIR" },
+            trustProject: { flag: "--trust-projects" },
+            model: {
+                flag: "--model",
+                providerSeparator: "/",
+                thinkingSeparator: ":",
+            },
+        },
+        // @openma/pi-acp depends on the Pi SDK as ^1.1.0, so an unpinned install
+        // takes whatever 1.x is newest that day. These are the versions 0.1.7 was
+        // released against. Update them together with the adapter version.
+        pinned: {
+            package: "@openma/pi-acp@0.1.7",
+            dependencies: {
+                "@earendil-works/chord": "1.1.0",
+                "@earendil-works/pi-agent-core": "1.1.0",
+                "@earendil-works/pi-ai": "1.1.0",
+                "@earendil-works/pi-codemode": "1.1.0",
+                "@earendil-works/pi-coding-agent": "1.1.0",
+                "@earendil-works/pi-mcp": "1.1.0",
+                "@earendil-works/pi-telemetry": "1.1.0",
+                "@earendil-works/pi-tui": "1.1.0",
+            },
+        },
     },
     {
         id: "gemini",

@@ -45,6 +45,41 @@ export interface KnownAgentConfigOption {
   options?: KnownAgentConfigSelectValue[];
 }
 
+/**
+ * How a harness is started for one unattended run (a benchmark trial, a CI
+ * job): which of its own flags and variables carry the generic options in
+ * `AcpHeadlessLaunchOptions`. Hosts name the harness id and pass those
+ * options to `buildAcpHeadlessLaunch`; they never spell a harness flag.
+ */
+export interface KnownAgentHeadlessLaunch {
+  /** Flags that turn off interactive behaviour. Always passed. */
+  args?: string[];
+  /** Flag that takes the directory for the harness's own session files. */
+  sessionDir?: { flag: string };
+  /** Where the agent's user-level configuration directory is set. */
+  agentDir?: { flag?: string; env?: string };
+  /** Flag that loads project-level resources without a stored trust decision. */
+  trustProject?: { flag: string };
+  /** Model selection. The value is `[provider<sep>]model[<sep>thinking]`. */
+  model?: {
+    flag: string;
+    providerSeparator?: string;
+    thinkingSeparator?: string;
+  };
+}
+
+/**
+ * A reproducible npm install of a harness: the adapter package and the
+ * dependencies that decide the agent's behaviour, each at one exact version.
+ * `installPinnedAcpHarness` enforces `dependencies` through npm `overrides`.
+ */
+export interface KnownAgentPinnedInstall {
+  /** Exact package spec, `name@x.y.z`. */
+  package: string;
+  /** Dependency name to exact version. */
+  dependencies: Record<string, string>;
+}
+
 export interface KnownAgentEntry {
   /** Canonical id used by hosts and dropdowns. Slug-only, no spaces. */
   id: string;
@@ -95,6 +130,11 @@ export interface KnownAgentEntry {
         archives: Partial<Record<string, { url: string; cmd: string }>>;
         downloadUrl?: string;
       };
+  /** Unattended launch recipe. Absent when the harness has none recorded. */
+  headless?: KnownAgentHeadlessLaunch;
+  /** Exact versions for hosts that need a reproducible install. Product
+   *  installs keep following `registryDistribution`. */
+  pinned?: KnownAgentPinnedInstall;
 }
 
 export function registryShimName(id: string): string {
@@ -138,6 +178,35 @@ export const OVERLAY_AGENTS: KnownAgentEntry[] = [
     registryDistribution: { npx: { package: "@openma/pi-acp" } },
     installHint: "npm install -g @openma/pi-acp@latest",
     homepage: "https://github.com/openma-ai/pi-acp",
+    headless: {
+      // No editor is attached, so tools run in the agent's own process, and
+      // the startup banner would be recorded as an assistant message.
+      args: ["--no-delegation", "--quiet-startup"],
+      sessionDir: { flag: "--session-dir" },
+      agentDir: { flag: "--agent-dir", env: "PI_CODING_AGENT_DIR" },
+      trustProject: { flag: "--trust-projects" },
+      model: {
+        flag: "--model",
+        providerSeparator: "/",
+        thinkingSeparator: ":",
+      },
+    },
+    // @openma/pi-acp depends on the Pi SDK as ^1.1.0, so an unpinned install
+    // takes whatever 1.x is newest that day. These are the versions 0.1.7 was
+    // released against. Update them together with the adapter version.
+    pinned: {
+      package: "@openma/pi-acp@0.1.7",
+      dependencies: {
+        "@earendil-works/chord": "1.1.0",
+        "@earendil-works/pi-agent-core": "1.1.0",
+        "@earendil-works/pi-ai": "1.1.0",
+        "@earendil-works/pi-codemode": "1.1.0",
+        "@earendil-works/pi-coding-agent": "1.1.0",
+        "@earendil-works/pi-mcp": "1.1.0",
+        "@earendil-works/pi-telemetry": "1.1.0",
+        "@earendil-works/pi-tui": "1.1.0",
+      },
+    },
   },
   {
     id: "gemini",

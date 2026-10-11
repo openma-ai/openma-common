@@ -107,6 +107,10 @@
       "types": "./dist/acp-harnesses/installer.d.ts",
       "import": "./dist/acp-harnesses/installer.js"
     },
+    "./acp-harnesses/headless-launch": {
+      "types": "./dist/acp-harnesses/headless-launch.d.ts",
+      "import": "./dist/acp-harnesses/headless-launch.js"
+    },
     "./acp-harnesses/agent-setup": {
       "types": "./dist/acp-harnesses/agent-setup.d.ts",
       "import": "./dist/acp-harnesses/agent-setup.js"
