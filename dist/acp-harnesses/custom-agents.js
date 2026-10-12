@@ -148,7 +148,8 @@ function envPairsFromRow(value) {
         const name = nonEmptyString(item?.name);
         return name && typeof item?.value === "string" ? [[name, item.value]] : [];
     });
-    return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+    // An explicit `env = []` row round-trips as env:{} — presence preserved.
+    return Object.fromEntries(entries);
 }
 /** The definition a `config.toml` `[[agents]]` row carries, if it is one. */
 export function customAcpAgentFromConfigTomlRow(row) {
@@ -203,9 +204,11 @@ export function customAcpAgentsFromConfigToml(config) {
 // ---------------------------------------------------------------------------
 // Compatible reads of Martty's legacy settings.json
 // ---------------------------------------------------------------------------
-// Rows Martty wrote before the shared store may carry runner flags it added
-// itself; they are dropped on read so the launch argv stays clean. Versions
-// and tags inside args are never touched.
+// Rows Martty wrote before the shared store may carry runner flags Martty
+// itself injected next to `npx` (`--yes` and `--prefer-offline` tell the
+// runner not to prompt and to reuse its cache). They are Martty's own
+// mechanics, not user-chosen launch arguments, so reads drop them — unlike
+// package versions and tags inside args, which are never touched.
 const NPM_RUNNER = /^npx(?:\.(?:cmd|bat|exe))?$/i;
 const LEGACY_NPX_FLAGS = new Set(["--yes", "--prefer-offline"]);
 function marttyLegacyNpxArgs(agent) {
@@ -243,14 +246,15 @@ function writeAtomic(path, content) {
     writeFileSync(temporary, content);
     renameSync(temporary, path);
 }
-// Leading comment lines (Backchat's file header) survive a reserialize;
-// everything else unrelated does by virtue of the parsed object.
+// Leading comment lines (Backchat's file header) survive a reserialize —
+// including the newline that separates them from the first key; everything
+// else unrelated does by virtue of the parsed object.
 function leadingComments(raw) {
     const lines = raw.split("\n");
     let end = 0;
     while (end < lines.length && (lines[end].startsWith("#") || !lines[end].trim()))
         end += 1;
-    return lines.slice(0, end).join("\n");
+    return end === 0 ? "" : `${lines.slice(0, end).join("\n")}\n`;
 }
 /**
  * Every custom agent definition under `omaDir`: `config.toml` first, then
@@ -284,15 +288,19 @@ function rewriteSharedAgents(omaDir, mutate) {
     for (const row of rows) {
         const record = asRecord(row);
         const id = nonEmptyString(record?.id);
-        if (!record || !id || rewrittenIds.has(id)) {
-            outRows.push(row); // unparsed or duplicate-id rows stay byte-equivalent
+        if (!record || !id) {
+            outRows.push(row); // unparsed rows stay byte-equivalent
             continue;
         }
+        // Every row after the first for an id is a stray duplicate: it can never
+        // be the definition again, so its command keys go the same way a removed
+        // definition's do — otherwise a duplicate would resurrect the id.
+        const agent = rewrittenIds.has(id) ? undefined : nextById.get(id);
         rewrittenIds.add(id);
-        const agent = nextById.get(id);
         if (!agent) {
-            // The definition was removed: drop the command keys but keep
-            // product-local flags (enabled/env) when they are all that is left.
+            // The definition was removed (or this is a duplicate): drop the
+            // command keys but keep product-local flags (enabled/env) when they
+            // are all that is left.
             const { command_override: _c, args_override: _a, label_override: _l, ...residual } = record;
             if (Object.keys(residual).length > 1)
                 outRows.push(residual);

@@ -120,7 +120,7 @@ describe("config.toml row mapping", () => {
         env: { TOKEN: "v" },
       },
       { id: "tbl", label: "tbl", command: "t-acp", args: [], env: { K: "v" } },
-      { id: "badenv", label: "badenv", command: "b-acp", args: [] },
+      { id: "badenv", label: "badenv", command: "b-acp", args: [], env: {} },
       { id: "other", label: "other", command: "other-acp", args: [] },
     ]);
   });
@@ -217,6 +217,8 @@ describe("writes into config.toml", () => {
     });
     let written = readFileSync(path, "utf8");
     expect(written).toContain("# backchat config");
+    // The header comment must stay a comment — never merge into a key.
+    expect(written).toMatch(/^# https:\/\/github\.com\/minimax\/backchat\n\n\[appearance\]/m);
     const parsed = readToml(path);
     expect(parsed.appearance).toEqual({ theme: "dark" });
     expect(parsed.agents).toEqual([
@@ -226,6 +228,37 @@ describe("writes into config.toml", () => {
 
     removeCustomAcpAgent(dir, "pi");
     expect(readToml(path).agents).toEqual([{ id: "codex-acp", enabled: false }]);
+  });
+
+  it("keeps a comment sitting directly above a key a comment", async () => {
+    const dir = await makeRoot();
+    const path = customAcpAgentsConfigPath(dir);
+    writeFileSync(path, '# header\ntheme = "dark"\n[ui]\nfont = "x"\n');
+    upsertCustomAcpAgent(dir, { id: "x", command: "x-acp" });
+    const written = readFileSync(path, "utf8");
+    expect(written).toContain("# header\n");
+    expect(written).not.toContain("# headertheme");
+    expect(readToml(path).theme).toBe("dark");
+  });
+
+  it("removes an id even when duplicate rows carry command_override", async () => {
+    const dir = await makeRoot();
+    const path = customAcpAgentsConfigPath(dir);
+    writeFileSync(path, [
+      "[[agents]]",
+      'id = "x"',
+      'command_override = "a"',
+      "",
+      "[[agents]]",
+      'id = "x"',
+      'command_override = "b"',
+      "enabled = true",
+      "",
+    ].join("\n"));
+    removeCustomAcpAgent(dir, "x");
+    expect(readCustomAcpAgents(dir)).toEqual([]);
+    // The second row keeps only its product-local flag — no command left.
+    expect(readToml(path).agents).toEqual([{ id: "x", enabled: true }]);
   });
 
   it("refuses to overwrite a config.toml that fails to parse", async () => {
