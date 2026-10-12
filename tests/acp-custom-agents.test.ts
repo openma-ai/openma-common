@@ -105,6 +105,8 @@ describe("config.toml row mapping", () => {
           args_override: ["serve"],
           env: [{ name: "TOKEN", value: "v" }],
         },
+        { id: "tbl", command_override: "t-acp", env: { K: "v" } },
+        { id: "badenv", command_override: "b-acp", env: [{ name: "X" }] },
         { id: "other", command_override: "other-acp" },
       ],
     }));
@@ -117,6 +119,8 @@ describe("config.toml row mapping", () => {
         args: ["serve"],
         env: { TOKEN: "v" },
       },
+      { id: "tbl", label: "tbl", command: "t-acp", args: [], env: { K: "v" } },
+      { id: "badenv", label: "badenv", command: "b-acp", args: [] },
       { id: "other", label: "other", command: "other-acp", args: [] },
     ]);
   });
@@ -154,6 +158,9 @@ describe("customAcpAgentsFromSettingsJson", () => {
     expect(customAcpAgentsFromSettingsJson({
       harnesses: [{ id: "x", command: "my-agent", args: ["--yes"] }],
     })[0]!.args).toEqual(["--yes"]);
+    expect(customAcpAgentsFromSettingsJson({
+      harnesses: [{ id: "n", command: "npx", args: ["pkg@1.2.3"] }],
+    })[0]!.args).toEqual(["pkg@1.2.3"]);
     expect(customAcpAgentsFromSettingsJson(undefined)).toEqual([]);
     expect(customAcpAgentsFromSettingsJson({ harnesses: "nope" })).toEqual([]);
   });
@@ -253,12 +260,18 @@ describe("writes into config.toml", () => {
   it("respects enabled=false stored rows on read and on upsert", async () => {
     const dir = await makeRoot();
     upsertCustomAcpAgent(dir, { id: "pi", command: "npx", enabled: false });
+    upsertCustomAcpAgent(dir, { id: "z", command: "z-acp" });
     expect(readCustomAcpAgents(dir)).toEqual([
       { id: "pi", label: "pi", command: "npx", args: [], enabled: false },
+      { id: "z", label: "z", command: "z-acp", args: [] },
     ]);
-    // A caller upserting without the flag keeps the stored disable.
+    // A caller upserting without the flag keeps the stored disable, and
+    // replacing one definition leaves the other rows alone.
     upsertCustomAcpAgent(dir, { id: "pi", command: "npx2" });
-    expect(readCustomAcpAgents(dir)[0]!.enabled).toBe(false);
+    expect(readCustomAcpAgents(dir)).toEqual([
+      { id: "pi", label: "pi", command: "npx2", args: [], enabled: false },
+      { id: "z", label: "z", command: "z-acp", args: [] },
+    ]);
   });
 
   it("keeps a residual enabled flag when a definition is removed", async () => {
@@ -290,7 +303,9 @@ describe("writes into config.toml", () => {
       "",
     ].join("\n"));
     upsertCustomAcpAgent(dir, { id: "pi", command: "npx" });
-    upsertCustomAcpAgent(dir, { id: "e", command: "e-acp", env: { V: "1" } });
+    upsertCustomAcpAgent(dir, {
+      id: "e", label: "E Two", command: "e-acp", args: ["x"], env: { V: "1" },
+    });
     const agents = readToml(path).agents as unknown[];
     // The env-only row gains the command fields and keeps its stored env pairs...
     expect(agents).toContainEqual({
@@ -298,9 +313,15 @@ describe("writes into config.toml", () => {
     });
     // ...the duplicate-id row stays as it was...
     expect(agents).toContainEqual({ id: "pi", enabled: true });
-    // ...the definition's own env wins when it carries one (keeping enabled)...
+    // ...the definition's own label/args/env win when it carries them
+    // (keeping the row's enabled flag)...
     expect(agents).toContainEqual({
-      id: "e", enabled: true, command_override: "e-acp", env: [{ name: "V", value: "1" }],
+      id: "e",
+      enabled: true,
+      label_override: "E Two",
+      command_override: "e-acp",
+      args_override: ["x"],
+      env: [{ name: "V", value: "1" }],
     });
     // ...and rows without an id are never dropped.
     expect(agents).toContainEqual({ command_override: "id-less" });

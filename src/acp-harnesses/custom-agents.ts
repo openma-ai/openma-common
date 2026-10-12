@@ -250,11 +250,10 @@ function readJsonFile(path: string): unknown {
   }
 }
 
+// smol-toml's parse yields the root table or throws; the caller decides
+// whether a missing file (ENOENT handled upstream) or a corrupt file counts.
 function readConfigToml(path: string): Record<string, unknown> {
-  const parsed = parseToml(readFileSync(path, "utf8"));
-  const record = asRecord(parsed);
-  if (!record) throw new Error(`${path}: root must be a TOML table`);
-  return record;
+  return parseToml(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
 
 function writeAtomic(path: string, content: string): void {
