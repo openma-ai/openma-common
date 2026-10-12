@@ -17,13 +17,14 @@ describe("stress session generator", () => {
       seq: number,
       data: Record<string, unknown>,
     ): CanonicalEvent => ({
-      schema: "oma.event.v1",
+      schema_version: "oma.event.v1",
       event_id: eventId,
       type,
       session_id: "session-stress",
       turn_id: id,
       occurred_at: "2026-10-01T00:00:00.000Z",
       seq,
+      source: { kind: "harness", harness: "test" },
       data,
     });
     const seed = [

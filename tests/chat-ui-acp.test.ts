@@ -16,7 +16,6 @@ describe("ACP chat turn projection", () => {
         assistantText: "Answer.",
         tools: [],
         plan: [],
-        hasPlanLifecycle: false,
         notes: [],
         timeline: [
           { kind: "assistant_text", text: "Answer." },
