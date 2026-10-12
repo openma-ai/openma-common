@@ -1,7 +1,10 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { CSSProperties } from "react";
 import { describe, expect, it, vi } from "vitest";
 import * as chatUI from "../src/chat-ui/components.js";
+import { projectAcpChatTurn } from "../src/chat-ui/acp.js";
 
 import {
   AgentChatView,
@@ -11,10 +14,12 @@ import {
   ChatReasoningContent,
   ChatReasoningTrigger,
   ChatThoughtEventRow,
+  projectChatThoughtEvent,
 } from "../src/chat-ui/components.js";
 import type {
   AgentUIMessageItem,
   AgentUIToolItem,
+  AgentUIUserInputItem,
   AgentUITurnState,
 } from "../src/agent-ui/index.js";
 
@@ -186,6 +191,20 @@ describe("Backchat main AgentUITurnView", () => {
       <p data-tool-item={tool.id}>{tool.title}</p>
     ),
   };
+
+  it.each([
+    ["queued", false],
+    ["running", false],
+    ["unknown", false],
+    ["complete", true],
+    ["completed", true],
+    ["error", true],
+    ["errored", true],
+    ["cancelled", true],
+    ["terminated", true],
+  ] as const)("classifies %s turn status", (status, terminal) => {
+    expect(chatUI.isTerminalTurnStatus(status)).toBe(terminal);
+  });
 
   it("renders Backchat's thinking fallback while a running turn has no visible event", () => {
     const html = renderToStaticMarkup(
@@ -446,6 +465,404 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).toContain('data-session-turn-answer="true"');
     expect(html).toContain("Finished.");
   });
+
+  it("renders assistant messages and activity groups in chronological order", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{
+          id: "turn-chronological",
+          status: "completed",
+          items: [
+            assistant("assistant-a", "A", "commentary"),
+            activityTool("t1"),
+            assistant("assistant-b", "B", "commentary"),
+            activityTool("t2"),
+            assistant("assistant-c", "C", "final_answer"),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    const processStart = html.indexOf('data-session-process-activity="true"');
+    const answerStart = html.indexOf('data-session-turn-answer="true"');
+    const processHtml = html.slice(processStart, answerStart);
+    const itemA = processHtml.indexOf('data-assistant-item="assistant-a"');
+    const itemB = processHtml.indexOf('data-assistant-item="assistant-b"');
+    const toolOne = processHtml.indexOf('data-tool-item="t1"');
+    const toolTwo = processHtml.indexOf('data-tool-item="t2"');
+    expect(itemA).toBeGreaterThan(-1);
+    expect(itemA).toBeLessThan(toolOne);
+    expect(toolOne).toBeLessThan(itemB);
+    expect(itemB).toBeLessThan(toolTwo);
+    expect(answerStart).toBeGreaterThan(processStart);
+    expect(html.slice(answerStart)).toContain(">C</p>");
+    expect(processHtml).not.toContain(">C</p>");
+  });
+
+  it("omits system messages from the chronological process transcript", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-system-message"
+        turn={{
+          id: "turn-system-message",
+          status: "completed",
+          items: [
+            {
+              id: "system-message",
+              kind: "message",
+              role: "system",
+              text: "Internal system note",
+              status: "complete",
+            },
+            assistant("assistant-after-system", "Visible commentary", "commentary"),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    expect(html).not.toContain("Internal system note");
+    expect(html).toContain('data-assistant-item="assistant-after-system"');
+    expect(html).toContain("Visible commentary");
+  });
+
+  it("renders thought, tool rounds, interleaved paragraphs, answer, then footer", () => {
+    const footer = vi.fn(() => <footer data-turn-footer>Footer</footer>);
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{
+          id: "turn-interleaved-rounds",
+          status: "completed",
+          items: [
+            {
+              id: "thought-leading",
+              kind: "thinking",
+              role: "assistant",
+              text: "Thinking through the request.",
+              status: "complete",
+            },
+            activityTool("round-1"),
+            assistant("paragraph-1", "First process paragraph.", "commentary"),
+            activityTool("round-2"),
+            assistant("paragraph-2", "Final answer paragraph.", "final_answer"),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={{ ...slots, renderFooter: footer }}
+      />,
+    );
+    const thought = html.indexOf("Thinking through the request.");
+    const firstTool = html.indexOf('data-tool-item="round-1"');
+    const firstParagraph = html.indexOf('data-assistant-item="paragraph-1"');
+    const secondTool = html.indexOf('data-tool-item="round-2"');
+    const answer = html.indexOf('data-session-turn-answer="true"');
+    const finalParagraph = html.indexOf('data-assistant-item="paragraph-2"');
+    const renderedFooter = html.indexOf('data-turn-footer="true"');
+
+    expect(thought).toBeGreaterThan(-1);
+    expect(thought).toBeLessThan(firstTool);
+    expect(firstTool).toBeLessThan(firstParagraph);
+    expect(firstParagraph).toBeLessThan(secondTool);
+    expect(secondTool).toBeLessThan(answer);
+    expect(answer).toBeLessThan(finalParagraph);
+    expect(finalParagraph).toBeLessThan(renderedFooter);
+    expect(html.slice(answer, renderedFooter)).toContain("Final answer paragraph.");
+    expect(footer).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders user input inline using the optional slot or the muted default", () => {
+    const projected = projectAcpChatTurn({
+      id: "turn-steering",
+      promptText: "Original prompt",
+      events: [{
+        payload: {
+          schema: "oma.event.v1",
+          type: "user.message",
+          turn_id: "client-turn-1",
+          data: {
+            input_kind: "steering",
+            outcome: "injected",
+            text: "Check the cache path.",
+          },
+        },
+      }],
+      status: "complete",
+    });
+    const userInput = projected.items.find(
+      (item): item is AgentUIUserInputItem => item.kind === "user_input",
+    );
+    expect(userInput).toMatchObject({
+      kind: "user_input",
+      text: "Check the cache path.",
+      clientId: "client-turn-1",
+    });
+    if (!userInput) throw new Error("Steering input was not projected.");
+    const turn: AgentUITurnState = {
+      id: "turn-steering",
+      status: "completed",
+      items: [
+        assistant("before-steer", "Before", "commentary"),
+        userInput,
+        activityTool("after-steer"),
+        assistant("answer", "Done."),
+      ],
+    };
+    const props = {
+      turn,
+      thoughts: "history" as const,
+      labels: {
+        workingFor: () => "Working",
+        workedFor: () => "Worked",
+        thinking: "Thinking",
+        toolRunSummary: () => "Ran commands",
+        toolActivity: (tool: AgentUIToolItem) => tool.title ?? "Tool",
+      },
+      slots,
+    };
+    const html = renderToStaticMarkup(<AgentUITurnView {...props} />);
+    const inputIndex = html.indexOf("Check the cache path.");
+    expect(inputIndex).toBeGreaterThan(html.indexOf(">Before</p>"));
+    expect(inputIndex).toBeLessThan(html.indexOf('data-tool-item="after-steer"'));
+    expect(html).toContain("ml-auto w-fit max-w-full");
+    expect(html).toContain(
+      'max-width:var(--chat-user-message-max-width, 88%)',
+    );
+    expect(html).toContain("bg-bg-surface/60");
+
+    const slotted = renderToStaticMarkup(
+      <AgentUITurnView
+        {...props}
+        slots={{
+          ...slots,
+          renderUserInput: ({ item }) => (
+            <p data-user-input={item.clientId}>{item.text}</p>
+          ),
+        }}
+      />,
+    );
+    expect(slotted).toContain('data-user-input="client-turn-1"');
+  });
+
+  it("marks the final injected input as live while its turn is running", () => {
+    const renderUserInput = vi.fn(
+      ({ item, live }: { item: AgentUIUserInputItem; live: boolean }) => (
+        <p data-user-input-live={String(live)}>{item.text}</p>
+      ),
+    );
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{
+          id: "turn-live-input",
+          status: "running",
+          items: [{
+            id: "steer-live",
+            kind: "user_input",
+            text: "Continue with the tests.",
+          }],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: () => "Tool",
+        }}
+        slots={{ ...slots, renderUserInput }}
+      />,
+    );
+
+    expect(html).toContain('data-user-input-live="true"');
+    expect(renderUserInput).toHaveBeenCalledWith(
+      expect.objectContaining({ live: true }),
+    );
+  });
+
+  it("does not call the footer slot until the frame has stopped", () => {
+    const renderFooter = vi.fn(() => <footer>Stopped footer</footer>);
+    const common = {
+      turn: { id: "turn-footer-gate", status: "completed" as const, items: [] },
+      thoughts: "history" as const,
+      labels: {
+        workingFor: () => "Working",
+        workedFor: () => "Worked",
+        thinking: "Thinking",
+        toolRunSummary: () => "Ran commands",
+        toolActivity: () => "Tool",
+      },
+      slots: { ...slots, renderFooter },
+    };
+
+    const running = renderToStaticMarkup(
+      <AgentUITurnView {...common} frameStatus="running" />,
+    );
+    expect(renderFooter).not.toHaveBeenCalled();
+    expect(running).not.toContain("Stopped footer");
+
+    const stopped = renderToStaticMarkup(
+      <AgentUITurnView {...common} frameStatus="completed" />,
+    );
+    expect(renderFooter).toHaveBeenCalledTimes(1);
+    expect(stopped).toContain("Stopped footer");
+  });
+
+  it("keeps live thought text in the body, not the group header", () => {
+    const liveThought = "secret streaming words";
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{
+          id: "turn-live-thought",
+          status: "running",
+          items: [
+            activityTool("tool-before-live"),
+            {
+              id: "thought-live",
+              kind: "thinking",
+              role: "assistant",
+              text: liveThought,
+              status: "streaming",
+            },
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          thoughtFor: () => "Thought",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: () => "Tool",
+        }}
+        slots={{
+          ...slots,
+          projectThoughtActivity: ({ item, live }) => {
+            const projection = {
+              live,
+              liveFallback: "Thinking",
+              completedLabel: "Thought",
+            };
+            return projectChatThoughtEvent(projection);
+          },
+          renderThought: ({ item }) => <p>{item.text}</p>,
+        }}
+      />,
+    );
+    const thoughtBody = html.indexOf(liveThought);
+    const triggerStart = html.lastIndexOf("<button", thoughtBody);
+    const triggerEnd = html.indexOf("</button>", triggerStart);
+    const trigger = html.slice(triggerStart, triggerEnd);
+
+    expect(trigger).toContain('data-chat-activity-disclosure-trigger="true"');
+    expect(trigger).toContain("Thinking");
+    expect(trigger).not.toContain(liveThought);
+    expect(html).toContain(liveThought);
+  });
+
+  it("projects a stable live thought fallback and the completed thought label", () => {
+    const liveProjection = {
+      live: true,
+      liveFallback: "Thinking",
+      completedLabel: "Thought for 2s",
+    };
+    expect(projectChatThoughtEvent(liveProjection)).toEqual({ summary: "Thinking" });
+    expect(projectChatThoughtEvent({
+      live: false,
+      liveFallback: "Thinking",
+      completedLabel: "Thought for 2s",
+    })).toMatchObject({ summary: "Thought for 2s" });
+  });
+
+  it("renders the Codex Guardian interleave as one ordered turn with the answer last", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(import.meta.dirname, "./fixtures/codex-guardian-interleave.json"),
+        "utf8",
+      ),
+    ) as unknown[];
+    const turn = projectAcpChatTurn({
+      id: "turn-guardian",
+      promptText: "Inspect the changes.",
+      events: fixture.map((payload) => ({ payload })),
+      status: "complete",
+    });
+
+    expect(turn.id).toBe("turn-guardian");
+    expect(turn.items.at(-1)).toMatchObject({
+      kind: "message",
+      phase: "final_answer",
+      text: "Everything is ready. The tests passed.",
+    });
+    expect(new Set(turn.items.map((item) => item.id)).size).toBe(turn.items.length);
+    expect(
+      turn.items
+        .filter((item) => item.kind === "thinking")
+        .map((item) => item.id),
+    ).toEqual(["turn-guardian:thought:0", "turn-guardian:thought:7"]);
+    expect(turn.items.slice(1).map((item) =>
+      item.kind === "tool" ? item.id : item.kind,
+    )).toEqual([
+      "thinking",
+      "message",
+      "guardian_assessment:r0",
+      "c1",
+      "guardian_assessment:r1",
+      "c2",
+      "guardian_assessment:r2",
+      "thinking",
+      "guardian_assessment:orphan",
+      "message",
+    ]);
+
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={turn}
+        thoughts="history"
+        activityTools="all"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+    const processStart = html.indexOf('data-session-process-activity="true"');
+    const answerStart = html.indexOf('data-session-turn-answer="true"');
+    expect(answerStart).toBeGreaterThan(processStart);
+    expect(html.slice(processStart, answerStart)).not.toContain(
+      "Everything is ready. The tests passed.",
+    );
+    expect(html.slice(answerStart)).toContain(
+      "Everything is ready. The tests passed.",
+    );
+  });
+
 });
 
 describe("Backchat main AgentChatView", () => {

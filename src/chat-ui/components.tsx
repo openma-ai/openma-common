@@ -23,6 +23,7 @@ import type {
   AgentUIRawItem,
   AgentUITimelineItem,
   AgentUIToolItem,
+  AgentUIUserInputItem,
   AgentUITurnState,
 } from "../agent-ui/index.js";
 import {
@@ -276,24 +277,16 @@ export interface ChatThoughtEventProjection {
 }
 
 export function projectChatThoughtEvent({
-  text,
   live,
   liveFallback,
   completedLabel,
-  renderLiveSummary,
 }: {
-  text: string;
   live: boolean;
   liveFallback: ReactNode;
   completedLabel: ReactNode;
-  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
 }): ChatThoughtEventProjection {
   if (live) {
-    const fallback = text.trim() || liveFallback;
-    return {
-      multiline: true,
-      summary: renderLiveSummary?.(fallback) ?? fallback,
-    };
+    return { summary: liveFallback };
   }
   return {
     leading: (
@@ -308,11 +301,9 @@ export function projectChatThoughtEvent({
 
 export function ChatThoughtEventRow({
   live,
-  text,
   liveFallback,
   completedLabel,
   projection,
-  renderLiveSummary,
   renderBody,
 }: {
   live: boolean;
@@ -320,7 +311,6 @@ export function ChatThoughtEventRow({
   liveFallback: ReactNode;
   completedLabel: ReactNode;
   projection?: ChatThoughtEventProjection;
-  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
   renderBody: (input: { live: boolean }) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -330,11 +320,9 @@ export function ChatThoughtEventRow({
   const resolvedProjection =
     projection ??
     projectChatThoughtEvent({
-      text,
       live,
       liveFallback,
       completedLabel,
-      renderLiveSummary,
     });
 
   const toggleOpen = () => {
@@ -729,6 +717,9 @@ export interface AgentUITurnSlots {
   renderTool: (
     input: AgentUITurnRenderContext & { tool: AgentUIToolItem },
   ) => ReactNode;
+  renderUserInput?: (
+    input: AgentUITurnRenderContext & { item: AgentUIUserInputItem },
+  ) => ReactNode;
   renderRaw?: (
     input: AgentUITurnRenderContext & { item: AgentUIRawItem },
   ) => ReactNode;
@@ -1096,6 +1087,26 @@ function ChatComposerFrame({
 
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
+export function isTerminalTurnStatus(status: SessionTurnStatus): boolean {
+  switch (status) {
+    case "queued":
+    case "running":
+    case "unknown":
+      return false;
+    case "complete":
+    case "completed":
+    case "error":
+    case "errored":
+    case "cancelled":
+    case "terminated":
+      return true;
+    default: {
+      const exhaustive: never = status;
+      return exhaustive;
+    }
+  }
+}
+
 export function AgentUITurnView({
   sessionId,
   turn,
@@ -1111,6 +1122,8 @@ export function AgentUITurnView({
 }: AgentUITurnViewProps) {
   const isStreaming = turn.status === "running";
   const isCancelled = turn.status === "cancelled";
+  const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
+  const isStopped = !isStreaming && isTerminalTurnStatus(resolvedFrameStatus);
   const [processOpen, setProcessOpen] = useState(isStreaming);
   const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
   useEffect(() => {
@@ -1195,7 +1208,41 @@ export function AgentUITurnView({
     const sequences: ReactNode[] = [];
     for (let index = 0; index < processItems.length; index += 1) {
       const item = processItems[index];
-      if (item?.kind === "message") continue;
+      if (item?.kind === "message") {
+        if (item.role === "assistant") {
+          sequences.push(
+            <div key={item.id} className="min-w-0">
+              {slots.renderAssistant({
+                ...renderContext,
+                item,
+                section: "process",
+                live: isStreaming && item === finalItem,
+                prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+              })}
+            </div>,
+          );
+        }
+        continue;
+      }
+      if (item?.kind === "user_input") {
+        sequences.push(
+          <div key={item.id} className="min-w-0">
+            {slots.renderUserInput?.({
+              ...renderContext,
+              item,
+              live: isStreaming && item === finalItem,
+            }) ?? (
+              <div
+                className="ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted"
+                style={{ maxWidth: "var(--chat-user-message-max-width, 88%)" }}
+              >
+                {item.text}
+              </div>
+            )}
+          </div>,
+        );
+        continue;
+      }
       const group = activityGroups.get(index);
       if (!group) continue;
       const groupTools = group.flatMap((child) =>
@@ -1286,6 +1333,7 @@ export function AgentUITurnView({
     finalActivityItem,
     isStreaming,
     labels,
+    finalItem,
     processItems,
     renderContext,
     slots,
@@ -1377,22 +1425,6 @@ export function AgentUITurnView({
             <ChatReasoningContent>
               <div className="space-y-1">
                 {slots.renderProcessBefore?.(renderContext)}
-                {processItems.map((item, index) => {
-                  if (item.kind !== "message" || item.role !== "assistant") {
-                    return null;
-                  }
-                  return (
-                    <div key={item.id} className="min-w-0">
-                      {slots.renderAssistant({
-                        ...renderContext,
-                        item,
-                        section: "process",
-                        live: isStreaming && item === finalItem,
-                        prefixSkip: assistantPrefixes.get(item.id) ?? 0,
-                      })}
-                    </div>
-                  );
-                })}
                 {slots.renderProcessAfter?.(renderContext)}
               </div>
             </ChatReasoningContent>
@@ -1439,7 +1471,7 @@ export function AgentUITurnView({
           </p>
         ) : null}
         {slots.renderAfterAnswer?.(renderContext)}
-        {slots.renderFooter?.(renderContext)}
+        {isStopped ? slots.renderFooter?.(renderContext) : null}
       </SessionTurnFrame>
     </>
   );

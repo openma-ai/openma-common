@@ -1,0 +1,132 @@
+[
+  {
+    "sessionUpdate": "agent_thought_chunk",
+    "messageId": "thought-0",
+    "content": { "type": "text", "text": "Inspecting the request. " }
+  },
+  {
+    "sessionUpdate": "agent_thought_chunk",
+    "messageId": "thought-0",
+    "content": { "type": "text", "text": "Checking the repository." }
+  },
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "commentary-0",
+    "phase": "commentary",
+    "content": { "type": "text", "text": "I will inspect the files. " }
+  },
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "commentary-0",
+    "phase": "commentary",
+    "content": { "type": "text", "text": "Then I will run tests." }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "guardian_assessment:r0",
+    "kind": "think",
+    "title": "Guardian Review",
+    "status": "in_progress",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review started." } }],
+    "rawInput": { "reviewId": "r0", "review": { "status": "running" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "guardian_assessment:r0",
+    "status": "completed",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review complete." } }],
+    "rawOutput": { "reviewId": "r0", "review": { "status": "completed" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "c1",
+    "kind": "execute",
+    "title": "Run tests",
+    "status": "in_progress",
+    "rawInput": { "command": "pnpm test" }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "guardian_assessment:r1",
+    "kind": "think",
+    "title": "Guardian Review",
+    "status": "in_progress",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review started." } }],
+    "rawInput": { "reviewId": "r1", "review": { "status": "running" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "c2",
+    "kind": "execute",
+    "title": "Inspect source",
+    "status": "in_progress",
+    "rawInput": { "command": "rg TODO src" }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "guardian_assessment:r2",
+    "kind": "think",
+    "title": "Guardian Review",
+    "status": "in_progress",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review started." } }],
+    "rawInput": { "reviewId": "r2", "review": { "status": "running" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "agent_thought_chunk",
+    "messageId": "thought-0",
+    "content": { "type": "text", "text": "The review found one more detail." }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "guardian_assessment:r2",
+    "status": "completed",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review complete." } }],
+    "rawOutput": { "reviewId": "r2", "review": { "status": "completed" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "guardian_assessment:orphan",
+    "kind": "think",
+    "title": "Guardian Review",
+    "status": "completed",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review complete." } }],
+    "rawInput": { "reviewId": "orphan", "review": { "status": "completed" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "guardian_assessment:r1",
+    "status": "completed",
+    "content": [{ "type": "content", "content": { "type": "text", "text": "Review complete." } }],
+    "rawOutput": { "reviewId": "r1", "review": { "status": "completed" }, "action": "review" }
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "c2",
+    "status": "completed",
+    "rawOutput": "tests passed"
+  },
+  {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "c1",
+    "status": "completed",
+    "rawOutput": "source reviewed"
+  },
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "final-0",
+    "phase": "final_answer",
+    "content": { "type": "text", "text": "Everything is ready. " }
+  },
+  {
+    "sessionUpdate": "agent_message_chunk",
+    "messageId": "final-0",
+    "phase": "final_answer",
+    "content": { "type": "text", "text": "The tests passed." }
+  },
+  {
+    "schema_version": "oma.event.v1",
+    "type": "turn.completed",
+    "turn_id": "turn-1",
+    "data": { "stop_reason": "end_turn" }
+  }
+]

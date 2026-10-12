@@ -37,6 +37,10 @@ export function groupAgentUIActivityEvents(items, { toolsById }) {
             flush();
             return;
         }
+        if (item.kind === "user_input") {
+            flush();
+            return;
+        }
         if (item.kind === "thinking") {
             if (start === undefined)
                 start = index;
