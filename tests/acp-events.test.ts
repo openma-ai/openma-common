@@ -646,6 +646,33 @@ describe("incremental ACP turn projection", () => {
     expect(firstSnapshot.tools).not.toBe(secondSnapshot.tools);
   });
 
+  it("ignores empty-id tool uses without closing the open message segment", () => {
+    const out = render(
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-before-empty-tool",
+        content: { type: "text", text: "Before " },
+      },
+      {
+        type: "agent.tool_use",
+        id: "",
+        name: "empty-id-tool",
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-before-empty-tool",
+        content: { type: "text", text: "after." },
+      },
+    );
+
+    expect(out.timeline).toHaveLength(1);
+    expect(out.timeline[0]).toMatchObject({
+      kind: "assistant_text",
+      text: "Before after.",
+    });
+    expect(out.tools).toEqual([]);
+  });
+
   it("normalizes sparse tool updates and preserves established raw input", () => {
     const projector = createTurnProjector();
     const apply = (payload: unknown) => projector.apply({ payload });
@@ -1080,6 +1107,27 @@ describe("incremental ACP turn projection", () => {
     });
     expect(render(event).timeline).toEqual([
       { kind: "user_input", text: "Content-only steering" },
+    ]);
+  });
+
+  it("projects injected steering with no text content as an empty user input", () => {
+    const event = {
+      schema_version: "oma.event.v1",
+      type: "user.message",
+      turn_id: "client-turn-empty",
+      data: {
+        input_kind: "steering",
+        outcome: "injected",
+      },
+    };
+
+    expect(parseAcpEvent(event)).toMatchObject({
+      kind: "user_input",
+      text: "",
+      clientId: "client-turn-empty",
+    });
+    expect(render(event).timeline).toEqual([
+      { kind: "user_input", text: "", clientId: "client-turn-empty" },
     ]);
   });
 

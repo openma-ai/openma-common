@@ -508,6 +508,41 @@ describe("Backchat main AgentUITurnView", () => {
     expect(processHtml).not.toContain(">C</p>");
   });
 
+  it("omits system messages from the chronological process transcript", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-system-message"
+        turn={{
+          id: "turn-system-message",
+          status: "completed",
+          items: [
+            {
+              id: "system-message",
+              kind: "message",
+              role: "system",
+              text: "Internal system note",
+              status: "complete",
+            },
+            assistant("assistant-after-system", "Visible commentary", "commentary"),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    expect(html).not.toContain("Internal system note");
+    expect(html).toContain('data-assistant-item="assistant-after-system"');
+    expect(html).toContain("Visible commentary");
+  });
+
   it("renders thought, tool rounds, interleaved paragraphs, answer, then footer", () => {
     const footer = vi.fn(() => <footer data-turn-footer>Footer</footer>);
     const html = renderToStaticMarkup(
