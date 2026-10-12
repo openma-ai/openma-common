@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { parseAcpEvent, reduceTurn, sanitizeThoughtText } from "../src/session-events/acp.js";
+import {
+  createTurnProjector,
+  parseAcpEvent,
+  reduceTurn,
+  sanitizeThoughtText,
+} from "../src/session-events/acp.js";
 
 const render = (...payloads: unknown[]) => reduceTurn(payloads.map((payload) => ({ payload })));
 
@@ -404,5 +411,311 @@ describe("ACP event adapter", () => {
         content: [{ type: "text", text: "v2 thought" }],
       },
     })).toMatchObject({ kind: "thought", text: "v2 thought" });
+  });
+});
+
+describe("incremental ACP turn projection", () => {
+  it("T2 appends chunks only to the open segment with a matching message and phase", () => {
+    const out = render(
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        phase: "commentary",
+        content: { type: "text", text: "Before " },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        phase: "commentary",
+        content: { type: "text", text: "tooling. " },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-2",
+        phase: "commentary",
+        content: { type: "text", text: "Between." },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        phase: "commentary",
+        content: { type: "text", text: "Reopened." },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        phase: "final_answer",
+        content: { type: "text", text: "After." },
+      },
+      {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "message-1",
+        phase: "final_answer",
+        content: { type: "text", text: " answer." },
+      },
+      {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "First thought. " },
+      },
+      {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Second thought." },
+      },
+    );
+
+    expect(out.timeline).toEqual([
+      { kind: "assistant_text", text: "Before tooling. ", phase: "commentary" },
+      { kind: "assistant_text", text: "Between.", phase: "commentary" },
+      { kind: "assistant_text", text: "Reopened.", phase: "commentary" },
+      { kind: "assistant_text", text: "After. answer.", phase: "final_answer" },
+      { kind: "thought", text: "First thought. Second thought." },
+    ]);
+  });
+
+  it("T3 patches known tools in place without closing the open thought segment", () => {
+    const projector = createTurnProjector();
+    const apply = (payload: unknown) => projector.apply({ payload });
+    apply({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-before",
+      content: { type: "text", text: "Before tool." },
+    });
+    apply({
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-1",
+      title: "First title",
+      status: "in_progress",
+    });
+    apply({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-after",
+      content: { type: "text", text: "Still " },
+    });
+    const firstSnapshot = projector.snapshot();
+
+    apply({
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-1",
+      title: "Updated title",
+      status: "in_progress",
+    });
+    apply({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-1",
+      status: "completed",
+    });
+    apply({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-after",
+      content: { type: "text", text: "open." },
+    });
+    const secondSnapshot = projector.snapshot();
+
+    expect(secondSnapshot.timeline).toEqual([
+      { kind: "thought", text: "Before tool.", messageId: "thought-before" },
+      { kind: "tool", toolCallId: "tool-1" },
+      { kind: "thought", text: "Still open.", messageId: "thought-after" },
+    ]);
+    expect(secondSnapshot.tools).toHaveLength(1);
+    expect(secondSnapshot.tools[0]).toMatchObject({
+      toolCallId: "tool-1",
+      title: "Updated title",
+      status: "completed",
+    });
+    expect(firstSnapshot.tools[0]?.status).toBe("in_progress");
+    expect(firstSnapshot.timeline).not.toBe(secondSnapshot.timeline);
+    expect(firstSnapshot.tools).not.toBe(secondSnapshot.tools);
+  });
+
+  it("T4 starts a new segment when a closed message id returns", () => {
+    const out = render(
+      {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "thought-1",
+        content: { type: "text", text: "First segment." },
+      },
+      {
+        sessionUpdate: "tool_call",
+        toolCallId: "tool-1",
+        title: "Read",
+        status: "in_progress",
+      },
+      {
+        sessionUpdate: "agent_thought_chunk",
+        messageId: "thought-1",
+        content: { type: "text", text: "Second segment." },
+      },
+    );
+
+    expect(out.timeline).toEqual([
+      { kind: "thought", text: "First segment.", messageId: "thought-1" },
+      { kind: "tool", toolCallId: "tool-1" },
+      { kind: "thought", text: "Second segment.", messageId: "thought-1" },
+    ]);
+    expect(out.currentThoughtText).toBe("Second segment.");
+  });
+
+  it("T6 projects only injected steering messages as inline user inputs", () => {
+    const out = render(
+      {
+        schema_version: "oma.event.v1",
+        type: "agent.message",
+        turn_id: "turn-a",
+        data: { text: "Working." },
+      },
+      {
+        schema: "oma.event.v1",
+        type: "user.message",
+        turn_id: "client-turn-1",
+        data: {
+          text: "Please check the cache.",
+          input_kind: "steering",
+          outcome: "injected",
+          active_turn_id: "turn-a",
+        },
+      },
+      {
+        schema_version: "oma.event.v1",
+        type: "user.message",
+        turn_id: "client-turn-2",
+        data: {
+          text: "A normal prompt.",
+          input_kind: "prompt",
+          outcome: "injected",
+        },
+      },
+    );
+
+    expect(out.timeline).toEqual([
+      { kind: "assistant_text", text: "Working." },
+      {
+        kind: "user_input",
+        text: "Please check the cache.",
+        clientId: "client-turn-1",
+      },
+    ]);
+  });
+
+  it("preserves first-arrival order and deduplicates interleaved Codex Guardian tools", () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        resolve(import.meta.dirname, "./fixtures/codex-guardian-interleave.json"),
+        "utf8",
+      ),
+    ) as unknown[];
+    const out = render(...fixture);
+
+    expect(out.timeline.map((item) =>
+      item.kind === "tool" ? item.toolCallId : item.kind,
+    )).toEqual([
+      "thought",
+      "assistant_text",
+      "guardian_assessment:r0",
+      "c1",
+      "guardian_assessment:r1",
+      "c2",
+      "guardian_assessment:r2",
+      "thought",
+      "guardian_assessment:orphan",
+      "assistant_text",
+    ]);
+    expect(out.timeline.filter((item) => item.kind === "tool")).toHaveLength(6);
+    expect(out.tools.map((tool) => tool.toolCallId)).toEqual([
+      "guardian_assessment:r0",
+      "c1",
+      "guardian_assessment:r1",
+      "c2",
+      "guardian_assessment:r2",
+      "guardian_assessment:orphan",
+    ]);
+    expect(out.tools.at(-1)).toMatchObject({
+      toolCallId: "guardian_assessment:orphan",
+      kind: "think",
+      title: "Guardian Review",
+      status: "completed",
+    });
+    expect(out.timeline.at(-1)).toMatchObject({
+      kind: "assistant_text",
+      phase: "final_answer",
+      text: "Everything is ready. The tests passed.",
+    });
+  });
+
+  it("T7 keeps per-event projection cost linear from 4.5k to 45k events", () => {
+    const buildEvents = (cycles: number) => {
+      const events: Array<{ payload: unknown }> = [];
+      for (let cycle = 0; cycle < cycles; cycle += 1) {
+        for (let chunk = 0; chunk < 20; chunk += 1) {
+          events.push({
+            payload: {
+              sessionUpdate: "agent_thought_chunk",
+              content: {
+                type: "text",
+                text: `think ${cycle} ${chunk} `,
+              },
+            },
+          });
+        }
+        const toolCallId = `tool-${cycle}`;
+        events.push({
+          payload: {
+            sessionUpdate: "tool_call",
+            toolCallId,
+            title: `Run step ${cycle}`,
+            kind: "execute",
+            status: "pending",
+          },
+        });
+        for (let update = 0; update < 3; update += 1) {
+          events.push({
+            payload: {
+              sessionUpdate: "tool_call_update",
+              toolCallId,
+              status: "in_progress",
+              content: [{
+                type: "content",
+                content: { type: "text", text: "line\n".repeat(40) },
+              }],
+            },
+          });
+        }
+        events.push({
+          payload: {
+            sessionUpdate: "tool_call_update",
+            toolCallId,
+            status: "completed",
+          },
+        });
+        for (let chunk = 0; chunk < 20; chunk += 1) {
+          events.push({
+            payload: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                type: "text",
+                text: `| col ${chunk} | **md** \`code\` |\n`,
+              },
+            },
+          });
+        }
+      }
+      return events;
+    };
+    const measurePerEvent = (events: readonly { payload: unknown }[]) => {
+      const projector = createTurnProjector();
+      const start = performance.now();
+      for (const event of events) projector.apply(event);
+      projector.snapshot();
+      return (performance.now() - start) / events.length;
+    };
+
+    const smallEvents = buildEvents(100);
+    const largeEvents = buildEvents(1000);
+    measurePerEvent(smallEvents);
+    const smallPerEvent = measurePerEvent(smallEvents);
+    const largePerEvent = measurePerEvent(largeEvents);
+
+    expect(smallEvents).toHaveLength(4_500);
+    expect(largeEvents).toHaveLength(45_000);
+    expect(largePerEvent / smallPerEvent).toBeLessThan(3);
   });
 });

@@ -17,9 +17,8 @@
  *   - `current_mode_update` → REPLACE the agent's current mode id.
  *   - session-level metadata is handled by SessionStore before this reducer.
  *
- * Designed to be pure: pass an immutable event list, get a snapshot.
- * Re-running on each render is cheap because events list grows linearly
- * with the turn length (a few hundred at most).
+ * reduceTurn is the pure convenience wrapper; live callers retain a projector
+ * and apply only newly received events.
  */
 import { extractAcpSystemNotice } from "./acp-system-notices.js";
 export { extractAcpSystemNotice } from "./acp-system-notices.js";
@@ -315,7 +314,8 @@ function getEventSummary(event) {
 }
 export function parseAcpEvent(event) {
     const eventRecord = objectField(event);
-    const isCanonicalOpenMAEvent = eventRecord.schema_version === "oma.event.v1";
+    const isCanonicalOpenMAEvent = eventRecord.schema_version === "oma.event.v1" ||
+        eventRecord.schema === "oma.event.v1";
     const canonicalTool = isCanonicalOpenMAEvent
         ? normalizeCanonicalToolEvent(eventRecord)
         : null;
@@ -713,7 +713,7 @@ export function mergeStreamingText(accumulated, incoming) {
     }
     return accumulated + incoming;
 }
-export function reduceTurn(events) {
+export function createTurnProjector() {
     const out = {
         thoughtText: "",
         currentThoughtText: "",
@@ -725,51 +725,30 @@ export function reduceTurn(events) {
     };
     const toolById = new Map();
     let toolsOrder = [];
-    // Running buffer for the current assistant_text segment. Flushed into
-    // out.timeline when a tool_call event arrives (which breaks the run)
-    // or at end-of-stream. Same chunk concatenation we used to do into
-    // assistantText, but segment-aware.
-    let textBuf = "";
-    let textPhase;
-    const flushText = () => {
-        if (textBuf) {
-            out.timeline.push({
-                kind: "assistant_text",
-                text: textBuf,
-                ...(textPhase ? { phase: textPhase } : {}),
-            });
-            textBuf = "";
-            textPhase = undefined;
-        }
-    };
-    const thoughtIndexByMessageId = new Map();
+    let openSegment;
     let currentPlanId;
-    let anonymousThoughtIndex;
+    const planIndexById = new Map();
+    const closeOpenSegment = () => {
+        openSegment = undefined;
+    };
     const appendThought = (parsed) => {
-        const id = parsed.messageId;
-        const existingIndex = id
-            ? thoughtIndexByMessageId.get(id)
-            : anonymousThoughtIndex;
-        if (existingIndex !== undefined) {
-            const existing = out.timeline[existingIndex];
-            if (existing?.kind === "thought") {
-                existing.text = mergeStreamingText(existing.text, parsed.text);
-                out.currentThoughtText = latestThoughtSegment(existing.text);
-                return;
-            }
+        if (openSegment?.kind === "thought" &&
+            openSegment.messageId === parsed.messageId) {
+            openSegment.item.text = mergeStreamingText(openSegment.item.text, parsed.text);
+            return;
         }
-        flushText();
+        closeOpenSegment();
         const item = {
             kind: "thought",
             text: parsed.text,
-            ...(id ? { messageId: id } : {}),
+            ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
         };
-        const index = out.timeline.push(item) - 1;
-        if (id)
-            thoughtIndexByMessageId.set(id, index);
-        else
-            anonymousThoughtIndex = index;
-        out.currentThoughtText = latestThoughtSegment(parsed.text);
+        out.timeline.push(item);
+        openSegment = {
+            kind: "thought",
+            messageId: parsed.messageId,
+            item,
+        };
     };
     const appendOutputDelta = (current, delta) => {
         if (typeof current !== "string" || current.length === 0)
@@ -781,30 +760,10 @@ export function reduceTurn(events) {
         }
         return current + delta.separator + delta.data;
     };
-    const mergePlanEntries = (current, incoming) => {
-        const next = [...current];
-        const indexById = new Map();
-        next.forEach((entry, index) => {
-            if (entry.id)
-                indexById.set(entry.id, index);
-        });
-        for (const entry of incoming) {
-            const existingIndex = entry.id ? indexById.get(entry.id) : undefined;
-            if (existingIndex === undefined) {
-                if (entry.id)
-                    indexById.set(entry.id, next.length);
-                next.push(entry);
-            }
-            else {
-                next[existingIndex] = entry;
-            }
-        }
-        return next;
-    };
     const upsertTool = (incoming) => {
         const id = incoming.toolCallId;
         if (!id)
-            return;
+            return false;
         const prev = toolById.get(id);
         if (!prev) {
             const entry = {
@@ -827,12 +786,8 @@ export function reduceTurn(events) {
                 entry.status = "completed";
             }
             toolById.set(id, entry);
-            if (!toolsOrder.includes(id)) {
-                toolsOrder.push(id);
-                flushText();
-                out.timeline.push({ kind: "tool", toolCallId: id });
-            }
-            return;
+            toolsOrder.push(id);
+            return true;
         }
         if (incoming.title !== undefined)
             prev.title = incoming.title;
@@ -873,32 +828,93 @@ export function reduceTurn(events) {
             prev.content?.some((b) => b.type === "content" && b.content?.type === "image")) {
             prev.status = "completed";
         }
+        return false;
     };
-    for (const ev of events) {
-        const parsed = parseAcpEvent(ev.payload);
+    const addPlanEntries = (incoming, merge) => {
+        if (!merge) {
+            out.plan = incoming.map((entry) => ({ ...entry }));
+            planIndexById.clear();
+            out.plan.forEach((entry, index) => {
+                if (entry.id)
+                    planIndexById.set(entry.id, index);
+            });
+            return;
+        }
+        for (const entry of incoming) {
+            const existingIndex = entry.id
+                ? planIndexById.get(entry.id)
+                : undefined;
+            if (existingIndex === undefined) {
+                if (entry.id)
+                    planIndexById.set(entry.id, out.plan.length);
+                out.plan.push({ ...entry });
+            }
+            else {
+                out.plan[existingIndex] = { ...entry };
+            }
+        }
+    };
+    const apply = ({ payload }) => {
+        const raw = objectField(payload);
+        const data = objectField(raw.data);
+        if ((raw.schema_version === "oma.event.v1" || raw.schema === "oma.event.v1") &&
+            raw.type === "user.message" &&
+            data.input_kind === "steering" &&
+            data.outcome === "injected") {
+            closeOpenSegment();
+            const text = stringValue(data.text) ?? extractTextBlocks(data.content) ?? "";
+            const clientId = stringValue(raw.turn_id) ??
+                stringField(data, ["client_id", "client_turn_id"]);
+            out.timeline.push({
+                kind: "user_input",
+                text,
+                ...(clientId ? { clientId } : {}),
+            });
+            return;
+        }
+        const parsed = parseAcpEvent(payload);
         switch (parsed.kind) {
             case "thought":
-                out.thoughtText = mergeStreamingText(out.thoughtText, parsed.text);
                 appendThought(parsed);
                 break;
-            case "text":
-                out.currentThoughtText = "";
-                if (textBuf && textPhase !== parsed.phase)
-                    flushText();
-                textPhase = parsed.phase;
-                textBuf = mergeStreamingText(textBuf, parsed.text);
+            case "text": {
+                if (openSegment?.kind === "assistant_text" &&
+                    openSegment.messageId === parsed.messageId &&
+                    openSegment.phase === parsed.phase) {
+                    openSegment.item.text = mergeStreamingText(openSegment.item.text, parsed.text);
+                    break;
+                }
+                closeOpenSegment();
+                const item = {
+                    kind: "assistant_text",
+                    text: parsed.text,
+                    ...(parsed.phase ? { phase: parsed.phase } : {}),
+                };
+                out.timeline.push(item);
+                openSegment = {
+                    kind: "assistant_text",
+                    messageId: parsed.messageId,
+                    phase: parsed.phase,
+                    item,
+                };
                 break;
-            case "tool_call":
-                out.currentThoughtText = "";
-                upsertTool(parsed.tool);
+            }
+            case "tool_call": {
+                const created = upsertTool(parsed.tool);
+                if (created) {
+                    closeOpenSegment();
+                    out.timeline.push({
+                        kind: "tool",
+                        toolCallId: parsed.tool.toolCallId,
+                    });
+                }
                 break;
+            }
             case "plan":
-                out.plan = parsed.updateMode === "merge"
-                    && (currentPlanId === undefined
-                        || parsed.planId === undefined
-                        || parsed.planId === currentPlanId)
-                    ? mergePlanEntries(out.plan, parsed.plan)
-                    : parsed.plan;
+                addPlanEntries(parsed.plan, parsed.updateMode === "merge" &&
+                    (currentPlanId === undefined ||
+                        parsed.planId === undefined ||
+                        parsed.planId === currentPlanId));
                 if (parsed.document)
                     out.planDocument = parsed.document;
                 currentPlanId = parsed.planId;
@@ -911,6 +927,7 @@ export function reduceTurn(events) {
             case "plan_removed":
                 if (parsed.planId === undefined || parsed.planId === currentPlanId) {
                     out.plan = [];
+                    planIndexById.clear();
                     out.planDocument = undefined;
                     currentPlanId = undefined;
                 }
@@ -921,26 +938,43 @@ export function reduceTurn(events) {
             case "commands":
             case "notice":
             case "silent":
-                break;
             case "raw":
-                // Drop raw events from the primary chat surface. They are still
-                // available in the persisted event stream for debugging.
                 break;
         }
-    }
-    // Flush any trailing assistant text so the closing message segment
-    // makes it into the timeline.
-    flushText();
-    out.tools = toolsOrder
-        .map((id) => toolById.get(id))
-        .filter((e) => !!e);
-    // For back-compat with code still reading TurnRender.assistantText —
-    // the streaming track and a few legacy spots — concatenate the segments.
-    out.assistantText = out.timeline
-        .filter((t) => t.kind === "assistant_text")
-        .map((t) => t.text)
-        .join("");
-    return out;
+    };
+    const snapshot = () => {
+        const timeline = out.timeline.map((item) => ({ ...item }));
+        const thoughtText = timeline
+            .filter((item) => item.kind === "thought")
+            .map((item) => item.text)
+            .join("");
+        const tools = toolsOrder
+            .map((id) => toolById.get(id))
+            .filter((tool) => !!tool)
+            .map((tool) => ({ ...tool }));
+        return {
+            thoughtText,
+            currentThoughtText: openSegment?.kind === "thought"
+                ? latestThoughtSegment(openSegment.item.text)
+                : "",
+            assistantText: timeline
+                .filter((item) => item.kind === "assistant_text")
+                .map((item) => item.text)
+                .join(""),
+            tools,
+            plan: out.plan.map((entry) => ({ ...entry })),
+            planDocument: out.planDocument ? { ...out.planDocument } : undefined,
+            notes: [...out.notes],
+            timeline,
+        };
+    };
+    return { apply, snapshot };
+}
+export function reduceTurn(events) {
+    const projector = createTurnProjector();
+    for (const event of events)
+        projector.apply(event);
+    return projector.snapshot();
 }
 export function latestThoughtSegment(text) {
     if (/\n{2,}\s*$/.test(text))
