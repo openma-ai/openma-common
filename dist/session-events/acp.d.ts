@@ -103,11 +103,13 @@ export interface PlanDocument {
 export type TimelineItem = {
     /** Adjacent assistant chunks in the same phase and message append here. */
     kind: "assistant_text";
+    segmentId?: number;
     text: string;
     phase?: "commentary" | "final_answer";
 } | {
     /** Adjacent chunks sharing a messageId patch the open thought item. */
     kind: "thought";
+    segmentId?: number;
     messageId?: string;
     text: string;
 } | {

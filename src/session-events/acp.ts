@@ -126,12 +126,14 @@ export type TimelineItem =
   | {
       /** Adjacent assistant chunks in the same phase and message append here. */
       kind: "assistant_text";
+      segmentId?: number;
       text: string;
       phase?: "commentary" | "final_answer";
     }
   | {
       /** Adjacent chunks sharing a messageId patch the open thought item. */
       kind: "thought";
+      segmentId?: number;
       messageId?: string;
       text: string;
     }
@@ -952,27 +954,41 @@ export function createTurnProjector(): {
   let openSegment: OpenSegment | undefined;
   let currentPlanId: string | undefined;
   const planIndexById = new Map<string, number>();
+  let timelineVersion = 0;
+  let snapshotTimelineVersion = 0;
+  let snapshotTimeline: TimelineItem[] = [];
   const closeOpenSegment = () => {
     openSegment = undefined;
+  };
+  const appendTimelineItem = (item: TimelineItem) => {
+    out.timeline.push(item);
+    timelineVersion += 1;
+  };
+  const replaceOpenTimelineItem = (item: TimelineItem) => {
+    out.timeline[out.timeline.length - 1] = item;
+    timelineVersion += 1;
   };
   const appendThought = (parsed: Extract<ParsedAcpEvent, { kind: "thought" }>) => {
     if (
       openSegment?.kind === "thought" &&
       openSegment.messageId === parsed.messageId
     ) {
-      openSegment.item.text = mergeStreamingText(
-        openSegment.item.text,
-        parsed.text,
-      );
+      const item = {
+        ...openSegment.item,
+        text: mergeStreamingText(openSegment.item.text, parsed.text),
+      };
+      replaceOpenTimelineItem(item);
+      openSegment.item = item;
       return;
     }
     closeOpenSegment();
     const item: Extract<TimelineItem, { kind: "thought" }> = {
       kind: "thought",
+      segmentId: out.timeline.length,
       text: parsed.text,
       ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
     };
-    out.timeline.push(item);
+    appendTimelineItem(item);
     openSegment = {
       kind: "thought",
       messageId: parsed.messageId,
@@ -1100,7 +1116,7 @@ export function createTurnProjector(): {
       const clientId =
         stringValue(raw.turn_id) ??
         stringField(data, ["client_id", "client_turn_id"]);
-      out.timeline.push({
+      appendTimelineItem({
         kind: "user_input",
         text,
         ...(clientId ? { clientId } : {}),
@@ -1119,19 +1135,22 @@ export function createTurnProjector(): {
           openSegment.messageId === parsed.messageId &&
           openSegment.phase === parsed.phase
         ) {
-          openSegment.item.text = mergeStreamingText(
-            openSegment.item.text,
-            parsed.text,
-          );
+          const item = {
+            ...openSegment.item,
+            text: mergeStreamingText(openSegment.item.text, parsed.text),
+          };
+          replaceOpenTimelineItem(item);
+          openSegment.item = item;
           break;
         }
         closeOpenSegment();
         const item: Extract<TimelineItem, { kind: "assistant_text" }> = {
           kind: "assistant_text",
+          segmentId: out.timeline.length,
           text: parsed.text,
           ...(parsed.phase ? { phase: parsed.phase } : {}),
         };
-        out.timeline.push(item);
+        appendTimelineItem(item);
         openSegment = {
           kind: "assistant_text",
           messageId: parsed.messageId,
@@ -1144,7 +1163,7 @@ export function createTurnProjector(): {
         const created = upsertTool(parsed.tool);
         if (created) {
           closeOpenSegment();
-          out.timeline.push({
+          appendTimelineItem({
             kind: "tool",
             toolCallId: parsed.tool.toolCallId,
           });
@@ -1186,7 +1205,11 @@ export function createTurnProjector(): {
   };
 
   const snapshot = (): TurnRender => {
-    const timeline = out.timeline.map((item) => ({ ...item })) as TimelineItem[];
+    if (timelineVersion !== snapshotTimelineVersion) {
+      snapshotTimeline = out.timeline.slice();
+      snapshotTimelineVersion = timelineVersion;
+    }
+    const timeline = snapshotTimeline;
     const thoughtText = timeline
       .filter(
         (item): item is Extract<TimelineItem, { kind: "thought" }> =>

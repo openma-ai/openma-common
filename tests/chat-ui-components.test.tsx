@@ -733,6 +733,11 @@ describe("Backchat main AgentUITurnView", () => {
       text: "Everything is ready. The tests passed.",
     });
     expect(new Set(turn.items.map((item) => item.id)).size).toBe(turn.items.length);
+    expect(
+      turn.items
+        .filter((item) => item.kind === "thinking")
+        .map((item) => item.id),
+    ).toEqual(["turn-guardian:thought:0", "turn-guardian:thought:7"]);
     expect(turn.items.slice(1).map((item) =>
       item.kind === "tool" ? item.id : item.kind,
     )).toEqual([

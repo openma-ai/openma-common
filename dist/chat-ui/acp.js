@@ -24,7 +24,7 @@ export function projectAcpChatTurn(input, options = {}) {
     rendered.timeline.forEach((entry, index) => {
         if (entry.kind === "assistant_text") {
             items.push({
-                id: `${input.id}:assistant:${index}`,
+                id: `${input.id}:assistant:${entry.segmentId ?? index}`,
                 kind: "message",
                 role: "assistant",
                 text: entry.text,
@@ -38,7 +38,7 @@ export function projectAcpChatTurn(input, options = {}) {
         }
         if (entry.kind === "thought") {
             items.push({
-                id: `${input.id}:thought:${index}`,
+                id: `${input.id}:thought:${entry.segmentId ?? index}`,
                 ...(entry.messageId ? { messageId: entry.messageId } : {}),
                 kind: "thinking",
                 role: "assistant",

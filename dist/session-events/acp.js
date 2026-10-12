@@ -728,22 +728,39 @@ export function createTurnProjector() {
     let openSegment;
     let currentPlanId;
     const planIndexById = new Map();
+    let timelineVersion = 0;
+    let snapshotTimelineVersion = 0;
+    let snapshotTimeline = [];
     const closeOpenSegment = () => {
         openSegment = undefined;
+    };
+    const appendTimelineItem = (item) => {
+        out.timeline.push(item);
+        timelineVersion += 1;
+    };
+    const replaceOpenTimelineItem = (item) => {
+        out.timeline[out.timeline.length - 1] = item;
+        timelineVersion += 1;
     };
     const appendThought = (parsed) => {
         if (openSegment?.kind === "thought" &&
             openSegment.messageId === parsed.messageId) {
-            openSegment.item.text = mergeStreamingText(openSegment.item.text, parsed.text);
+            const item = {
+                ...openSegment.item,
+                text: mergeStreamingText(openSegment.item.text, parsed.text),
+            };
+            replaceOpenTimelineItem(item);
+            openSegment.item = item;
             return;
         }
         closeOpenSegment();
         const item = {
             kind: "thought",
+            segmentId: out.timeline.length,
             text: parsed.text,
             ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
         };
-        out.timeline.push(item);
+        appendTimelineItem(item);
         openSegment = {
             kind: "thought",
             messageId: parsed.messageId,
@@ -865,7 +882,7 @@ export function createTurnProjector() {
             const text = stringValue(data.text) ?? extractTextBlocks(data.content) ?? "";
             const clientId = stringValue(raw.turn_id) ??
                 stringField(data, ["client_id", "client_turn_id"]);
-            out.timeline.push({
+            appendTimelineItem({
                 kind: "user_input",
                 text,
                 ...(clientId ? { clientId } : {}),
@@ -881,16 +898,22 @@ export function createTurnProjector() {
                 if (openSegment?.kind === "assistant_text" &&
                     openSegment.messageId === parsed.messageId &&
                     openSegment.phase === parsed.phase) {
-                    openSegment.item.text = mergeStreamingText(openSegment.item.text, parsed.text);
+                    const item = {
+                        ...openSegment.item,
+                        text: mergeStreamingText(openSegment.item.text, parsed.text),
+                    };
+                    replaceOpenTimelineItem(item);
+                    openSegment.item = item;
                     break;
                 }
                 closeOpenSegment();
                 const item = {
                     kind: "assistant_text",
+                    segmentId: out.timeline.length,
                     text: parsed.text,
                     ...(parsed.phase ? { phase: parsed.phase } : {}),
                 };
-                out.timeline.push(item);
+                appendTimelineItem(item);
                 openSegment = {
                     kind: "assistant_text",
                     messageId: parsed.messageId,
@@ -903,7 +926,7 @@ export function createTurnProjector() {
                 const created = upsertTool(parsed.tool);
                 if (created) {
                     closeOpenSegment();
-                    out.timeline.push({
+                    appendTimelineItem({
                         kind: "tool",
                         toolCallId: parsed.tool.toolCallId,
                     });
@@ -943,7 +966,11 @@ export function createTurnProjector() {
         }
     };
     const snapshot = () => {
-        const timeline = out.timeline.map((item) => ({ ...item }));
+        if (timelineVersion !== snapshotTimelineVersion) {
+            snapshotTimeline = out.timeline.slice();
+            snapshotTimelineVersion = timelineVersion;
+        }
+        const timeline = snapshotTimeline;
         const thoughtText = timeline
             .filter((item) => item.kind === "thought")
             .map((item) => item.text)

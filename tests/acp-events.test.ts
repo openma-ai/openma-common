@@ -47,9 +47,9 @@ describe("ACP event adapter", () => {
       expect.objectContaining({ toolCallId: "tool-1", status: "completed" }),
     ]);
     expect(out.timeline).toEqual([
-      { kind: "assistant_text", text: "Before " },
+      { kind: "assistant_text", segmentId: 0, text: "Before " },
       { kind: "tool", toolCallId: "tool-1" },
-      { kind: "assistant_text", text: "after." },
+      { kind: "assistant_text", segmentId: 2, text: "after." },
     ]);
   });
 
@@ -464,11 +464,11 @@ describe("incremental ACP turn projection", () => {
     );
 
     expect(out.timeline).toEqual([
-      { kind: "assistant_text", text: "Before tooling. ", phase: "commentary" },
-      { kind: "assistant_text", text: "Between.", phase: "commentary" },
-      { kind: "assistant_text", text: "Reopened.", phase: "commentary" },
-      { kind: "assistant_text", text: "After. answer.", phase: "final_answer" },
-      { kind: "thought", text: "First thought. Second thought." },
+      { kind: "assistant_text", segmentId: 0, text: "Before tooling. ", phase: "commentary" },
+      { kind: "assistant_text", segmentId: 1, text: "Between.", phase: "commentary" },
+      { kind: "assistant_text", segmentId: 2, text: "Reopened.", phase: "commentary" },
+      { kind: "assistant_text", segmentId: 3, text: "After. answer.", phase: "final_answer" },
+      { kind: "thought", segmentId: 4, text: "First thought. Second thought." },
     ]);
   });
 
@@ -512,9 +512,9 @@ describe("incremental ACP turn projection", () => {
     const secondSnapshot = projector.snapshot();
 
     expect(secondSnapshot.timeline).toEqual([
-      { kind: "thought", text: "Before tool.", messageId: "thought-before" },
+      { kind: "thought", segmentId: 0, text: "Before tool.", messageId: "thought-before" },
       { kind: "tool", toolCallId: "tool-1" },
-      { kind: "thought", text: "Still open.", messageId: "thought-after" },
+      { kind: "thought", segmentId: 2, text: "Still open.", messageId: "thought-after" },
     ]);
     expect(secondSnapshot.tools).toHaveLength(1);
     expect(secondSnapshot.tools[0]).toMatchObject({
@@ -548,9 +548,9 @@ describe("incremental ACP turn projection", () => {
     );
 
     expect(out.timeline).toEqual([
-      { kind: "thought", text: "First segment.", messageId: "thought-1" },
+      { kind: "thought", segmentId: 0, text: "First segment.", messageId: "thought-1" },
       { kind: "tool", toolCallId: "tool-1" },
-      { kind: "thought", text: "Second segment.", messageId: "thought-1" },
+      { kind: "thought", segmentId: 2, text: "Second segment.", messageId: "thought-1" },
     ]);
     expect(out.currentThoughtText).toBe("Second segment.");
   });
@@ -587,13 +587,49 @@ describe("incremental ACP turn projection", () => {
     );
 
     expect(out.timeline).toEqual([
-      { kind: "assistant_text", text: "Working." },
+      { kind: "assistant_text", segmentId: 0, text: "Working." },
       {
         kind: "user_input",
         text: "Please check the cache.",
         clientId: "client-turn-1",
       },
     ]);
+  });
+
+  it("structurally shares unchanged timeline items across snapshots", () => {
+    const projector = createTurnProjector();
+    const apply = (payload: unknown) => projector.apply({ payload });
+    apply({
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-before",
+      content: { type: "text", text: "Earlier." },
+    });
+    apply({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-live",
+      content: { type: "text", text: "Draft" },
+    });
+    const firstSnapshot = projector.snapshot();
+
+    expect(projector.snapshot().timeline).toBe(firstSnapshot.timeline);
+    apply({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-live",
+      content: { type: "text", text: " updated" },
+    });
+    const secondSnapshot = projector.snapshot();
+
+    expect(secondSnapshot.timeline).not.toBe(firstSnapshot.timeline);
+    expect(secondSnapshot.timeline[0]).toBe(firstSnapshot.timeline[0]);
+    expect(secondSnapshot.timeline[1]).not.toBe(firstSnapshot.timeline[1]);
+    expect(firstSnapshot.timeline[1]).toMatchObject({
+      segmentId: 1,
+      text: "Draft",
+    });
+    expect(secondSnapshot.timeline[1]).toMatchObject({
+      segmentId: 1,
+      text: "Draft updated",
+    });
   });
 
   it("preserves first-arrival order and deduplicates interleaved Codex Guardian tools", () => {
