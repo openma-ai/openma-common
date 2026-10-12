@@ -192,6 +192,20 @@ describe("Backchat main AgentUITurnView", () => {
     ),
   };
 
+  it.each([
+    ["queued", false],
+    ["running", false],
+    ["unknown", false],
+    ["complete", true],
+    ["completed", true],
+    ["error", true],
+    ["errored", true],
+    ["cancelled", true],
+    ["terminated", true],
+  ] as const)("classifies %s turn status", (status, terminal) => {
+    expect(chatUI.isTerminalTurnStatus(status)).toBe(terminal);
+  });
+
   it("renders Backchat's thinking fallback while a running turn has no visible event", () => {
     const html = renderToStaticMarkup(
       <AgentUITurnView
@@ -616,6 +630,41 @@ describe("Backchat main AgentUITurnView", () => {
       />,
     );
     expect(slotted).toContain('data-user-input="client-turn-1"');
+  });
+
+  it("marks the final injected input as live while its turn is running", () => {
+    const renderUserInput = vi.fn(
+      ({ item, live }: { item: AgentUIUserInputItem; live: boolean }) => (
+        <p data-user-input-live={String(live)}>{item.text}</p>
+      ),
+    );
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        turn={{
+          id: "turn-live-input",
+          status: "running",
+          items: [{
+            id: "steer-live",
+            kind: "user_input",
+            text: "Continue with the tests.",
+          }],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: () => "Working",
+          workedFor: () => "Worked",
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: () => "Tool",
+        }}
+        slots={{ ...slots, renderUserInput }}
+      />,
+    );
+
+    expect(html).toContain('data-user-input-live="true"');
+    expect(renderUserInput).toHaveBeenCalledWith(
+      expect.objectContaining({ live: true }),
+    );
   });
 
   it("does not call the footer slot until the frame has stopped", () => {

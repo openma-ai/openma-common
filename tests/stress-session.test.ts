@@ -8,6 +8,59 @@ import {
 } from "../src/testing/stress-session.js";
 
 describe("stress session generator", () => {
+  it("validates options and preserves chunk newline suffixes without a terminal seed event", () => {
+    const turnId = "turn-stress";
+    const event = (
+      eventId: string,
+      type: string,
+      id: string,
+      seq: number,
+      data: Record<string, unknown>,
+    ): CanonicalEvent => ({
+      schema: "oma.event.v1",
+      event_id: eventId,
+      type,
+      session_id: "session-stress",
+      turn_id: id,
+      occurred_at: "2026-10-01T00:00:00.000Z",
+      seq,
+      data,
+    });
+    const seed = [
+      event("steer", "user.message", "client-1", 1, {
+        input_kind: "steering",
+        outcome: "injected",
+        active_turn_id: turnId,
+      }),
+      event("chunk-with-content", "agent.message_chunk", turnId, 2, {
+        text: "Part\n\n",
+        content: { type: "text" },
+      }),
+      event("chunk-without-content", "agent.message_chunk", turnId, 3, {
+        content: [],
+      }),
+    ];
+
+    expect(() => generateStressTurn(seed, { targetEvents: -1 })).toThrow(RangeError);
+    expect(() => generateStressTurn(seed, { targetEvents: 1.5 })).toThrow(RangeError);
+    expect(() => generateStressTurn([], { targetEvents: 1 })).toThrow(TypeError);
+
+    const generated = generateStressTurn(seed, { targetEvents: 1 });
+    expect(generated).toHaveLength(4);
+    expect(generated[1]?.data.text).toMatch(/\n\n$/);
+    expect(generated[1]?.data.content).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("Here is **bold** text"),
+    });
+    expect(generated[2]?.data.text).toContain("Here is **bold** text");
+    expect(generated[2]?.data.content).toEqual([]);
+    expect(generated.at(-1)).toMatchObject({
+      type: "turn.completed",
+      event_id: "steer-stress-final",
+      data: { stop_reason: "end_turn" },
+    });
+  });
+
   it("repeats the steering turn deterministically with unique ids and canonical boundaries", () => {
     const seed = JSON.parse(
       readFileSync(

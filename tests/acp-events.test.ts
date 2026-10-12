@@ -646,6 +646,61 @@ describe("incremental ACP turn projection", () => {
     expect(firstSnapshot.tools).not.toBe(secondSnapshot.tools);
   });
 
+  it("normalizes sparse tool updates and preserves established raw input", () => {
+    const projector = createTurnProjector();
+    const apply = (payload: unknown) => projector.apply({ payload });
+    apply({
+      sessionUpdate: "tool_call",
+      toolCallId: "",
+      status: "in_progress",
+    });
+    apply({
+      sessionUpdate: "tool_call",
+      toolCallId: "tool-patch",
+      status: "in_progress",
+      rawInput: { command: "before" },
+    });
+    apply({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-patch",
+      kind: "read",
+      toolName: "Read",
+      parentToolUseId: "parent",
+      status: "in_progress",
+      rawInput: {},
+      _meta: { mcp_output_delta: { data: "partial output" } },
+      content: [{
+        type: "content",
+        content: { type: "image", uri: "file:///tmp/image.png" },
+      }],
+      locations: [{ path: "README.md", line: 1 }],
+    });
+
+    const withImage = projector.snapshot();
+    expect(withImage.tools).toHaveLength(1);
+    expect(withImage.tools[0]).toMatchObject({
+      toolCallId: "tool-patch",
+      kind: "read",
+      toolName: "Read",
+      parentToolUseId: "parent",
+      rawInput: { command: "before" },
+      rawOutput: "partial output",
+      status: "completed",
+      locations: [{ path: "README.md", line: 1 }],
+    });
+
+    apply({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tool-patch",
+      status: "in_progress",
+      rawInput: { command: "after" },
+    });
+    expect(projector.snapshot().tools[0]).toMatchObject({
+      rawInput: { command: "after" },
+      status: "completed",
+    });
+  });
+
   it("T4 starts a new segment when a closed message id returns", () => {
     const out = render(
       {
@@ -1006,6 +1061,74 @@ describe("incremental ACP turn projection", () => {
     expect([...prefixes.values()].reduce((count, prefix) => count + prefix.length, 0)).toBe(
       events.length,
     );
+  });
+
+  it("projects content-only steering without a client turn id", () => {
+    const event = {
+      schema: "oma.event.v1",
+      type: "user.message",
+      data: {
+        input_kind: "steering",
+        outcome: "injected",
+        content: [{ type: "text", text: "Content-only steering" }],
+      },
+    };
+    expect(parseAcpEvent(event)).toMatchObject({
+      kind: "user_input",
+      text: "Content-only steering",
+      event,
+    });
+    expect(render(event).timeline).toEqual([
+      { kind: "user_input", text: "Content-only steering" },
+    ]);
+  });
+
+  it("merges plan entries by id and clears an already-empty matching plan", () => {
+    const projector = createTurnProjector();
+    const apply = (payload: unknown) => projector.apply({ payload });
+    const plan = (
+      planId: string,
+      updateMode: "replace" | "merge",
+      entries: Array<Record<string, unknown>>,
+    ) => ({
+      schema_version: "oma.event.v1",
+      type: "plan.updated",
+      data: {
+        representation: "items",
+        plan_id: planId,
+        update_mode: updateMode,
+        entries,
+      },
+    });
+    const remove = (planId?: string) => ({
+      schema_version: "oma.event.v1",
+      type: "plan.removed",
+      data: planId === undefined ? {} : { plan_id: planId },
+    });
+
+    apply(plan("plan-a", "replace", [
+      { id: "existing", content: "Old item" },
+    ]));
+    apply(plan("plan-a", "merge", [
+      { id: "existing", content: "Updated item" },
+      { id: "added", content: "Added item" },
+      { content: "Anonymous item" },
+    ]));
+    apply(plan("plan-a", "merge", []));
+    expect(projector.snapshot().plan).toMatchObject([
+      { id: "existing", content: "Updated item", status: "pending" },
+      { id: "added", content: "Added item", status: "pending" },
+      { content: "Anonymous item", status: "pending" },
+    ]);
+
+    apply(plan("plan-b", "merge", [{ id: "replacement", content: "New plan" }]));
+    expect(projector.snapshot().plan).toMatchObject([
+      { id: "replacement", content: "New plan", status: "pending" },
+    ]);
+    apply(remove("plan-b"));
+    apply(remove());
+    apply(remove("other-plan"));
+    expect(projector.snapshot().plan).toEqual([]);
   });
 
   it("preserves tool order and final states across seeded cross-tool update permutations", () => {

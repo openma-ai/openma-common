@@ -637,6 +637,35 @@ describe("Agent wire adapters", () => {
     expect(Object.isFrozen(snapshot)).toBe(true);
   });
 
+  it("preserves an inline user input when snapshotting a canonical ACP event", () => {
+    const canonical = createOpenMAEvent({
+      event_id: context.eventId,
+      type: "user.message",
+      session_id: context.sessionId,
+      turn_id: context.turnId,
+      source: { kind: "harness", harness: "acp" },
+      occurred_at: context.occurredAt,
+      seq: context.seq,
+      data: {
+        text: "Check the cache.",
+        input_kind: "steering",
+        outcome: "injected",
+        active_turn_id: context.turnId,
+      },
+    });
+
+    expect(acpEventToOpenMA(canonical, context)).toMatchObject({
+      event_id: context.eventId,
+      type: "user.message",
+      turn_id: context.turnId,
+      data: {
+        input_kind: "steering",
+        outcome: "injected",
+        active_turn_id: context.turnId,
+      },
+    });
+  });
+
   it("rejects a canonical pass-through event with mismatched correlation", () => {
     const canonical = managedEventToOpenMA(
       { type: "session.status_idle" },

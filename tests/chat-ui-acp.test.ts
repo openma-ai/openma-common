@@ -3,6 +3,40 @@ import { describe, expect, it } from "vitest";
 import { projectAcpChatTurn } from "../src/chat-ui/acp.js";
 
 describe("ACP chat turn projection", () => {
+  it("uses positional ids when a host supplies legacy timeline items without segment ids", () => {
+    const turn = projectAcpChatTurn({
+      id: "turn-positional",
+      promptText: "",
+      status: "complete",
+      events: [],
+    }, {
+      rendered: {
+        thoughtText: "Thought.",
+        currentThoughtText: "",
+        assistantText: "Answer.",
+        tools: [],
+        plan: [],
+        hasPlanLifecycle: false,
+        notes: [],
+        timeline: [
+          { kind: "assistant_text", text: "Answer." },
+          { kind: "thought", text: "Thought." },
+          { kind: "user_input", text: "Steer." },
+        ],
+      },
+    });
+
+    expect(turn.items.map((item) => item.id)).toEqual([
+      "turn-positional:assistant:0",
+      "turn-positional:thought:1",
+      "turn-positional:user-input:2",
+    ]);
+    expect(turn.items[2]).toMatchObject({
+      kind: "user_input",
+      text: "Steer.",
+    });
+  });
+
   it("projects chronological thought, tool, and final-answer parts", () => {
     const turn = projectAcpChatTurn({
       id: "turn-1",
