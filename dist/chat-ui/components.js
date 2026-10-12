@@ -331,17 +331,30 @@ function ChatComposerFrame({ slots, home = false, style, }) {
 }
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
+export function isTerminalTurnStatus(status) {
+    switch (status) {
+        case "queued":
+        case "running":
+        case "unknown":
+            return false;
+        case "complete":
+        case "completed":
+        case "error":
+        case "errored":
+        case "cancelled":
+        case "terminated":
+            return true;
+        default: {
+            const exhaustive = status;
+            return exhaustive;
+        }
+    }
+}
 export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, }) {
     const isStreaming = turn.status === "running";
     const isCancelled = turn.status === "cancelled";
     const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
-    const isStopped = !isStreaming &&
-        (resolvedFrameStatus === "complete" ||
-            resolvedFrameStatus === "completed" ||
-            resolvedFrameStatus === "error" ||
-            resolvedFrameStatus === "errored" ||
-            resolvedFrameStatus === "cancelled" ||
-            resolvedFrameStatus === "terminated");
+    const isStopped = !isStreaming && isTerminalTurnStatus(resolvedFrameStatus);
     const [processOpen, setProcessOpen] = useState(isStreaming);
     const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
     useEffect(() => {

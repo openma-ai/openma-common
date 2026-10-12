@@ -164,6 +164,11 @@ export type ParsedAcpEvent = {
     parentToolUseId?: string;
     event: unknown;
 } | {
+    kind: "user_input";
+    text: string;
+    clientId?: string;
+    event: unknown;
+} | {
     kind: "notice";
     notice: string;
     event: unknown;

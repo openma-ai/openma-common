@@ -325,6 +325,20 @@ export function parseAcpEvent(event) {
         ? stringValue(eventRecord.type)
         : undefined;
     const canonicalData = objectField(eventRecord.data);
+    if (canonicalType === "user.message" &&
+        canonicalData.input_kind === "steering" &&
+        canonicalData.outcome === "injected") {
+        const text = stringValue(canonicalData.text)
+            ?? extractTextBlocks(canonicalData.content)
+            ?? "";
+        const clientId = stringValue(eventRecord.turn_id);
+        return {
+            kind: "user_input",
+            text,
+            ...(clientId ? { clientId } : {}),
+            event,
+        };
+    }
     if (canonicalType === "agent.message" || canonicalType === "agent.message_chunk") {
         const text = stringValue(canonicalData.text)
             ?? extractTextBlocks(canonicalData.content);
@@ -728,9 +742,21 @@ export function createTurnProjector() {
     let openSegment;
     let currentPlanId;
     const planIndexById = new Map();
+    let toolsVersion = 0;
+    let snapshotToolsVersion = 0;
+    let snapshotTools = [];
+    let planVersion = 0;
+    let snapshotPlanVersion = 0;
+    let snapshotPlan = [];
     let timelineVersion = 0;
     let snapshotTimelineVersion = 0;
     let snapshotTimeline = [];
+    let thoughtTextVersion = 0;
+    let snapshotThoughtTextVersion = 0;
+    let snapshotThoughtText = "";
+    let assistantTextVersion = 0;
+    let snapshotAssistantTextVersion = 0;
+    let snapshotAssistantText = "";
     const closeOpenSegment = () => {
         openSegment = undefined;
     };
@@ -804,47 +830,51 @@ export function createTurnProjector() {
             }
             toolById.set(id, entry);
             toolsOrder.push(id);
+            toolsVersion += 1;
             return true;
         }
+        const next = { ...prev };
         if (incoming.title !== undefined)
-            prev.title = incoming.title;
+            next.title = incoming.title;
         if (incoming.kind !== undefined)
-            prev.kind = incoming.kind;
+            next.kind = incoming.kind;
         if (incoming.status !== undefined)
-            prev.status = incoming.status;
+            next.status = incoming.status;
         if (incoming.toolName !== undefined)
-            prev.toolName = incoming.toolName;
+            next.toolName = incoming.toolName;
         if (incoming.meta !== undefined) {
-            prev.meta = {
-                ...(prev.meta ?? {}),
+            next.meta = {
+                ...(next.meta ?? {}),
                 ...incoming.meta,
             };
         }
         if (incoming.parentToolUseId !== undefined) {
-            prev.parentToolUseId = incoming.parentToolUseId;
+            next.parentToolUseId = incoming.parentToolUseId;
         }
         if (incoming.rawInput !== undefined) {
             const incEmpty = isEmptyObject(incoming.rawInput);
-            const prevHasContent = !isEmptyObject(prev.rawInput);
+            const prevHasContent = !isEmptyObject(next.rawInput);
             if (!(incEmpty && prevHasContent))
-                prev.rawInput = incoming.rawInput;
+                next.rawInput = incoming.rawInput;
         }
         if (incoming.rawOutput !== undefined) {
             // A native ACP rawOutput is a complete snapshot and therefore replaces
             // any adapter deltas accumulated before it.
-            prev.rawOutput = incoming.rawOutput;
+            next.rawOutput = incoming.rawOutput;
         }
         else if (incoming.outputDelta !== undefined) {
-            prev.rawOutput = appendOutputDelta(prev.rawOutput, incoming.outputDelta);
+            next.rawOutput = appendOutputDelta(next.rawOutput, incoming.outputDelta);
         }
         if (incoming.content !== undefined)
-            prev.content = incoming.content;
+            next.content = incoming.content;
         if (incoming.locations !== undefined)
-            prev.locations = incoming.locations;
-        if (prev.status === "in_progress" &&
-            prev.content?.some((b) => b.type === "content" && b.content?.type === "image")) {
-            prev.status = "completed";
+            next.locations = incoming.locations;
+        if (next.status === "in_progress" &&
+            next.content?.some((b) => b.type === "content" && b.content?.type === "image")) {
+            next.status = "completed";
         }
+        toolById.set(id, next);
+        toolsVersion += 1;
         return false;
     };
     const addPlanEntries = (incoming, merge) => {
@@ -855,8 +885,10 @@ export function createTurnProjector() {
                 if (entry.id)
                     planIndexById.set(entry.id, index);
             });
+            planVersion += 1;
             return;
         }
+        let changed = false;
         for (const entry of incoming) {
             const existingIndex = entry.id
                 ? planIndexById.get(entry.id)
@@ -865,34 +897,30 @@ export function createTurnProjector() {
                 if (entry.id)
                     planIndexById.set(entry.id, out.plan.length);
                 out.plan.push({ ...entry });
+                changed = true;
             }
             else {
                 out.plan[existingIndex] = { ...entry };
+                changed = true;
             }
         }
+        if (changed)
+            planVersion += 1;
     };
     const apply = ({ payload }) => {
-        const raw = objectField(payload);
-        const data = objectField(raw.data);
-        if ((raw.schema_version === "oma.event.v1" || raw.schema === "oma.event.v1") &&
-            raw.type === "user.message" &&
-            data.input_kind === "steering" &&
-            data.outcome === "injected") {
-            closeOpenSegment();
-            const text = stringValue(data.text) ?? extractTextBlocks(data.content) ?? "";
-            const clientId = stringValue(raw.turn_id) ??
-                stringField(data, ["client_id", "client_turn_id"]);
-            appendTimelineItem({
-                kind: "user_input",
-                text,
-                ...(clientId ? { clientId } : {}),
-            });
-            return;
-        }
         const parsed = parseAcpEvent(payload);
         switch (parsed.kind) {
+            case "user_input":
+                closeOpenSegment();
+                appendTimelineItem({
+                    kind: "user_input",
+                    text: parsed.text,
+                    ...(parsed.clientId ? { clientId: parsed.clientId } : {}),
+                });
+                break;
             case "thought":
                 appendThought(parsed);
+                thoughtTextVersion += 1;
                 break;
             case "text": {
                 if (openSegment?.kind === "assistant_text" &&
@@ -904,6 +932,7 @@ export function createTurnProjector() {
                     };
                     replaceOpenTimelineItem(item);
                     openSegment.item = item;
+                    assistantTextVersion += 1;
                     break;
                 }
                 closeOpenSegment();
@@ -914,6 +943,7 @@ export function createTurnProjector() {
                     ...(parsed.phase ? { phase: parsed.phase } : {}),
                 };
                 appendTimelineItem(item);
+                assistantTextVersion += 1;
                 openSegment = {
                     kind: "assistant_text",
                     messageId: parsed.messageId,
@@ -949,6 +979,8 @@ export function createTurnProjector() {
                 break;
             case "plan_removed":
                 if (parsed.planId === undefined || parsed.planId === currentPlanId) {
+                    if (out.plan.length > 0)
+                        planVersion += 1;
                     out.plan = [];
                     planIndexById.clear();
                     out.planDocument = undefined;
@@ -971,25 +1003,38 @@ export function createTurnProjector() {
             snapshotTimelineVersion = timelineVersion;
         }
         const timeline = snapshotTimeline;
-        const thoughtText = timeline
-            .filter((item) => item.kind === "thought")
-            .map((item) => item.text)
-            .join("");
-        const tools = toolsOrder
-            .map((id) => toolById.get(id))
-            .filter((tool) => !!tool)
-            .map((tool) => ({ ...tool }));
+        if (snapshotThoughtTextVersion !== thoughtTextVersion) {
+            snapshotThoughtText = timeline
+                .filter((item) => item.kind === "thought")
+                .map((item) => item.text)
+                .join("");
+            snapshotThoughtTextVersion = thoughtTextVersion;
+        }
+        if (snapshotAssistantTextVersion !== assistantTextVersion) {
+            snapshotAssistantText = timeline
+                .filter((item) => item.kind === "assistant_text")
+                .map((item) => item.text)
+                .join("");
+            snapshotAssistantTextVersion = assistantTextVersion;
+        }
+        if (snapshotToolsVersion !== toolsVersion) {
+            snapshotTools = toolsOrder
+                .map((id) => toolById.get(id))
+                .filter((tool) => !!tool);
+            snapshotToolsVersion = toolsVersion;
+        }
+        if (snapshotPlanVersion !== planVersion) {
+            snapshotPlan = out.plan.slice();
+            snapshotPlanVersion = planVersion;
+        }
         return {
-            thoughtText,
+            thoughtText: snapshotThoughtText,
             currentThoughtText: openSegment?.kind === "thought"
                 ? latestThoughtSegment(openSegment.item.text)
                 : "",
-            assistantText: timeline
-                .filter((item) => item.kind === "assistant_text")
-                .map((item) => item.text)
-                .join(""),
-            tools,
-            plan: out.plan.map((entry) => ({ ...entry })),
+            assistantText: snapshotAssistantText,
+            tools: snapshotTools,
+            plan: snapshotPlan,
             planDocument: out.planDocument ? { ...out.planDocument } : undefined,
             notes: [...out.notes],
             timeline,

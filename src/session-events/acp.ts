@@ -220,6 +220,12 @@ export type ParsedAcpEvent =
       parentToolUseId?: string;
       event: unknown;
     }
+  | {
+      kind: "user_input";
+      text: string;
+      clientId?: string;
+      event: unknown;
+    }
   | { kind: "notice"; notice: string; event: unknown }
   | { kind: "tool_call"; tool: NormalizedToolPatch; event: unknown }
   | { kind: "commands"; commands: AvailableCommand[]; event: unknown }
@@ -526,6 +532,23 @@ export function parseAcpEvent(event: unknown): ParsedAcpEvent {
     ? stringValue(eventRecord.type)
     : undefined;
   const canonicalData = objectField(eventRecord.data);
+  if (
+    canonicalType === "user.message" &&
+    canonicalData.input_kind === "steering" &&
+    canonicalData.outcome === "injected"
+  ) {
+    const text =
+      stringValue(canonicalData.text)
+      ?? extractTextBlocks(canonicalData.content)
+      ?? "";
+    const clientId = stringValue(eventRecord.turn_id);
+    return {
+      kind: "user_input",
+      text,
+      ...(clientId ? { clientId } : {}),
+      event,
+    };
+  }
   if (canonicalType === "agent.message" || canonicalType === "agent.message_chunk") {
     const text =
       stringValue(canonicalData.text)
@@ -954,9 +977,21 @@ export function createTurnProjector(): {
   let openSegment: OpenSegment | undefined;
   let currentPlanId: string | undefined;
   const planIndexById = new Map<string, number>();
+  let toolsVersion = 0;
+  let snapshotToolsVersion = 0;
+  let snapshotTools: ToolEntry[] = [];
+  let planVersion = 0;
+  let snapshotPlanVersion = 0;
+  let snapshotPlan: PlanEntry[] = [];
   let timelineVersion = 0;
   let snapshotTimelineVersion = 0;
   let snapshotTimeline: TimelineItem[] = [];
+  let thoughtTextVersion = 0;
+  let snapshotThoughtTextVersion = 0;
+  let snapshotThoughtText = "";
+  let assistantTextVersion = 0;
+  let snapshotAssistantTextVersion = 0;
+  let snapshotAssistantText = "";
   const closeOpenSegment = () => {
     openSegment = undefined;
   };
@@ -1037,42 +1072,46 @@ export function createTurnProjector(): {
       }
       toolById.set(id, entry);
       toolsOrder.push(id);
+      toolsVersion += 1;
       return true;
     }
 
-    if (incoming.title !== undefined) prev.title = incoming.title;
-    if (incoming.kind !== undefined) prev.kind = incoming.kind;
-    if (incoming.status !== undefined) prev.status = incoming.status;
-    if (incoming.toolName !== undefined) prev.toolName = incoming.toolName;
+    const next: ToolEntry = { ...prev };
+    if (incoming.title !== undefined) next.title = incoming.title;
+    if (incoming.kind !== undefined) next.kind = incoming.kind;
+    if (incoming.status !== undefined) next.status = incoming.status;
+    if (incoming.toolName !== undefined) next.toolName = incoming.toolName;
     if (incoming.meta !== undefined) {
-      prev.meta = {
-        ...(prev.meta ?? {}),
+      next.meta = {
+        ...(next.meta ?? {}),
         ...incoming.meta,
       };
     }
     if (incoming.parentToolUseId !== undefined) {
-      prev.parentToolUseId = incoming.parentToolUseId;
+      next.parentToolUseId = incoming.parentToolUseId;
     }
     if (incoming.rawInput !== undefined) {
       const incEmpty = isEmptyObject(incoming.rawInput);
-      const prevHasContent = !isEmptyObject(prev.rawInput);
-      if (!(incEmpty && prevHasContent)) prev.rawInput = incoming.rawInput;
+      const prevHasContent = !isEmptyObject(next.rawInput);
+      if (!(incEmpty && prevHasContent)) next.rawInput = incoming.rawInput;
     }
     if (incoming.rawOutput !== undefined) {
       // A native ACP rawOutput is a complete snapshot and therefore replaces
       // any adapter deltas accumulated before it.
-      prev.rawOutput = incoming.rawOutput;
+      next.rawOutput = incoming.rawOutput;
     } else if (incoming.outputDelta !== undefined) {
-      prev.rawOutput = appendOutputDelta(prev.rawOutput, incoming.outputDelta);
+      next.rawOutput = appendOutputDelta(next.rawOutput, incoming.outputDelta);
     }
-    if (incoming.content !== undefined) prev.content = incoming.content;
-    if (incoming.locations !== undefined) prev.locations = incoming.locations;
+    if (incoming.content !== undefined) next.content = incoming.content;
+    if (incoming.locations !== undefined) next.locations = incoming.locations;
     if (
-      prev.status === "in_progress" &&
-      prev.content?.some((b) => b.type === "content" && b.content?.type === "image")
+      next.status === "in_progress" &&
+      next.content?.some((b) => b.type === "content" && b.content?.type === "image")
     ) {
-      prev.status = "completed";
+      next.status = "completed";
     }
+    toolById.set(id, next);
+    toolsVersion += 1;
     return false;
   };
 
@@ -1086,8 +1125,10 @@ export function createTurnProjector(): {
       out.plan.forEach((entry, index) => {
         if (entry.id) planIndexById.set(entry.id, index);
       });
+      planVersion += 1;
       return;
     }
+    let changed = false;
     for (const entry of incoming) {
       const existingIndex = entry.id
         ? planIndexById.get(entry.id)
@@ -1095,39 +1136,29 @@ export function createTurnProjector(): {
       if (existingIndex === undefined) {
         if (entry.id) planIndexById.set(entry.id, out.plan.length);
         out.plan.push({ ...entry });
+        changed = true;
       } else {
         out.plan[existingIndex] = { ...entry };
+        changed = true;
       }
     }
+    if (changed) planVersion += 1;
   };
 
   const apply = ({ payload }: { payload: unknown }) => {
-    const raw = objectField(payload);
-    const data = objectField(raw.data);
-    if (
-      (raw.schema_version === "oma.event.v1" || raw.schema === "oma.event.v1") &&
-      raw.type === "user.message" &&
-      data.input_kind === "steering" &&
-      data.outcome === "injected"
-    ) {
-      closeOpenSegment();
-      const text =
-        stringValue(data.text) ?? extractTextBlocks(data.content) ?? "";
-      const clientId =
-        stringValue(raw.turn_id) ??
-        stringField(data, ["client_id", "client_turn_id"]);
-      appendTimelineItem({
-        kind: "user_input",
-        text,
-        ...(clientId ? { clientId } : {}),
-      });
-      return;
-    }
-
     const parsed = parseAcpEvent(payload);
     switch (parsed.kind) {
+      case "user_input":
+        closeOpenSegment();
+        appendTimelineItem({
+          kind: "user_input",
+          text: parsed.text,
+          ...(parsed.clientId ? { clientId: parsed.clientId } : {}),
+        });
+        break;
       case "thought":
         appendThought(parsed);
+        thoughtTextVersion += 1;
         break;
       case "text": {
         if (
@@ -1141,6 +1172,7 @@ export function createTurnProjector(): {
           };
           replaceOpenTimelineItem(item);
           openSegment.item = item;
+          assistantTextVersion += 1;
           break;
         }
         closeOpenSegment();
@@ -1151,6 +1183,7 @@ export function createTurnProjector(): {
           ...(parsed.phase ? { phase: parsed.phase } : {}),
         };
         appendTimelineItem(item);
+        assistantTextVersion += 1;
         openSegment = {
           kind: "assistant_text",
           messageId: parsed.messageId,
@@ -1187,6 +1220,7 @@ export function createTurnProjector(): {
         break;
       case "plan_removed":
         if (parsed.planId === undefined || parsed.planId === currentPlanId) {
+          if (out.plan.length > 0) planVersion += 1;
           out.plan = [];
           planIndexById.clear();
           out.planDocument = undefined;
@@ -1210,32 +1244,45 @@ export function createTurnProjector(): {
       snapshotTimelineVersion = timelineVersion;
     }
     const timeline = snapshotTimeline;
-    const thoughtText = timeline
-      .filter(
-        (item): item is Extract<TimelineItem, { kind: "thought" }> =>
-          item.kind === "thought",
-      )
-      .map((item) => item.text)
-      .join("");
-    const tools = toolsOrder
-      .map((id) => toolById.get(id))
-      .filter((tool): tool is ToolEntry => !!tool)
-      .map((tool) => ({ ...tool }));
-    return {
-      thoughtText,
-      currentThoughtText:
-        openSegment?.kind === "thought"
-          ? latestThoughtSegment(openSegment.item.text)
-          : "",
-      assistantText: timeline
+    if (snapshotThoughtTextVersion !== thoughtTextVersion) {
+      snapshotThoughtText = timeline
+        .filter(
+          (item): item is Extract<TimelineItem, { kind: "thought" }> =>
+            item.kind === "thought",
+        )
+        .map((item) => item.text)
+        .join("");
+      snapshotThoughtTextVersion = thoughtTextVersion;
+    }
+    if (snapshotAssistantTextVersion !== assistantTextVersion) {
+      snapshotAssistantText = timeline
         .filter(
           (item): item is Extract<TimelineItem, { kind: "assistant_text" }> =>
             item.kind === "assistant_text",
         )
         .map((item) => item.text)
-        .join(""),
-      tools,
-      plan: out.plan.map((entry) => ({ ...entry })),
+        .join("");
+      snapshotAssistantTextVersion = assistantTextVersion;
+    }
+    if (snapshotToolsVersion !== toolsVersion) {
+      snapshotTools = toolsOrder
+        .map((id) => toolById.get(id))
+        .filter((tool): tool is ToolEntry => !!tool);
+      snapshotToolsVersion = toolsVersion;
+    }
+    if (snapshotPlanVersion !== planVersion) {
+      snapshotPlan = out.plan.slice();
+      snapshotPlanVersion = planVersion;
+    }
+    return {
+      thoughtText: snapshotThoughtText,
+      currentThoughtText:
+        openSegment?.kind === "thought"
+          ? latestThoughtSegment(openSegment.item.text)
+          : "",
+      assistantText: snapshotAssistantText,
+      tools: snapshotTools,
+      plan: snapshotPlan,
       planDocument: out.planDocument ? { ...out.planDocument } : undefined,
       notes: [...out.notes],
       timeline,
