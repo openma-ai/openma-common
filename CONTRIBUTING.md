@@ -180,9 +180,15 @@ pnpm verify
 
 ### CI
 
-没有会跑的 GitHub Actions。`GET /repos/openma-ai/openma-common/actions/workflows` 的 `total_count` 是 0。仓库里没有 `.github/workflows`。
+`.github/workflows/` 有三个 workflow。
 
-`docs/ci-workflow.yml` 从 `11421ce` 就在树里。文件里的 workflow 名叫 `CI`，`on` 是 `pull_request`，以及对 `main` 和 tag `v*` 的 `push`。job `verify` 用 `ubuntu-latest`、`actions/checkout@v4`、`pnpm/action-setup@v4`、`actions/setup-node@v4`（`node-version: "24"`），然后 `pnpm install --frozen-lockfile`、`pnpm verify`、`git diff --exit-code -- dist`。tag 上再检查 tag 名等于 `v` 加上 `package.json` 的 `version`。它不在 `.github/workflows/`，GitHub Actions 不会跑它。`engines.node` 仍是 `>=20`。这份未启用文件把 `node-version` 写成 `"24"`。
+`ci.yml`（`CI`）：`pull_request`、对 `main` 的 push、tag `v*` 的 push。job `verify`（`ubuntu-latest`）：checkout、pnpm、Node 24、uv（装 Python 3.12 给 uvx 测试）、`pnpm install --frozen-lockfile`、`pnpm verify`、Playwright Chromium + `pnpm verify:chat-ui-interactive-surface`（截图传 artifact）、`node scripts/verify-acp-fork-browser.mjs`、`git diff --exit-code -- dist`、`pnpm test:coverage`，最后传 Codecov（`fail_ci_if_error: false`，没有 `CODECOV_TOKEN` 不会红）。job `release-check` 只在 PR 上跑：拉 base 分支和 tags 后 `node scripts/release-check.mjs`。job `verify-windows`（`windows-latest`）补好 Git `usr\bin` 和官方 xz 后跑同一套 install + `pnpm verify`。
+
+`release-tag.yml`（`Release tag`）：只在 tag `v*` push 上跑。`node scripts/release-check.mjs --tag` 核对 tag 等于 `v` 加 `package.json` 的 `version`、`docs/releases/vX.Y.Z.md` 存在、`pnpm build` 后 `dist/` 干净。
+
+`cursor-cloud-live.yml`（`Cursor Cloud live`）：PR（限 `src/protocol/cursor-cloud/**`、`tests/live/**`、`tests/fixtures/cursor-cloud/**`、`src/session-events/**` 和它自身的改动）、`main` push、每周一 06:00 UTC cron、手动 dispatch。fork PR 或缺 `CURSOR_API_KEY` 时 skip；跑 `pnpm test:live:cursor-cloud` 并上传匿名化 stream sample。普通 PR 不依赖它。
+
+`docs/ci-workflow.yml` 从 `11421ce` 就在树里，是未启用的历史文件：不在 `.github/workflows/`，GitHub Actions 不会跑它。`engines.node` 仍是 `>=20`。
 
 ### 发布
 
