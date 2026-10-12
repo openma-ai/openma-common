@@ -8,7 +8,7 @@ name: CI heavy
 
 on:
   push:
-    branches: [main]
+    branches: [main, devin/1791789380-ci-heavy-fail-test]
   pull_request:
     types:
       - opened
@@ -128,6 +128,9 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.code == 'true')
     runs-on: ubuntu-latest
     steps:
+      - name: Deliberate failure for issue-path test
+        run: exit 1
+
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
