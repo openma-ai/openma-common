@@ -29,7 +29,7 @@ export interface NpmAcpReleaseOptions {
 }
 export interface PreparedAcpRelease { command: string; release: NpmAcpRelease }
 const exec = promisify(execFile);
-function quoteWindowsArg(value: string): string {
+export function quoteWindowsArg(value: string): string {
   if (value.length === 0) return '""';
   if (!/[\s"&|<>^]/.test(value)) return value;
   return `"${value.replaceAll('"', '""')}"`;

@@ -1,3 +1,5 @@
+import type { KnownAgentEntry } from "./known-agents.js";
+import { type CommandInvocation } from "./launcher.js";
 export declare const ACP_NPM_INSTALL_TIMEOUT_MS: number;
 interface AcpRegistryNpxDistribution {
     package: string;
@@ -43,6 +45,12 @@ export interface InstallAcpRegistryAgentOptions {
     shimArgs?: string[];
     shimEnv?: Record<string, string | undefined>;
     env?: NodeJS.ProcessEnv;
+    /**
+     * npm installs only: dependency name to exact version. Written as npm
+     * `overrides`, so every copy in the tree is that version, and checked
+     * against what npm installed.
+     */
+    npmOverrides?: Record<string, string>;
 }
 export interface AcpRegistryCatalogAgent {
     id: string;
@@ -66,12 +74,16 @@ export interface InstallManagedAdapterOptions {
 export interface InstallResult {
     commandPath: string;
     version?: string;
+    /** Installed versions of the dependencies named in `npmOverrides`. */
+    dependencies?: Record<string, string>;
 }
 export interface AcpRegistryInstallMetadata {
     source: "registry";
     registryId: string;
     shimName: string;
     version?: string;
+    /** Present for an install made with `npmOverrides`. */
+    dependencies?: Record<string, string>;
     installedAt: string;
 }
 export interface UninstallAcpRegistryAgentOptions {
@@ -103,8 +115,30 @@ export declare function repairRelocatedAcpRegistryShim(options: {
     binDir: string;
     installRoot?: string;
 }): Promise<boolean>;
+/**
+ * How a host starts a launcher this installer wrote. A POSIX launcher starts
+ * directly; a Windows `.cmd` launcher has to go through `cmd.exe`.
+ */
+export declare function acpLauncherInvocation(commandPath: string, args?: readonly string[], options?: {
+    platform?: NodeJS.Platform;
+    comSpec?: string;
+}): CommandInvocation;
 export declare function installAcpRegistryAgent(options: InstallAcpRegistryAgentOptions): Promise<InstallResult>;
-export { readAcpHarnessInstallState, type AcpHarnessInstallState, type ReadAcpHarnessInstallStateOptions, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
+export type InstallPinnedAcpHarnessOptions = Pick<InstallAcpRegistryAgentOptions, "binDir" | "installRoot" | "npmCommand" | "npmCommandArgs" | "npmEnv" | "npmRegistryUrls" | "env" | "fetchImpl"> & {
+    entry: KnownAgentEntry;
+    /** Defaults to the running platform. */
+    platform?: NodeJS.Platform;
+};
+/**
+ * Installs a harness at the exact versions its registry entry pins
+ * (`KnownAgentEntry.pinned`), for hosts that need the same agent on every
+ * machine. The launcher and the install state use the names from
+ * `pinnedAcpHarnessPaths`, never the product install's, so both can live in
+ * one bin directory. On Windows the launcher is a `.cmd` file; start it with
+ * `acpLauncherInvocation`.
+ */
+export declare function installPinnedAcpHarness(options: InstallPinnedAcpHarnessOptions): Promise<InstallResult>;
+export { readAcpHarnessInstallState, readAcpHarnessPinState, pinnedAcpHarnessPaths, acpHarnessPinnedPackages, compareCodePoints, type AcpHarnessInstallState, type AcpHarnessPinState, type ReadAcpHarnessInstallStateOptions, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
 export declare function installManagedAdapter(options: InstallManagedAdapterOptions): Promise<InstallResult>;
 export declare function uninstallAcpRegistryAgent(options: UninstallAcpRegistryAgentOptions): Promise<void>;
 export declare function uninstallManagedAdapter(options: UninstallManagedAdapterOptions): Promise<void>;

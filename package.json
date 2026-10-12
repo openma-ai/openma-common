@@ -107,6 +107,10 @@
       "types": "./dist/acp-harnesses/installer.d.ts",
       "import": "./dist/acp-harnesses/installer.js"
     },
+    "./acp-harnesses/headless-launch": {
+      "types": "./dist/acp-harnesses/headless-launch.d.ts",
+      "import": "./dist/acp-harnesses/headless-launch.js"
+    },
     "./acp-harnesses/agent-setup": {
       "types": "./dist/acp-harnesses/agent-setup.d.ts",
       "import": "./dist/acp-harnesses/agent-setup.js"
@@ -154,6 +158,7 @@
     "link:consumers": "node scripts/consumers.mjs link",
     "unlink:consumers": "node scripts/consumers.mjs unlink",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:live:cursor-cloud": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
@@ -166,6 +171,7 @@
     "@types/node": "^25.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "jsdom": "29.1.1",
     "pixelmatch": "^7.2.0",
     "playwright": "1.58.2",

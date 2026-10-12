@@ -1,5 +1,6 @@
 import { access, readFile, readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { launcherTarget } from "./launcher.js";
 /** Harness ids whose latest version comes from npm, not the public ACP registry snapshot. */
 export const OPENMA_NPM_HARNESS_IDS = new Set(["pi-acp", "dsh-acp"]);
 export function usesOpenMaNpmLatestSource(entry) {
@@ -61,6 +62,85 @@ export async function readAcpHarnessInstallState(options) {
         ...(updateAvailable ? { updateAvailable: true } : {}),
     };
 }
+/** Orders by UTF-16 code unit, the same on every machine. `localeCompare` follows the host locale. */
+export function compareCodePoints(left, right) {
+    return left < right ? -1 : left > right ? 1 : 0;
+}
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+export function isExactVersion(version) {
+    return version !== undefined && EXACT_VERSION.test(version);
+}
+/** Dependency pins in a stable order. Throws when one is not an exact version. */
+export function exactDependencyPins(pins) {
+    const entries = Object.entries(pins ?? {}).sort(([left], [right]) => compareCodePoints(left, right));
+    for (const [name, version] of entries) {
+        if (!isExactVersion(version)) {
+            throw new Error(`npm override for ${name} must be an exact version, got ${JSON.stringify(version)}`);
+        }
+    }
+    return entries;
+}
+/**
+ * The exact versions an entry pins. Throws when the entry pins nothing or
+ * names anything other than an exact version: the installer and the state
+ * reader refuse the same input.
+ */
+export function acpHarnessPinnedPackages(entry) {
+    if (!entry.pinned || !entry.registryId) {
+        throw new Error(`${entry.label} (${entry.id}) has no pinned install`);
+    }
+    const version = npmVersionFromSpec(entry.pinned.package);
+    if (!isExactVersion(version)) {
+        throw new Error(`${entry.label} (${entry.id}) pins ${entry.pinned.package}, which is not an exact version`);
+    }
+    return {
+        package: { name: npmPackageNameFromSpec(entry.pinned.package), version },
+        dependencies: exactDependencyPins(entry.pinned.dependencies),
+    };
+}
+/**
+ * Where a pinned install lives. Its launcher name and its state directory
+ * differ from the product install's, so the two can share one bin directory
+ * and install root without overwriting each other.
+ */
+export function pinnedAcpHarnessPaths(entry, binDir, options = {}) {
+    const windows = (options.platform ?? process.platform) === "win32";
+    const base = `${posixBasename(entry.spec.command)}-pinned`;
+    const launcherName = windows ? `${base}.cmd` : base;
+    return {
+        stateId: `${entry.registryId ?? entry.id}-pinned`,
+        launcherName,
+        launcherPath: join(binDir, launcherName),
+    };
+}
+function posixBasename(command) {
+    return command.replaceAll("\\", "/").split("/").at(-1);
+}
+/**
+ * Compares the install a pinned launcher points at with the exact versions
+ * the registry entry pins. Reads only local files. Null when the entry pins
+ * nothing; throws when its pins are not exact versions.
+ */
+export async function readAcpHarnessPinState(options) {
+    if (!options.entry.pinned)
+        return null;
+    const pins = acpHarnessPinnedPackages(options.entry);
+    const installedPackage = await installedNpmPackageVersionFromShim(options.shimPath, pins.package.name);
+    const dependencies = await Promise.all(pins.dependencies.map(async ([dependency, version]) => {
+        const installed = await installedNpmPackageVersionFromShim(options.shimPath, dependency);
+        return { name: dependency, pinned: version, ...(installed ? { installed } : {}) };
+    }));
+    return {
+        package: {
+            name: pins.package.name,
+            pinned: pins.package.version,
+            ...(installedPackage ? { installed: installedPackage } : {}),
+        },
+        dependencies,
+        satisfied: installedPackage === pins.package.version
+            && dependencies.every((dependency) => dependency.installed === dependency.pinned),
+    };
+}
 export function npmPackageNameFromSpec(packageSpec) {
     if (packageSpec.startsWith("@")) {
         const versionIndex = packageSpec.indexOf("@", 1);
@@ -114,8 +194,7 @@ export async function readInstalledNpmPackageVersion(options) {
 }
 export async function installedNpmPackageVersionFromShim(shimPath, packageName) {
     try {
-        const shim = await readFile(shimPath, "utf8");
-        const commandPath = shim.match(/^exec\s+'([^']+)'(?:\s|$)/m)?.[1];
+        const commandPath = launcherTarget(await readFile(shimPath, "utf8"));
         if (!commandPath)
             return undefined;
         return await readPackageJsonVersion(join(dirnameFromShim(commandPath), "node_modules", ...packageName.split("/"), "package.json"));
