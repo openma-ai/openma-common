@@ -1,23 +1,23 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  OMA_AGENTS_FILENAME,
+  configTomlRowFromCustomAcpAgent,
+  customAcpAgentFromConfigTomlRow,
+  customAcpAgentsConfigPath,
   customAcpAgentsFromConfigToml,
   customAcpAgentsFromSettingsJson,
-  customAcpAgentsPath,
   mergeCustomAcpAgents,
+  migrateLegacyAcpAgents,
   normalizeCustomAcpAgent,
   normalizeCustomAcpAgents,
   readCustomAcpAgents,
-  readCustomAcpAgentsFile,
   removeCustomAcpAgent,
   upsertCustomAcpAgent,
   validateCustomAcpAgent,
-  writeCustomAcpAgentsFile,
 } from "../src/acp-harnesses/custom-agents.js";
 
 const roots: string[] = [];
@@ -32,285 +32,290 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
+function readToml(path: string): Record<string, unknown> {
+  return parseToml(readFileSync(path, "utf8")) as Record<string, unknown>;
+}
+
 describe("validateCustomAcpAgent", () => {
   it("keeps a complete definition and preserves arg versions verbatim", () => {
-    const agent = validateCustomAcpAgent({
+    expect(validateCustomAcpAgent({
       id: "pi-beta",
       label: " Pi Beta ",
       command: " npx ",
-      args: ["--yes", "@openma/pi-acp@beta"],
+      args: ["@openma/pi-acp@beta"],
       env: { TOKEN: "abc" },
-    });
-    expect(agent).toEqual({
+      enabled: false,
+    })).toEqual({
       id: "pi-beta",
       label: "Pi Beta",
       command: "npx",
-      args: ["--yes", "@openma/pi-acp@beta"],
+      args: ["@openma/pi-acp@beta"],
       env: { TOKEN: "abc" },
+      enabled: false,
     });
   });
 
-  it("defaults label to id and args to an empty array", () => {
+  it("defaults label to id and args to an empty array; keeps env:{} verbatim", () => {
     expect(validateCustomAcpAgent({ id: "x", command: "x-acp" })).toEqual({
-      id: "x",
-      label: "x",
-      command: "x-acp",
-      args: [],
+      id: "x", label: "x", command: "x-acp", args: [],
     });
-    // An empty env object serializes to no env key.
     expect(validateCustomAcpAgent({ id: "x", command: "x-acp", env: {} })).toEqual({
-      id: "x",
-      label: "x",
-      command: "x-acp",
-      args: [],
+      id: "x", label: "x", command: "x-acp", args: [], env: {},
     });
   });
 
   it("rejects malformed definitions with a reason", () => {
     expect(() => validateCustomAcpAgent(null)).toThrow("must be an object");
-    expect(() => validateCustomAcpAgent([1])).toThrow("must be an object");
     expect(() => validateCustomAcpAgent({ command: "c" })).toThrow("id must be a non-empty string");
     expect(() => validateCustomAcpAgent({ id: " " })).toThrow("id must be a non-empty string");
     expect(() => validateCustomAcpAgent({ id: "x" })).toThrow("command must be a non-empty string");
     expect(() => validateCustomAcpAgent({ id: "x", command: "c", args: "a" }))
       .toThrow("args must be an array of strings");
-    expect(() => validateCustomAcpAgent({ id: "x", command: "c", args: [1] }))
-      .toThrow("args must be an array of strings");
     expect(() => validateCustomAcpAgent({ id: "x", command: "c", env: { V: 1 } }))
       .toThrow("env must be an object of strings");
+    expect(() => validateCustomAcpAgent({ id: "x", command: "c", enabled: "no" }))
+      .toThrow("enabled must be a boolean");
   });
 });
 
-describe("normalizeCustomAcpAgent(s)", () => {
-  it("drops malformed rows instead of failing the list", () => {
+describe("normalizeCustomAcpAgent(s) / mergeCustomAcpAgents", () => {
+  it("drops malformed rows and dedups by id, first wins", () => {
     expect(normalizeCustomAcpAgent("junk")).toBeUndefined();
     expect(normalizeCustomAcpAgents([{ id: "a", command: "c" }, { bad: true }])).toEqual([
       { id: "a", label: "a", command: "c", args: [] },
     ]);
     expect(normalizeCustomAcpAgents({ not: "an array" })).toEqual([]);
-  });
-
-  it("deduplicates by id, first wins", () => {
-    const agents = normalizeCustomAcpAgents([
-      { id: "a", label: "first", command: "c1" },
-      { id: "a", label: "second", command: "c2" },
-    ]);
-    expect(agents).toHaveLength(1);
-    expect(agents[0]!.label).toBe("first");
-  });
-});
-
-describe("mergeCustomAcpAgents", () => {
-  it("keeps the first occurrence per id across lists", () => {
     expect(mergeCustomAcpAgents(
       [{ id: "a", label: "canonical", command: "c", args: [] }],
-      [{ id: "a", label: "legacy", command: "c", args: [] }, {
-        id: "b", label: "b", command: "d", args: [],
-      }],
-    ).map(({ id, label }) => [id, label])).toEqual([["a", "canonical"], ["b", "b"]]);
+      [{ id: "a", label: "legacy", command: "c", args: [] }],
+    )).toEqual([{ id: "a", label: "canonical", command: "c", args: [] }]);
   });
 });
 
-describe("customAcpAgentsFromSettingsJson", () => {
-  it("reads Martty harnesses[] rows", () => {
-    expect(customAcpAgentsFromSettingsJson({
-      harnesses: [{ id: "pi", label: "Pi", command: "npx", args: ["@openma/pi-acp@beta"] }],
-      defaultHarness: "pi",
-    })).toEqual([{ id: "pi", label: "Pi", command: "npx", args: ["@openma/pi-acp@beta"] }]);
-  });
-
-  it("keeps user-pinned package versions verbatim", () => {
-    const [agent] = customAcpAgentsFromSettingsJson({
-      harnesses: [{ id: "pi", command: "npx", args: ["@openma/pi-acp@beta"] }],
-    });
-    expect(agent!.args).toEqual(["@openma/pi-acp@beta"]);
-  });
-
-  it("strips runner flags Martty used to inject into npx args", () => {
-    const [agent] = customAcpAgentsFromSettingsJson({
-      harnesses: [{
-        id: "pi",
-        command: "C:\\tools\\npx.cmd",
-        args: ["--yes", "--prefer-offline", "@openma/pi-acp@beta"],
-      }],
-    });
-    expect(agent!.args).toEqual(["@openma/pi-acp@beta"]);
-  });
-
-  it("leaves the same flags alone for non-npx commands", () => {
-    const [agent] = customAcpAgentsFromSettingsJson({
-      harnesses: [{ id: "x", command: "my-agent", args: ["--yes"] }],
-    });
-    expect(agent!.args).toEqual(["--yes"]);
-  });
-
-  it("returns an empty list for missing or malformed settings", () => {
-    expect(customAcpAgentsFromSettingsJson(undefined)).toEqual([]);
-    expect(customAcpAgentsFromSettingsJson({ harnesses: "nope" })).toEqual([]);
-  });
-});
-
-describe("customAcpAgentsFromConfigToml", () => {
-  it("reads only [[agents]] rows that define a command", () => {
-    const parsed = stringifyToml({
+describe("config.toml row mapping", () => {
+  it("reads only rows carrying command_override and keeps enabled/env", () => {
+    const parsed = parseToml(stringifyToml({
       agents: [
         { id: "claude-acp", enabled: false },
         {
           id: "custom",
+          enabled: false,
           label_override: "Custom ACP",
           command_override: "custom-acp",
-          args_override: ["serve", "--port", "9"],
+          args_override: ["serve"],
           env: [{ name: "TOKEN", value: "v" }],
         },
-        {
-          id: "other",
-          command_override: "other-acp",
-        },
+        { id: "other", command_override: "other-acp" },
       ],
-    });
-    expect(customAcpAgentsFromConfigToml(parseToml(parsed))).toEqual([
+    }));
+    expect(customAcpAgentsFromConfigToml(parsed)).toEqual([
       {
         id: "custom",
+        enabled: false,
         label: "Custom ACP",
         command: "custom-acp",
-        args: ["serve", "--port", "9"],
+        args: ["serve"],
         env: { TOKEN: "v" },
       },
       { id: "other", label: "other", command: "other-acp", args: [] },
     ]);
   });
 
-  it("skips malformed rows and dedups by id", () => {
-    const parsed = parseToml(stringifyToml({
+  it("round-trips a definition through the row shape", () => {
+    const agent = {
+      id: "x", label: "X", command: "x-acp", args: ["a"], env: { K: "v" }, enabled: false,
+    };
+    expect(customAcpAgentFromConfigTomlRow(configTomlRowFromCustomAcpAgent(agent))).toEqual(agent);
+    expect(configTomlRowFromCustomAcpAgent({ id: "x", label: "x", command: "c", args: [] }))
+      .toEqual({ id: "x", command_override: "c" });
+  });
+
+  it("skips malformed rows", () => {
+    expect(customAcpAgentsFromConfigToml(parseToml(stringifyToml({
       agents: [
         { command_override: "no-id" },
-        { id: "x", command_override: "c", args_override: [1, 2] },
-        { id: "x", command_override: "first" },
-        { id: "x", command_override: "second" },
+        { id: "x", command_override: "c", args_override: [1] },
       ],
-    }));
-    expect(customAcpAgentsFromConfigToml(parsed)).toEqual([
-      { id: "x", label: "x", command: "first", args: [] },
-    ]);
-  });
-
-  it("handles missing or malformed config", () => {
+    })))).toEqual([]);
     expect(customAcpAgentsFromConfigToml(undefined)).toEqual([]);
-    expect(customAcpAgentsFromConfigToml({})).toEqual([]);
     expect(customAcpAgentsFromConfigToml({ agents: "nope" })).toEqual([]);
-  });
-
-  it("accepts env written as an inline TOML table", () => {
-    const parsed = parseToml('[[agents]]\nid = "a"\ncommand_override = "c"\nenv = { TOKEN = "v" }\n');
-    const [agent] = customAcpAgentsFromConfigToml(parsed);
-    expect(agent!.env).toEqual({ TOKEN: "v" });
-  });
-
-  it("omits env when every pair is invalid", () => {
-    const parsed = parseToml(stringifyToml({
-      agents: [{ id: "a", command_override: "c", env: [{ name: " " }, { value: "x" }] }],
-    }));
-    expect(customAcpAgentsFromConfigToml(parsed)[0]!.env).toBeUndefined();
-  });
-
-  it("skips env pairs without a name or string value", () => {
-    const parsed = parseToml(stringifyToml({
-      agents: [{
-        id: "a",
-        command_override: "c",
-        env: [{ name: "GOOD", value: "1" }, { name: "  " }, { name: "NOVAL" }, "junk"],
-      }],
-    }));
-    const [agent] = customAcpAgentsFromConfigToml(parsed)!
-    expect(agent!.env).toEqual({ GOOD: "1" });
   });
 });
 
-describe("agents.json file IO", () => {
-  it("returns an empty list when the file is missing or corrupt", async () => {
-    const dir = await makeRoot();
-    expect(readCustomAcpAgentsFile(dir)).toEqual([]);
-    writeFileSync(customAcpAgentsPath(dir), "{not json");
-    expect(readCustomAcpAgentsFile(dir)).toEqual([]);
-    writeFileSync(customAcpAgentsPath(dir), JSON.stringify({ agents: "nope" }));
-    expect(readCustomAcpAgentsFile(dir)).toEqual([]);
-  });
-
-  it("accepts a bare array as well as the versioned object", async () => {
-    const dir = await makeRoot();
-    writeFileSync(customAcpAgentsPath(dir), JSON.stringify([
-      { id: "a", command: "c" },
-    ]));
-    expect(readCustomAcpAgentsFile(dir)).toEqual([
-      { id: "a", label: "a", command: "c", args: [] },
-    ]);
-  });
-
-  it("writes, upserts and removes definitions", async () => {
-    const dir = await makeRoot();
-    writeCustomAcpAgentsFile(dir, [
-      { id: "a", label: "A", command: "a-acp", args: ["--x"], env: { K: "v" } },
-    ]);
-    expect(JSON.parse(readFileSync(customAcpAgentsPath(dir), "utf8"))).toEqual({
-      version: 1,
-      agents: [{ id: "a", label: "A", command: "a-acp", args: ["--x"], env: { K: "v" } }],
-    });
-
-    upsertCustomAcpAgent(dir, { id: "b", command: "b-acp" });
-    upsertCustomAcpAgent(dir, { id: "a", command: "a2-acp", args: ["@openma/pi-acp@beta"] });
-    let agents = readCustomAcpAgentsFile(dir);
-    expect(agents).toEqual([
-      { id: "a", label: "a", command: "a2-acp", args: ["@openma/pi-acp@beta"] },
-      { id: "b", label: "b", command: "b-acp", args: [] },
-    ]);
-
-    removeCustomAcpAgent(dir, "a");
-    expect(readCustomAcpAgentsFile(dir).map(({ id }) => id)).toEqual(["b"]);
-  });
-
-  it("round-trips through a nested directory it creates", async () => {
-    const dir = join(await makeRoot(), "nested", ".oma");
-    upsertCustomAcpAgent(dir, { id: "x", command: "x" });
-    expect(readFileSync(join(dir, OMA_AGENTS_FILENAME), "utf8")).toContain('"id": "x"');
-  });
-
-  it("throws when asked to write an invalid definition", async () => {
-    const dir = await makeRoot();
-    expect(() => upsertCustomAcpAgent(dir, { id: "x" })).toThrow("command");
-    expect(() => writeCustomAcpAgentsFile(dir, [{ id: "x" } as never])).toThrow("command");
+describe("customAcpAgentsFromSettingsJson", () => {
+  it("reads harnesses[] rows, keeps versions verbatim, strips legacy npx flags", () => {
+    expect(customAcpAgentsFromSettingsJson({
+      harnesses: [{
+        id: "pi",
+        command: "C:\\tools\\npx.cmd",
+        args: ["--yes", "--prefer-offline", "@openma/pi-acp@beta"],
+      }],
+    })).toEqual([{ id: "pi", label: "pi", command: "C:\\tools\\npx.cmd", args: ["@openma/pi-acp@beta"] }]);
+    expect(customAcpAgentsFromSettingsJson({
+      harnesses: [{ id: "x", command: "my-agent", args: ["--yes"] }],
+    })[0]!.args).toEqual(["--yes"]);
+    expect(customAcpAgentsFromSettingsJson(undefined)).toEqual([]);
+    expect(customAcpAgentsFromSettingsJson({ harnesses: "nope" })).toEqual([]);
   });
 });
 
 describe("readCustomAcpAgents", () => {
-  it("merges all three stores, canonical file first", async () => {
+  it("merges config.toml and settings.json leftovers, deduped", async () => {
     const dir = await makeRoot();
-    writeCustomAcpAgentsFile(dir, [
-      { id: "shared", label: "canonical", command: "c1", args: [] },
-    ]);
     writeFileSync(join(dir, "config.toml"), stringifyToml({
       agents: [
         { id: "shared", command_override: "toml-version" },
-        { id: "toml-only", command_override: "toml-cmd", args_override: ["a"] },
         { id: "registry-agent", enabled: false },
       ],
     }));
     writeFileSync(join(dir, "settings.json"), JSON.stringify({
       harnesses: [
-        { id: "shared", label: "json", command: "c3" },
+        { id: "shared", command: "json-version" },
         { id: "json-only", label: "J", command: "j", args: ["@openma/pi-acp@beta"] },
       ],
     }));
-
     expect(readCustomAcpAgents(dir)).toEqual([
-      { id: "shared", label: "canonical", command: "c1", args: [] },
-      { id: "toml-only", label: "toml-only", command: "toml-cmd", args: ["a"] },
+      { id: "shared", label: "shared", command: "toml-version", args: [] },
       { id: "json-only", label: "J", command: "j", args: ["@openma/pi-acp@beta"] },
     ]);
   });
 
-  it("tolerates an empty directory", async () => {
+  it("returns an empty list for an empty dir and throws on a corrupt config.toml", async () => {
     const dir = await makeRoot();
-    mkdirSync(dir, { recursive: true });
     expect(readCustomAcpAgents(dir)).toEqual([]);
+    writeFileSync(join(dir, "config.toml"), "[[agents]]\nid = \"unclosed");
+    expect(() => readCustomAcpAgents(dir)).toThrow();
+  });
+});
+
+describe("writes into config.toml", () => {
+  it("upserts and removes definitions, preserving other sections", async () => {
+    const dir = await makeRoot();
+    const path = customAcpAgentsConfigPath(dir);
+    writeFileSync(path, [
+      "# backchat config",
+      "# https://github.com/minimax/backchat",
+      "",
+      "[appearance]",
+      'theme = "dark"',
+      "",
+      "[[agents]]",
+      'id = "codex-acp"',
+      "enabled = false",
+      "",
+    ].join("\n"));
+
+    upsertCustomAcpAgent(dir, {
+      id: "pi", label: "Pi", command: "npx", args: ["@openma/pi-acp@beta"],
+    });
+    let written = readFileSync(path, "utf8");
+    expect(written).toContain("# backchat config");
+    const parsed = readToml(path);
+    expect(parsed.appearance).toEqual({ theme: "dark" });
+    expect(parsed.agents).toEqual([
+      { id: "codex-acp", enabled: false },
+      { id: "pi", label_override: "Pi", command_override: "npx", args_override: ["@openma/pi-acp@beta"] },
+    ]);
+
+    removeCustomAcpAgent(dir, "pi");
+    expect(readToml(path).agents).toEqual([{ id: "codex-acp", enabled: false }]);
+  });
+
+  it("refuses to overwrite a config.toml that fails to parse", async () => {
+    const dir = await makeRoot();
+    const path = customAcpAgentsConfigPath(dir);
+    writeFileSync(path, "[[agents]]\nid = \"unclosed\n");
+    const before = readFileSync(path, "utf8");
+    expect(() => upsertCustomAcpAgent(dir, { id: "x", command: "c" })).toThrow();
+    expect(() => removeCustomAcpAgent(dir, "x")).toThrow();
+    expect(readFileSync(path, "utf8")).toBe(before);
+  });
+
+  it("a removed agent cannot resurface from settings.json", async () => {
+    const dir = await makeRoot();
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({
+      harnesses: [{ id: "old", label: "Old", command: "old-acp", args: ["a@1"] }],
+      defaultHarness: "old",
+      theme: "ember",
+    }));
+    // First write migrates the legacy list into config.toml...
+    upsertCustomAcpAgent(dir, { id: "new", command: "new-acp" });
+    expect(readCustomAcpAgents(dir).map(({ id }) => id)).toEqual(["old", "new"]);
+    expect(JSON.parse(readFileSync(join(dir, "settings.json"), "utf8")))
+      .toEqual({ defaultHarness: "old", theme: "ember" });
+    // ...then a removal drops it from the single store — nothing resurfaces.
+    removeCustomAcpAgent(dir, "old");
+    expect(readCustomAcpAgents(dir)).toEqual([
+      { id: "new", label: "new", command: "new-acp", args: [] },
+    ]);
+  });
+
+  it("respects enabled=false stored rows on read and on upsert", async () => {
+    const dir = await makeRoot();
+    upsertCustomAcpAgent(dir, { id: "pi", command: "npx", enabled: false });
+    expect(readCustomAcpAgents(dir)).toEqual([
+      { id: "pi", label: "pi", command: "npx", args: [], enabled: false },
+    ]);
+    // A caller upserting without the flag keeps the stored disable.
+    upsertCustomAcpAgent(dir, { id: "pi", command: "npx2" });
+    expect(readCustomAcpAgents(dir)[0]!.enabled).toBe(false);
+  });
+
+  it("keeps a residual enabled flag when a definition is removed", async () => {
+    const dir = await makeRoot();
+    upsertCustomAcpAgent(dir, { id: "pi", command: "npx", enabled: false });
+    removeCustomAcpAgent(dir, "pi");
+    expect(readToml(customAcpAgentsConfigPath(dir)).agents).toEqual([{ id: "pi", enabled: false }]);
+    expect(readCustomAcpAgents(dir)).toEqual([]);
+  });
+
+  it("keeps rows without id, duplicate ids and stored env untouched", async () => {
+    const dir = await makeRoot();
+    const path = customAcpAgentsConfigPath(dir);
+    writeFileSync(path, [
+      "[[agents]]",
+      'command_override = "id-less"',
+      "",
+      "[[agents]]",
+      'id = "pi"',
+      'env = [{name = "TOKEN", value = "v"}]',
+      "",
+      "[[agents]]",
+      'id = "pi"',
+      "enabled = true",
+      "",
+      "[[agents]]",
+      'id = "e"',
+      "enabled = true",
+      "",
+    ].join("\n"));
+    upsertCustomAcpAgent(dir, { id: "pi", command: "npx" });
+    upsertCustomAcpAgent(dir, { id: "e", command: "e-acp", env: { V: "1" } });
+    const agents = readToml(path).agents as unknown[];
+    // The env-only row gains the command fields and keeps its stored env pairs...
+    expect(agents).toContainEqual({
+      id: "pi", env: [{ name: "TOKEN", value: "v" }], command_override: "npx",
+    });
+    // ...the duplicate-id row stays as it was...
+    expect(agents).toContainEqual({ id: "pi", enabled: true });
+    // ...the definition's own env wins when it carries one (keeping enabled)...
+    expect(agents).toContainEqual({
+      id: "e", enabled: true, command_override: "e-acp", env: [{ name: "V", value: "1" }],
+    });
+    // ...and rows without an id are never dropped.
+    expect(agents).toContainEqual({ command_override: "id-less" });
+  });
+
+  it("migrateLegacyAcpAgents folds settings.json harnesses once", async () => {
+    const dir = await makeRoot();
+    expect(migrateLegacyAcpAgents(dir)).toBe(false);
+    writeFileSync(join(dir, "settings.json"), JSON.stringify({
+      harnesses: [{ id: "m", label: "M", command: "m-acp", args: ["a@2"] }],
+    }));
+    expect(migrateLegacyAcpAgents(dir)).toBe(true);
+    expect(migrateLegacyAcpAgents(dir)).toBe(false);
+    expect(readCustomAcpAgents(dir)).toEqual([
+      { id: "m", label: "M", command: "m-acp", args: ["a@2"] },
+    ]);
   });
 });

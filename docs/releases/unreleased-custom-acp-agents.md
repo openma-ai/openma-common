@@ -1,32 +1,19 @@
-# Unreleased: shared custom ACP agent store under `~/.oma`
+### Shared custom ACP agent store
 
-Additive. No exports were removed, so this is a minor change under the
-compatibility policy (new subpath export). Closes #36.
+New `@openma/common/acp-harnesses/custom-agents` module: reading, validating,
+and writing custom ACP agent definitions that Backchat and Martty share.
 
-## Changes
+The single shared store is `~/.oma/config.toml` `[[agents]]` — Backchat's
+per-agent override format (`id`, `enabled`, `env` pairs, plus
+`command_override` / `args_override` / `label_override` for custom agents).
+Definitions surface in the canonical shape `{id, label, command, args, env}`
+plus the store's `enabled` flag so a disabled agent stays disabled. Martty's
+legacy `~/.oma/settings.json` `harnesses[]` still read through for
+compatibility, and every write migrates them into `config.toml`, so removed
+definitions cannot resurface.
 
-- New export `@openma/common/acp-harnesses/custom-agents`: the shared store
-  for custom ACP agent definitions under `~/.oma`, previously duplicated as
-  Backchat `config.toml` `[[agents]]` overrides and Martty `settings.json`
-  `harnesses[]` rows.
-- Canonical file: `<oma>/agents.json`, one definition per agent in the
-  `AcpHarnessSpec` shape (`id`, `label`, `command`, `args`, optional `env`).
-  `readCustomAcpAgentsFile`, `writeCustomAcpAgentsFile` (atomic
-  temp-file + rename), `upsertCustomAcpAgent`, and `removeCustomAcpAgent`
-  read and write it.
-- `readCustomAcpAgents(omaDir)` merges `agents.json` with compatible reads
-  of `config.toml` `[[agents]]` rows carrying `command_override` and
-  `settings.json` `harnesses[]` rows, deduplicated by `id` — existing
-  Backchat and Martty configurations keep working. Adapters
-  (`customAcpAgentsFromConfigToml`, `customAcpAgentsFromSettingsJson`,
-  `mergeCustomAcpAgents`) are exported for consumers that already hold a
-  parsed settings document.
-- Versions the user writes in `args` are kept exactly as written; nothing
-  rewrites a pin such as `@openma/pi-acp@beta`. Runner flags Martty used to
-  inject into its own stored `npx` rows (`--yes`, `--prefer-offline`) are
-  still normalized away on read of `settings.json` only.
-- `validateCustomAcpAgent` throws with a reason for write paths;
-  `normalizeCustomAcpAgent(s)` drops malformed rows for stored reads, so one
-  bad row cannot break a whole file.
+Writes refuse to touch a `config.toml` that does not parse, preserve all
+unrelated keys and sections, and keep user-written argument versions (for
+example `@openma/pi-acp@beta`) exactly as written.
 
-Rename this file to `vX.Y.Z.md` in the release commit.
+Part of openma-ai/openma-common#36.
