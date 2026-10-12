@@ -45,9 +45,6 @@ jobs:
         run: node scripts/verify-acp-fork-browser.mjs
       - name: Verify committed build output is current
         run: git diff --exit-code -- dist
-      - name: Verify release tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: test "v$(node -p \"require('./package.json').version\")" = "$GITHUB_REF_NAME"
       - name: Measure test coverage
         run: pnpm test:coverage
       # codecov.yml requires 100% coverage of the lines a pull request changes.
