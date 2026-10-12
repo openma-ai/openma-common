@@ -15,6 +15,8 @@ import {
   createStreamTextPacer,
 } from "../src/agent-ui/react.js";
 
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 afterEach(() => {
   vi.useRealTimers();
   document.body.replaceChildren();
@@ -66,24 +68,35 @@ describe("Agent UI React streaming elements", () => {
   });
 
   it("keeps one ellipsized header row for each explicit thinking line", () => {
-    const html = renderToStaticMarkup(
-      <AgentUIStreamingThoughtProjection
-        store={createAgentUIStore("session-thinking")}
-        turnId="turn-thinking-header"
-        prefixSkip={0}
-        fallback={
-          "A very long first line that must not wrap into the next visual row.\n"
-          + "A second explicit line.\n\nA third paragraph."
-        }
-        mode="body"
-      />,
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    act(() =>
+      root.render(
+        <AgentUIStreamingThoughtProjection
+          store={createAgentUIStore("session-thinking")}
+          turnId="turn-thinking-header"
+          prefixSkip={0}
+          fallback={
+            "A very long first line that must not wrap into the next visual row.\n"
+            + "A second explicit line.\n\nA third paragraph."
+          }
+          mode="body"
+        />,
+      ),
     );
 
-    expect(html.match(/data-thought-projection-line="true"/g)).toHaveLength(3);
-    expect(html.match(/class="[^"]*truncate[^"]*"/g)).toHaveLength(3);
-    expect(html).toContain("A very long first line");
-    expect(html).toContain("A second explicit line.");
-    expect(html).toContain("A third paragraph.");
+    const lines = Array.from(
+      container.querySelectorAll("[data-thought-projection-line]"),
+      (line) => line.textContent,
+    );
+    expect(lines).toEqual([
+      "A very long first line that must not wrap into the next visual row.",
+      "A second explicit line.",
+      "A third paragraph.",
+    ]);
+    expect(container.querySelectorAll(".truncate")).toHaveLength(3);
+    act(() => root.unmount());
   });
 
   it("renders thought summary Markdown across chunks and skips earlier thoughts", async () => {
@@ -103,6 +116,79 @@ describe("Agent UI React streaming elements", () => {
     expect(container.querySelector("code")?.textContent).toBe("code");
     expect(container.textContent).not.toContain("Earlier");
     expect(container.textContent).not.toContain("**");
+    act(() => root.unmount());
+  });
+
+  it("keeps body projection DOM stable when streamed text replaces its fallback", async () => {
+    const store = createAgentUIStore("session-thinking");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const sendThought = (id: string, text: string) => store.dispatch({
+      event_id: id,
+      type: "agent.thinking",
+      session_id: "session-thinking",
+      turn_id: "turn-projection-body",
+      source: { kind: "harness", harness: "codex-acp" },
+      occurred_at: "2026-09-09T00:00:00.000Z",
+      data: { message_id: "thought", text },
+    } as Parameters<typeof store.dispatch>[0]);
+    const render = (fallback: string) => (
+      <AgentUIStreamingThoughtProjection
+        store={store}
+        turnId="turn-projection-body"
+        prefixSkip={0}
+        fallback={fallback}
+        mode="body"
+      />
+    );
+
+    await act(async () => root.render(render("one\ntwo\nthree")));
+    expect(
+      Array.from(
+        container.querySelectorAll("[data-thought-projection-line]"),
+        (line) => line.textContent,
+      ),
+    ).toEqual(["one", "two", "three"]);
+    act(() => sendThought("body-delta", "streamed thought"));
+    expect(container.textContent).toBe("streamed thought");
+    await expect(act(async () => root.render(render("four")))).resolves.toBeUndefined();
+    expect(container.textContent).toBe("streamed thought");
+    act(() => root.unmount());
+  });
+
+  it("keeps headline projection DOM stable when its fallback becomes empty", async () => {
+    const store = createAgentUIStore("session-thinking");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const sendThought = (id: string, text: string) => store.dispatch({
+      event_id: id,
+      type: "agent.thinking",
+      session_id: "session-thinking",
+      turn_id: "turn-projection-headline",
+      source: { kind: "harness", harness: "codex-acp" },
+      occurred_at: "2026-09-09T00:00:00.000Z",
+      data: { message_id: "thought", text },
+    } as Parameters<typeof store.dispatch>[0]);
+    const render = (fallback: string) => (
+      <AgentUIStreamingThoughtProjection
+        store={store}
+        turnId="turn-projection-headline"
+        prefixSkip={0}
+        fallback={fallback}
+        mode="headline"
+      />
+    );
+
+    await act(async () =>
+      root.render(render("one\ntwo\nthree")),
+    );
+    expect(container.textContent).toBe("one");
+    act(() => sendThought("headline-delta", "# Streamed headline"));
+    expect(container.textContent).toBe("Streamed headline");
+    await expect(act(async () => root.render(render("")))).resolves.toBeUndefined();
+    expect(container.textContent).toBe("Streamed headline");
     act(() => root.unmount());
   });
 

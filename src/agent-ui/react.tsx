@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useSyncExternalStore,
 } from "react";
@@ -360,13 +361,13 @@ export function AgentUIStreamingThoughtProjection({
 }) {
   const hostRef = useRef<HTMLSpanElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     let text = "";
     let replaying = true;
     const render = () => {
-      const lines = thoughtProjectionLines(text, fallback);
+      const lines = thoughtProjectionLines(text || fallback, fallback);
       if (mode === "headline") {
         host.textContent = thoughtHeadline(text) || lines[0] || fallback;
       } else {
@@ -387,20 +388,12 @@ export function AgentUIStreamingThoughtProjection({
     return unsubscribe;
   }, [fallback, mode, prefixSkip, store, turnId]);
 
-  if (mode === "headline") {
-    return <span ref={hostRef}>{fallback}</span>;
-  }
+  if (mode === "headline") return <span ref={hostRef} />;
   return (
-    <span ref={hostRef} className="block min-w-0" data-thought-projection="lines">
-      {thoughtProjectionLines(fallback, fallback).map((line, index) => (
-        <span
-          key={`${index}-${line}`}
-          data-thought-projection-line="true"
-          className="block min-w-0 truncate leading-6"
-        >
-          {line}
-        </span>
-      ))}
-    </span>
+    <span
+      ref={hostRef}
+      className="block min-w-0"
+      data-thought-projection="lines"
+    />
   );
 }
