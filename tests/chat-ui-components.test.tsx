@@ -69,6 +69,18 @@ describe("Backchat main chat disclosures", () => {
     expect(html).toContain("Run tests body");
   });
 
+  it("marks expanded activity content for the shared max-height token", () => {
+    const html = renderToStaticMarkup(
+      <ChatCollapsibleEventSequence
+        nodes={nodes}
+        active
+        completedProjection={{ summary: "Ran commands" }}
+      />,
+    );
+
+    expect(html).toContain("chat-activity-panel");
+  });
+
   it("keeps a completed event sequence hidden without discarding its state", () => {
     const html = renderToStaticMarkup(
       <ChatCollapsibleEventSequence

@@ -13,6 +13,7 @@ describe("chat UI host style contract", () => {
       ".chat-turn-frame",
       ".chat-composer-frame",
       ".chat-activity-icon",
+      ".chat-activity-panel",
       ".activity-disclosure-row",
       ".activity-disclosure-chevron",
       ".chat-interactive-surface",
@@ -27,6 +28,16 @@ describe("chat UI host style contract", () => {
     ]) {
       expect(css).toContain(selector);
     }
+
+    expect(css).toContain("--chat-activity-panel-max-height: min(220px, 26vh)");
+    const activityPanel = css.slice(
+      css.indexOf(".chat-activity-panel {"),
+      css.indexOf("}", css.indexOf(".chat-activity-panel {")),
+    );
+    expect(activityPanel).toContain(
+      "max-height: var(--chat-activity-panel-max-height)",
+    );
+    expect(activityPanel).toContain("overflow-y: auto");
 
     const emptyStack = css.slice(
       css.indexOf(".home-empty-stack {"),

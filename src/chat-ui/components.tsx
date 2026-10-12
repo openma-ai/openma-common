@@ -681,7 +681,7 @@ function ChatCollapsibleEventSequenceGroup({
         hidden={!open}
         aria-hidden={open ? undefined : true}
         inert={open ? undefined : true}
-        className="ml-4 mt-1 border-l border-border/40 pl-2"
+        className="chat-activity-panel ml-4 mt-1 border-l border-border/40 pl-2"
       >
         <div className="space-y-1">
           {nodes.map((node) => (

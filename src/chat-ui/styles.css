@@ -4,6 +4,7 @@
  */
 
 :where(:root) {
+  --chat-activity-panel-max-height: min(220px, 26vh);
   --chat-interactive-hover-bg: color-mix(
     in srgb,
     var(--chat-fg, var(--fg, currentColor)) 8%,
@@ -497,6 +498,11 @@ summary.openma-session-toolbar-chip.is-warning {
 .chat-activity-icon {
   width: var(--chat-activity-icon-size, 14px);
   height: var(--chat-activity-icon-size, 14px);
+}
+
+.chat-activity-panel {
+  max-height: var(--chat-activity-panel-max-height);
+  overflow-y: auto;
 }
 
 button.activity-disclosure-row.activity-disclosure-row,
