@@ -9,7 +9,7 @@ import { defaultNpmCliPath } from "./npm-cli.js";
 import { nodeModulesCacheKey } from "./node-abi.js";
 import { discardStaging, installerEnvironment, publishDirectory } from "./shared.js";
 const exec = promisify(execFile);
-function quoteWindowsArg(value) {
+export function quoteWindowsArg(value) {
     if (value.length === 0)
         return '""';
     if (!/[\s"&|<>^]/.test(value))

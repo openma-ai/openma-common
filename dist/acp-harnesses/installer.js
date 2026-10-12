@@ -3,7 +3,8 @@ import { createHash } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rm, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { latestNpmPackageVersion, npmVersionFromSpec, } from "./install-state.js";
+import { acpHarnessPinnedPackages, exactDependencyPins, latestNpmPackageVersion, npmVersionFromSpec, pinnedAcpHarnessPaths, } from "./install-state.js";
+import { commandInvocation, renderWindowsLauncher } from "./launcher.js";
 const execFileAsync = promisify(execFile);
 export const ACP_NPM_INSTALL_TIMEOUT_MS = 10 * 60_000;
 const ACP_REGISTRY_URL = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
@@ -73,10 +74,11 @@ function renderShellShim(commandPath, args = [], env = {}) {
         "",
     ].join("\n");
 }
-async function writeExecutableShim(shimPath, commandPath, args = [], env = {}) {
+async function writeExecutableShim(shimPath, commandPath, args = [], env = {}, windowsLauncher = false) {
     await mkdir(dirname(shimPath), { recursive: true });
     const stagedPath = `${shimPath}.tmp-${process.pid}-${Date.now()}`;
-    await writeFile(stagedPath, renderShellShim(commandPath, args, env), "utf8");
+    const render = windowsLauncher ? renderWindowsLauncher : renderShellShim;
+    await writeFile(stagedPath, render(commandPath, args, env), "utf8");
     await chmod(stagedPath, 0o755);
     await rename(stagedPath, shimPath);
 }
@@ -320,7 +322,7 @@ async function resolvePackageVersion(prefixDir, packageSpec) {
     }
     throw new Error(`${packageSpec} is installed but package.json is missing a version`);
 }
-async function resolvePackageBin(prefixDir, packageSpec) {
+async function resolvePackageBin(prefixDir, packageSpec, windows) {
     const packageName = packageNameFromSpec(packageSpec);
     const packageJsonPath = join(prefixDir, "node_modules", ...packagePathParts(packageName), "package.json");
     const pkg = JSON.parse(await readFile(packageJsonPath, "utf8"));
@@ -332,7 +334,7 @@ async function resolvePackageBin(prefixDir, packageSpec) {
             : Object.keys(pkg.bin ?? {})[0];
     if (!binName)
         throw new Error(`${packageSpec} does not expose an executable bin`);
-    return join(prefixDir, "node_modules", ".bin", process.platform === "win32" ? `${binName}.cmd` : binName);
+    return join(prefixDir, "node_modules", ".bin", windows ? `${binName}.cmd` : binName);
 }
 async function resolveNpmInstallVersion(packageSpec, options) {
     if (options.explicitVersion?.trim())
@@ -352,15 +354,19 @@ function isStringRecord(value) {
         && !Array.isArray(value)
         && Object.values(value).every((item) => typeof item === "string");
 }
-const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
-function sortedOverrides(overrides) {
-    const entries = Object.entries(overrides ?? {}).sort(([left], [right]) => left.localeCompare(right));
-    for (const [name, version] of entries) {
-        if (!EXACT_VERSION.test(version)) {
-            throw new Error(`npm override for ${name} must be an exact version, got ${JSON.stringify(version)}`);
-        }
-    }
-    return entries;
+const WINDOWS = process.platform === "win32";
+function runCommand(invocation, options) {
+    return execFileAsync(invocation.file, invocation.args, {
+        ...options,
+        windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+    });
+}
+/**
+ * How a host starts a launcher this installer wrote. A POSIX launcher starts
+ * directly; a Windows `.cmd` launcher has to go through `cmd.exe`.
+ */
+export function acpLauncherInvocation(commandPath, args = [], options = {}) {
+    return commandInvocation((options.platform ?? process.platform) === "win32", commandPath, args, options.comSpec);
 }
 /** npm reads `overrides` only from the package.json at the install prefix. */
 async function writeOverridesManifest(prefixDir, overrides) {
@@ -382,7 +388,8 @@ async function installedOverrideVersions(prefixDir, overrides) {
 }
 async function installNpxDistribution(npx, options) {
     const installRoot = options.installRoot ?? options.binDir;
-    const overrides = sortedOverrides(options.npmOverrides);
+    const overrides = exactDependencyPins(options.npmOverrides);
+    const { windows } = options;
     const resolvedVersion = await resolveNpmInstallVersion(npx.package, {
         explicitVersion: options.version,
         npmRegistryUrls: options.npmRegistryUrls,
@@ -395,7 +402,7 @@ async function installNpxDistribution(npx, options) {
         : `npx:${npx.package}`);
     let packageBin;
     try {
-        packageBin = await resolvePackageBin(prefixDir, npx.package);
+        packageBin = await resolvePackageBin(prefixDir, npx.package, windows);
         await access(packageBin);
     }
     catch {
@@ -411,6 +418,7 @@ async function installNpxDistribution(npx, options) {
                 timeout: ACP_NPM_INSTALL_TIMEOUT_MS,
                 maxBuffer: 1024 * 1024,
             };
+            const runNpm = (args) => runCommand(commandInvocation(windows, options.npmCommand ?? "npm", args, npmOptions.env.ComSpec), npmOptions);
             const installArgs = [
                 "install",
                 "--prefix",
@@ -428,13 +436,13 @@ async function installNpxDistribution(npx, options) {
                 const registryArgs = registryUrl ? ["--registry", registryUrl] : [];
                 try {
                     await writeOverridesManifest(stagedDir, overrides);
-                    await execFileAsync(options.npmCommand ?? "npm", [
+                    await runNpm([
                         ...(options.npmCommandArgs ?? []),
                         ...installArgs,
                         ...registryArgs,
                         "--prefer-offline",
                         npx.package,
-                    ], npmOptions);
+                    ]);
                     installed = true;
                     break;
                 }
@@ -444,13 +452,13 @@ async function installNpxDistribution(npx, options) {
                         await rm(stagedDir, { recursive: true, force: true });
                         try {
                             await writeOverridesManifest(stagedDir, overrides);
-                            await execFileAsync(options.npmCommand ?? "npm", [
+                            await runNpm([
                                 ...(options.npmCommandArgs ?? []),
                                 ...installArgs,
                                 ...registryArgs,
                                 "--prefer-online",
                                 npx.package,
-                            ], npmOptions);
+                            ]);
                             installed = true;
                             break;
                         }
@@ -463,7 +471,7 @@ async function installNpxDistribution(npx, options) {
             }
             if (!installed)
                 throw lastError;
-            const stagedBin = await resolvePackageBin(stagedDir, npx.package);
+            const stagedBin = await resolvePackageBin(stagedDir, npx.package, windows);
             await access(stagedBin);
             await rm(prefixDir, { recursive: true, force: true });
             await mkdir(dirname(prefixDir), { recursive: true });
@@ -473,15 +481,12 @@ async function installNpxDistribution(npx, options) {
             await rm(stagedDir, { recursive: true, force: true });
             throw error;
         }
-        packageBin = await resolvePackageBin(prefixDir, npx.package);
+        packageBin = await resolvePackageBin(prefixDir, npx.package, windows);
     }
     const installedVersion = await resolvePackageVersion(prefixDir, npx.package);
     const dependencies = await installedOverrideVersions(prefixDir, overrides);
     const shimPath = join(options.binDir, options.shimName);
-    await writeExecutableShim(shimPath, packageBin, options.shimArgs ?? npx.args ?? [], {
-        ...(npx.env ?? {}),
-        ...(options.shimEnv ?? {}),
-    });
+    await writeExecutableShim(shimPath, packageBin, options.shimArgs ?? npx.args ?? [], { ...(npx.env ?? {}), ...(options.shimEnv ?? {}) }, options.windowsLauncher);
     return {
         commandPath: shimPath,
         version: installedVersion,
@@ -591,6 +596,11 @@ export async function installAcpRegistryAgent(options) {
     }
     const platformKey = currentPlatformKey();
     const target = agent.distribution?.binary?.[platformKey];
+    const overrideCount = Object.keys(options.npmOverrides ?? {}).length;
+    if (overrideCount > 0 && (target || !agent.distribution?.npx)) {
+        // Overrides are an npm feature. Dropping them would install an unpinned agent.
+        throw new Error(`${agent.name ?? agent.id} does not install from npm on ${platformKey}, so npmOverrides cannot be applied`);
+    }
     let result;
     if (target) {
         result = await installBinaryDistribution(agent, target, {
@@ -619,6 +629,7 @@ export async function installAcpRegistryAgent(options) {
             shimEnv: options.shimEnv,
             npmOverrides: options.npmOverrides,
             version: agent.version,
+            windows: WINDOWS,
         });
     }
     else if (agent.distribution?.uvx) {
@@ -650,33 +661,38 @@ export async function installAcpRegistryAgent(options) {
 /**
  * Installs a harness at the exact versions its registry entry pins
  * (`KnownAgentEntry.pinned`), for hosts that need the same agent on every
- * machine. Product installs keep using `installAcpRegistryAgent`.
+ * machine. The launcher and the install state use the names from
+ * `pinnedAcpHarnessPaths`, never the product install's, so both can live in
+ * one bin directory. On Windows the launcher is a `.cmd` file; start it with
+ * `acpLauncherInvocation`.
  */
 export async function installPinnedAcpHarness(options) {
-    const { entry, ...install } = options;
-    if (!entry.pinned || !entry.registryId) {
-        throw new Error(`${entry.label} (${entry.id}) has no pinned install`);
-    }
-    const version = npmVersionFromSpec(entry.pinned.package);
-    if (!version || !EXACT_VERSION.test(version)) {
-        throw new Error(`${entry.label} (${entry.id}) pins ${entry.pinned.package}, which is not an exact version`);
-    }
-    return installAcpRegistryAgent({
+    const { entry, platform, ...install } = options;
+    const pins = acpHarnessPinnedPackages(entry);
+    const windows = (platform ?? process.platform) === "win32";
+    const paths = pinnedAcpHarnessPaths(entry, install.binDir, { platform });
+    const result = await installNpxDistribution({ package: `${pins.package.name}@${pins.package.version}` }, {
         ...install,
-        registryId: entry.registryId,
-        registryAgent: {
-            id: entry.registryId,
-            name: entry.label,
-            version,
-            distribution: { npx: { package: entry.pinned.package } },
-        },
-        shimName: basename(entry.spec.command),
+        registryId: paths.stateId,
+        shimName: paths.launcherName,
         shimArgs: entry.spec.args,
         shimEnv: entry.spec.env,
-        npmOverrides: entry.pinned.dependencies,
+        npmOverrides: Object.fromEntries(pins.dependencies),
+        version: pins.package.version,
+        windows,
+        windowsLauncher: windows,
     });
+    await writeRegistryInstallMetadata({ registryId: paths.stateId, shimName: paths.launcherName, binDir: install.binDir, installRoot: install.installRoot }, {
+        source: "registry",
+        registryId: paths.stateId,
+        shimName: paths.launcherName,
+        version: result.version,
+        dependencies: result.dependencies,
+        installedAt: new Date().toISOString(),
+    });
+    return result;
 }
-export { readAcpHarnessInstallState, readAcpHarnessPinState, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
+export { readAcpHarnessInstallState, readAcpHarnessPinState, pinnedAcpHarnessPaths, acpHarnessPinnedPackages, compareCodePoints, OPENMA_NPM_HARNESS_IDS, usesOpenMaNpmLatestSource, latestNpmPackageVersion, npmPackageNameFromSpec, npmVersionFromSpec, readInstalledNpmPackageVersion, installedNpmPackageVersionFromShim, isStrictlyNewerVersion, } from "./install-state.js";
 export async function installManagedAdapter(options) {
     const fetchImpl = options.fetchImpl ?? fetch;
     const bytes = await fetchBytes(options.downloadUrl, fetchImpl);

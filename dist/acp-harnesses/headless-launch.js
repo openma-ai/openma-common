@@ -54,11 +54,12 @@ export function buildAcpHeadlessLaunch(entry, options = {}) {
             unsupported.push("model");
         }
     }
-    if (provider !== undefined && recipe.model?.providerSeparator === undefined) {
+    // Provider and thinking level travel inside the model value. Without a
+    // model, or without the syntax for them, the launch does not carry them.
+    if (provider !== undefined && (model === undefined || recipe.model?.providerSeparator === undefined)) {
         unsupported.push("provider");
     }
-    if (thinkingLevel !== undefined &&
-        recipe.model?.thinkingSeparator === undefined) {
+    if (thinkingLevel !== undefined && (model === undefined || recipe.model?.thinkingSeparator === undefined)) {
         unsupported.push("thinkingLevel");
     }
     return { args, env, unsupported };

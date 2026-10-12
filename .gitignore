@@ -3,3 +3,4 @@ node_modules/
 .consumer-links.json
 .DS_Store
 tests/live/out/
+coverage/

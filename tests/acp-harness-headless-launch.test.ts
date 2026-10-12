@@ -101,6 +101,19 @@ describe("ACP headless launch", () => {
     });
   });
 
+  it("reports a provider or thinking level that has no model to travel in", () => {
+    // Both are written inside the model value, so without a model the launch
+    // would silently lose them.
+    expect(buildAcpHeadlessLaunch(pi, { provider: "deepseek", thinkingLevel: "medium" })).toEqual({
+      args: ["--no-delegation", "--quiet-startup"],
+      env: {},
+      unsupported: ["provider", "thinkingLevel"],
+    });
+    expect(buildAcpHeadlessLaunch(pi, { provider: "deepseek" }).unsupported).toEqual(["provider"]);
+    expect(buildAcpHeadlessLaunch(pi, { thinkingLevel: "medium" }).unsupported).toEqual(["thinkingLevel"]);
+    expect(buildAcpHeadlessLaunch(pi, { model: "v4" }).unsupported).toEqual([]);
+  });
+
   it("refuses a harness that has no recipe instead of guessing one", () => {
     expect(() => buildAcpHeadlessLaunch(entry())).toThrow("Example (example) has no headless launch recipe");
   });

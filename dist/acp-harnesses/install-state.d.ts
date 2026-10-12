@@ -30,10 +30,40 @@ export interface AcpHarnessPinState {
     /** Every pinned package is installed at exactly its pinned version. */
     satisfied: boolean;
 }
+/** Orders by UTF-16 code unit, the same on every machine. `localeCompare` follows the host locale. */
+export declare function compareCodePoints(left: string, right: string): number;
+export declare function isExactVersion(version: string | undefined): version is string;
+/** Dependency pins in a stable order. Throws when one is not an exact version. */
+export declare function exactDependencyPins(pins: Record<string, string> | undefined): Array<[string, string]>;
+export interface AcpHarnessPinnedPackages {
+    package: {
+        name: string;
+        version: string;
+    };
+    dependencies: Array<[string, string]>;
+}
 /**
- * Compares the install a managed shim points at with the exact versions the
- * registry entry pins. Reads only local files. Null when the entry pins
- * nothing.
+ * The exact versions an entry pins. Throws when the entry pins nothing or
+ * names anything other than an exact version: the installer and the state
+ * reader refuse the same input.
+ */
+export declare function acpHarnessPinnedPackages(entry: KnownAgentEntry): AcpHarnessPinnedPackages;
+/**
+ * Where a pinned install lives. Its launcher name and its state directory
+ * differ from the product install's, so the two can share one bin directory
+ * and install root without overwriting each other.
+ */
+export declare function pinnedAcpHarnessPaths(entry: KnownAgentEntry, binDir: string, options?: {
+    platform?: NodeJS.Platform;
+}): {
+    stateId: string;
+    launcherName: string;
+    launcherPath: string;
+};
+/**
+ * Compares the install a pinned launcher points at with the exact versions
+ * the registry entry pins. Reads only local files. Null when the entry pins
+ * nothing; throws when its pins are not exact versions.
  */
 export declare function readAcpHarnessPinState(options: {
     entry: KnownAgentEntry;

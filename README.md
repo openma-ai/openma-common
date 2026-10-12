@@ -302,10 +302,15 @@ names stay in the registry entry:
 ```ts
 import { resolveKnownAgent } from "@openma/common/acp-harnesses/registry";
 import { buildAcpHeadlessLaunch } from "@openma/common/acp-harnesses/headless-launch";
-import { installPinnedAcpHarness, readAcpHarnessPinState } from "@openma/common/acp-harnesses/installer";
+import {
+  acpLauncherInvocation,
+  installPinnedAcpHarness,
+  pinnedAcpHarnessPaths,
+  readAcpHarnessPinState,
+} from "@openma/common/acp-harnesses/installer";
 
 const entry = resolveKnownAgent("pi-acp")!;
-const { commandPath } = await installPinnedAcpHarness({ entry, binDir });
+const { commandPath, version, dependencies } = await installPinnedAcpHarness({ entry, binDir });
 const { args, env, unsupported } = buildAcpHeadlessLaunch(entry, {
   agentDir,        // the agent's user-level configuration directory
   sessionDir,
@@ -314,22 +319,60 @@ const { args, env, unsupported } = buildAcpHeadlessLaunch(entry, {
   model: "deepseek-v4-pro",
   thinkingLevel: "medium",
 });
+if (unsupported.length > 0) throw new Error(`cannot express: ${unsupported.join(", ")}`);
+const { file, args: argv, windowsVerbatimArguments } = acpLauncherInvocation(commandPath, args);
 ```
 
-`unsupported` lists the requested options the recipe cannot express. The launch
-does not carry them, so a host that depends on one, such as `agentDir` for
-isolation, must stop instead of running. An entry without a recipe throws.
+**Launch.** `unsupported` lists every requested option the launch does not
+carry: one the recipe has no flag or variable for, and a `provider` or
+`thinkingLevel` given without a `model` (both are written inside the model
+value). A host that depends on an option, such as `agentDir` for isolation,
+must stop when the list is not empty. An entry without a recipe throws.
 
-`installPinnedAcpHarness` installs `entry.pinned`: the adapter package at one
-exact version, with `entry.pinned.dependencies` written as npm `overrides` in
-the install prefix and checked against what npm installed. It fails when a
-pinned package is missing or at another version, including when it reuses an
-existing install directory. `readAcpHarnessPinState({ entry, shimPath })`
-compares an existing install with the pins from local files only. Product
-installs are unchanged: `installAcpRegistryAgent` and `AcpAgentSetupService`
-still follow `registryDistribution` and npm's latest.
+**Pinned install.** `installPinnedAcpHarness` installs `entry.pinned`: the
+adapter package at one exact version, with `entry.pinned.dependencies` written
+as npm `overrides` in the install prefix and checked against what npm
+installed. It fails when a pinned package is missing or at another version,
+including when it reuses an existing install directory. The result carries
+`version` and `dependencies` (the installed versions), which a host should
+record with its run.
+
+A pinned install never uses the product install's names. Its launcher is
+`<shim>-pinned` (`openma-acp-pi-acp-pinned`) and its state is
+`registry/<id>-pinned/` (`install.json` and the versioned prefix), from
+`pinnedAcpHarnessPaths(entry, binDir)`. It can share a bin directory and
+install root with a product install without either overwriting the other.
+Hosts should still give benchmark installs a directory of their own.
+
+`readAcpHarnessPinState({ entry, shimPath })` compares an existing pinned
+install with the pins from local files only. It returns `null` for an entry
+that pins nothing and throws, like the installer, for pins that are not exact
+versions. Pins are applied in code-point order, so the install directory name
+is the same on every machine.
+
+`npmOverrides` on `installAcpRegistryAgent` applies to npm installs only. For
+a harness that installs as a binary or through uvx on the current platform the
+call throws instead of installing an unpinned agent.
+
+**Windows.** The pinned launcher is a `.cmd` file
+(`openma-acp-pi-acp-pinned.cmd`) that sets the entry's variables and calls the
+package's `.cmd` bin. A `.cmd` file cannot be started by `CreateProcess`, so
+start it with `acpLauncherInvocation(commandPath, args)`, which returns
+`cmd.exe /d /s /c "<line>"` with `windowsVerbatimArguments` on Windows and the
+launcher itself elsewhere. `npm` given as a bare name or a `.cmd` path runs
+through `cmd.exe` the same way; an executable path such as a bundled
+`node.exe` (`npmCommand` + `npmCommandArgs`) starts directly. The pinned
+install tests run on `verify-windows`. Product installs
+(`installAcpRegistryAgent`, `AcpAgentSetupService`) still write a POSIX shell
+shim and still follow `registryDistribution` and npm's latest.
 
 Only `pi-acp` has a recipe and pins today. The pins cover `@openma/pi-acp` and
 the `@earendil-works/*` packages it resolves. Other transitive dependencies
 still follow their own ranges. Update the pins in the same PR that moves the
 adapter to a new Pi SDK.
+
+## Coverage
+
+`pnpm test:coverage` writes `coverage/lcov.info`. CI uploads it to Codecov,
+and `codecov.yml` requires 100% coverage of the lines a pull request changes
+(`patch` target). The project-wide number is informational.

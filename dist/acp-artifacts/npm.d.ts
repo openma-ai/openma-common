@@ -24,6 +24,7 @@ export interface PreparedAcpRelease {
     command: string;
     release: NpmAcpRelease;
 }
+export declare function quoteWindowsArg(value: string): string;
 /** Validate persisted release records before trusting their paths or digest. */
 export declare function validateNpmAcpRelease(value: unknown): NpmAcpRelease;
 /** Read the release's own identity and integrity from npm; never resolve latest. */
