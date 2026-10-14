@@ -131,7 +131,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 2. dsh 与 Martty 在 `main` 上的发版提交主题为 `release: vX.Y.Z`（dsh `v0.4.36`、Martty `v0.3.0`）。openma-common 是发版 PR 合并后再打同名 tag。
 3. `git tag vX.Y.Z && git push origin vX.Y.Z`。tag 指向 `main` 上的那次提交。
 4. tag 触发发布：dsh `release.yml` 先确认 tag 在 `main` 上，再跑测试、dsh 兼容矩阵和 standalone smoke，然后用 npm OIDC 发布。Martty `package-npm.yml` 监听 `v*.*.*`。
-5. openma-common 是 `private: true` 的 git 依赖：打 tag 后更新消费方，不发 npm。
+5. openma-common 的 `v*` tag 由 `release-tag.yml` 校验后用 npm OIDC 发布 `@openma/common`；发布后再更新消费方。
 
 **Changesets。** 用来发布 `@openma/cli` / `@openma/sdk`。步骤在「本仓库」。本仓库的 `version-pr` 会跑 MySQL 集成，但没有 `Enable KVM for Litebox`；没有 `/dev/kvm` 时 Litebox 用例会失败。
 
@@ -153,7 +153,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 
 包名是 `@openma/common`（`package.json` 的 `name`）。只收录至少两个 OpenMA 表面真正共享的契约。产品自己的组件、文案、路由、存储，以及主题插件校验，留在各自的仓库。
 
-`private: true`。没有 `publishConfig`，`scripts` 里也没有 `publish`。不发 npm。`files` 是 `dist` 和 `README.md`。README「Install from Git」的安装形式是 `github:openma-ai/openma-common#v0.7.0`。同一节写明 lockfile 会把这个 tag 解析成一次提交。`dist/` 已提交：2026-10-02，`git ls-files dist` 是 216 个路径。`a83404d`（`v0.1.1`，`fix: ship prebuilt output for git consumers`）开始把预构建产物放进仓库，Git 安装因此不必跑构建脚本。已经发出的 tag 不移动；消费方能看见的变更用新 tag（README 同一节）。
+发 npm：`publishConfig` 是 `access: public`、`provenance: true`。`v*` tag 推上去后，`release-tag.yml` 先跑 `scripts/release-check.mjs --tag`，再由 `publish` job（GitHub Environment `production`，`id-token: write`）用 npm trusted publisher 执行 `npm publish`，不用 npm token；tag 必须等于 `v` + `package.json#version`，该版本已在 npm 上时 job 直接跳过，可以重跑续发。`files` 是 `dist` 和 `README.md`。`dist/` 继续提交，Git 安装（README「Install from Git」，形如 `github:openma-ai/openma-common#v0.9.0`）照常可用。`a83404d`（`v0.1.1`，`fix: ship prebuilt output for git consumers`）开始把预构建产物放进仓库。第一次发布要由 npm 上 `@openma` 的维护者在发版提交上手动执行一次 `npm publish --provenance=false`（npm 只允许给已存在的包配置 trusted publisher；本地没有 CI 身份，不能生成 provenance；`v0.9.0` 及更早的 tag 仍是 `private: true`，发不了），之后在 npm 包设置里把 trusted publisher 指向本仓库的 `release-tag.yml` 和 Environment `production`。已经发出的 tag 不移动；消费方能看见的变更用新 tag（README 同一节）。
 
 没有 `.node-version`，也没有 `.nvmrc`。`engines.node` 是 `>=20`。pnpm 版本是 `packageManager` 字段：`pnpm@11.0.8`。
 
