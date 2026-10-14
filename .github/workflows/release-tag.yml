@@ -23,3 +23,34 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Validate tag, release notes, and dist
         run: node scripts/release-check.mjs --tag
+
+  # Publish the validated tag to npm with the GitHub OIDC trusted publisher
+  # (no npm token). Idempotent: re-running a tag whose version is already on
+  # npm is a no-op, so a partial failure can be resumed by re-running the job.
+  publish:
+    needs: release-tag
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      - name: Publish @openma/common
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
+            exit 1
+          fi
+          if npm view "@openma/common@${version}" version >/dev/null 2>&1; then
+            echo "@openma/common@${version} is already on npm; nothing to do."
+            exit 0
+          fi
+          npm install -g npm@^11.5.1
+          npm publish

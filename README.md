@@ -92,9 +92,22 @@ Adapters that implement the request advertise `sessionCapabilities.fork` togethe
 
 Truncation keeps the selected assistant message and everything before it, and drops everything after it. If that message contains tool calls whose results sit after the message, adapters remove those tool calls from the truncated message. The new session stays a legal model transcript, and `session/load` replay still ends on the target message. Tool calls that already completed before that message stay as they were. The contract, client example, and dependency order are in [docs/fork-support.md](./docs/fork-support.md).
 
+## Install from npm
+
+```json
+{
+  "dependencies": {
+    "@openma/common": "^0.9.0"
+  }
+}
+```
+
+Release tags are published to npm by CI with provenance. Built `dist/` output
+is what ships, so installs do not run package lifecycle scripts.
+
 ## Install from Git
 
-Use an immutable release tag in `package.json`:
+Git installs keep working for pinned commits. Use an immutable release tag in `package.json`:
 
 ```json
 {

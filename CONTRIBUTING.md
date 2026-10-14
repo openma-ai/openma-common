@@ -119,7 +119,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 发布之后，下游另开 bump PR，把依赖改到刚发布的版本，并跑下游自己的 CI：
 
 - Martty 的 `npm/package.json` 依赖 `@openma/deepseek-harness-acp`。CHANGELOG 记录过随 0.4.29、0.4.31 的升级；#135 跟上了 0.4.35 的打包修复。
-- openma-common 打 tag 之后，两个消费仓库改到新 tag 并提交 lockfile（该仓库 `CONTRIBUTING.md` 的 release checklist）。
+- openma-common 打 tag 并发布到 npm 之后，消费仓库把 `@openma/common` 改到新版本并提交 lockfile（该仓库 `CONTRIBUTING.md` 的 release checklist）。
 
 ## 发布 / Release
 
@@ -131,7 +131,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 2. dsh 与 Martty 在 `main` 上的发版提交主题为 `release: vX.Y.Z`（dsh `v0.4.36`、Martty `v0.3.0`）。openma-common 是发版 PR 合并后再打同名 tag。
 3. `git tag vX.Y.Z && git push origin vX.Y.Z`。tag 指向 `main` 上的那次提交。
 4. tag 触发发布：dsh `release.yml` 先确认 tag 在 `main` 上，再跑测试、dsh 兼容矩阵和 standalone smoke，然后用 npm OIDC 发布。Martty `package-npm.yml` 监听 `v*.*.*`。
-5. openma-common 是 `private: true` 的 git 依赖：打 tag 后更新消费方，不发 npm。
+5. openma-common 的 `v*` tag 由 `release-tag.yml` 校验后用 npm OIDC 发布 `@openma/common`；发布后再更新消费方。
 
 **Changesets。** 用来发布 `@openma/cli` / `@openma/sdk`。步骤在「本仓库」。本仓库的 `version-pr` 会跑 MySQL 集成，但没有 `Enable KVM for Litebox`；没有 `/dev/kvm` 时 Litebox 用例会失败。
 
@@ -153,7 +153,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 
 包名是 `@openma/common`（`package.json` 的 `name`）。只收录至少两个 OpenMA 表面真正共享的契约。产品自己的组件、文案、路由、存储，以及主题插件校验，留在各自的仓库。
 
-`private: true`。没有 `publishConfig`，`scripts` 里也没有 `publish`。不发 npm。`files` 是 `dist` 和 `README.md`。README「Install from Git」的安装形式是 `github:openma-ai/openma-common#v0.7.0`。同一节写明 lockfile 会把这个 tag 解析成一次提交。`dist/` 已提交：2026-10-02，`git ls-files dist` 是 216 个路径。`a83404d`（`v0.1.1`，`fix: ship prebuilt output for git consumers`）开始把预构建产物放进仓库，Git 安装因此不必跑构建脚本。已经发出的 tag 不移动；消费方能看见的变更用新 tag（README 同一节）。
+发 npm：`publishConfig` 是 `access: public`、`provenance: true`。`v*` tag 推上去后，`release-tag.yml` 先跑 `scripts/release-check.mjs --tag`，再由 `publish` job（GitHub Environment `production`，`id-token: write`）用 npm trusted publisher 执行 `npm publish`，不用 npm token；tag 必须等于 `v` + `package.json#version`，该版本已在 npm 上时 job 直接跳过，可以重跑续发。`files` 是 `dist` 和 `README.md`。`dist/` 继续提交，Git 安装（README「Install from Git」，形如 `github:openma-ai/openma-common#v0.9.0`）照常可用。`a83404d`（`v0.1.1`，`fix: ship prebuilt output for git consumers`）开始把预构建产物放进仓库。首个 npm 版本 `0.9.0` 由 npm 上 `@openma` 的维护者手动发布（2026-10-14，`npm publish --provenance=false`，`dist/` 与 `src/` 和 tag `v0.9.0` 一致；npm 只允许给已存在的包配置 trusted publisher，本地也没有 CI 身份可生成 provenance）。npm 包设置里的 trusted publisher 指向本仓库的 `release-tag.yml` 和 Environment `production`；从 `v0.9.1` 起由 CI 发布。已经发出的 tag 不移动；消费方能看见的变更用新 tag（README 同一节）。
 
 没有 `.node-version`，也没有 `.nvmrc`。`engines.node` 是 `>=20`。pnpm 版本是 `packageManager` 字段：`pnpm@11.0.8`。
 
