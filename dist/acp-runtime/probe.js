@@ -4,7 +4,6 @@ import { mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isAuthenticationRequiredError } from "./errors.js";
-import { NodeSpawner } from "./spawners/node.js";
 const ACP_CLIENT_CAPABILITIES = {
     fs: { readTextFile: true, writeTextFile: true },
     terminal: true,
@@ -221,7 +220,7 @@ async function spawnProbeAgent(options) {
         ...(options.agent.env ?? {}),
         ...(options.env ?? {}),
     };
-    const child = await (options.spawner ?? new NodeSpawner()).spawn({
+    const child = await (options.spawner ?? (await defaultSpawner())).spawn({
         ...options.agent,
         cwd: options.cwd,
         env: mergedEnv,
@@ -503,7 +502,7 @@ async function spawnAuthAgent(options) {
     const env = mergedStringEnv(options.agent.env, options.env);
     const diagnosticLines = [];
     const onDiagnosticLine = options.agent.onDiagnosticLine;
-    const child = await (options.spawner ?? new NodeSpawner()).spawn({
+    const child = await (options.spawner ?? (await defaultSpawner())).spawn({
         ...options.agent,
         cwd: options.cwd,
         env: { ...(options.agent.env ?? {}), ...(options.env ?? {}) },
@@ -868,5 +867,15 @@ function unauthenticatedDiagnostic(lines) {
 }
 async function allowDiagnosticsToFlush() {
     await new Promise((resolve) => setTimeout(resolve, 25));
+}
+/**
+ * The local-process spawner, loaded on first use. A static import would put
+ * node:child_process into the graph of the acp-runtime entry, which
+ * re-exports this module and is also imported by runtimes without
+ * child processes, such as Cloudflare Workers.
+ */
+async function defaultSpawner() {
+    const { NodeSpawner } = await import("./spawners/node.js");
+    return new NodeSpawner();
 }
 //# sourceMappingURL=probe.js.map
