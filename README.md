@@ -97,7 +97,7 @@ Truncation keeps the selected assistant message and everything before it, and dr
 ```json
 {
   "dependencies": {
-    "@openma/common": "^0.9.1"
+    "@openma/common": "^0.9.0"
   }
 }
 ```
