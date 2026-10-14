@@ -119,7 +119,7 @@ Dependabot 和手工 lockfile 更新都要做兼容性检查。CI 变绿只是�
 发布之后，下游另开 bump PR，把依赖改到刚发布的版本，并跑下游自己的 CI：
 
 - Martty 的 `npm/package.json` 依赖 `@openma/deepseek-harness-acp`。CHANGELOG 记录过随 0.4.29、0.4.31 的升级；#135 跟上了 0.4.35 的打包修复。
-- openma-common 打 tag 之后，两个消费仓库改到新 tag 并提交 lockfile（该仓库 `CONTRIBUTING.md` 的 release checklist）。
+- openma-common 打 tag 并发布到 npm 之后，消费仓库把 `@openma/common` 改到新版本并提交 lockfile（该仓库 `CONTRIBUTING.md` 的 release checklist）。
 
 ## 发布 / Release
 
