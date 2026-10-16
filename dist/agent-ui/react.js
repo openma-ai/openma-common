@@ -1,6 +1,6 @@
 "use client";
 import { jsx as _jsx } from "react/jsx-runtime";
-import { useEffect, useRef, useSyncExternalStore, } from "react";
+import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, } from "react";
 import * as smd from "streaming-markdown";
 /** Frame batches driven by a jerk-limited velocity controller. */
 export function createStreamTextPacer({ write, schedule, cancel, onDrain }) {
@@ -295,14 +295,14 @@ function syncProjectionLines(host, lines) {
 }
 export function AgentUIStreamingThoughtProjection({ store, turnId, prefixSkip, fallback, mode, }) {
     const hostRef = useRef(null);
-    useEffect(() => {
+    useLayoutEffect(() => {
         const host = hostRef.current;
         if (!host)
             return;
         let text = "";
         let replaying = true;
         const render = () => {
-            const lines = thoughtProjectionLines(text, fallback);
+            const lines = thoughtProjectionLines(text || fallback, fallback);
             if (mode === "headline") {
                 host.textContent = thoughtHeadline(text) || lines[0] || fallback;
             }
@@ -326,9 +326,8 @@ export function AgentUIStreamingThoughtProjection({ store, turnId, prefixSkip, f
             render();
         return unsubscribe;
     }, [fallback, mode, prefixSkip, store, turnId]);
-    if (mode === "headline") {
-        return _jsx("span", { ref: hostRef, children: fallback });
-    }
-    return (_jsx("span", { ref: hostRef, className: "block min-w-0", "data-thought-projection": "lines", children: thoughtProjectionLines(fallback, fallback).map((line, index) => (_jsx("span", { "data-thought-projection-line": "true", className: "block min-w-0 truncate leading-6", children: line }, `${index}-${line}`))) }));
+    if (mode === "headline")
+        return _jsx("span", { ref: hostRef });
+    return (_jsx("span", { ref: hostRef, className: "block min-w-0", "data-thought-projection": "lines" }));
 }
 //# sourceMappingURL=react.js.map
