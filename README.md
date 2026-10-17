@@ -97,7 +97,7 @@ Truncation keeps the selected assistant message and everything before it, and dr
 ```json
 {
   "dependencies": {
-    "@openma/common": "^0.9.1"
+    "@openma/common": "^0.9.2"
   }
 }
 ```
@@ -112,7 +112,7 @@ Git installs keep working for pinned commits. Use an immutable release tag in `p
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.9.1"
+    "@openma/common": "github:openma-ai/openma-common#v0.9.2"
   }
 }
 ```
