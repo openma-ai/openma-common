@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { buildAcpHeadlessLaunch } from "../src/acp-harnesses/headless-launch.js";
+import type { SessionConfigOption } from "@agentclientprotocol/sdk";
+
+import {
+  buildAcpHeadlessLaunch,
+  resolveAcpHeadlessThinkingLevel,
+} from "../src/acp-harnesses/headless-launch.js";
 import { OVERLAY_AGENTS, type KnownAgentEntry } from "../src/acp-harnesses/known-agents.js";
 import { _resetRegistryCache, loadRegistry } from "../src/acp-harnesses/registry.js";
 
@@ -116,6 +121,78 @@ describe("ACP headless launch", () => {
 
   it("refuses a harness that has no recipe instead of guessing one", () => {
     expect(() => buildAcpHeadlessLaunch(entry())).toThrow("Example (example) has no headless launch recipe");
+  });
+});
+
+describe("ACP headless thinking level", () => {
+  const thinking = (currentValue: string, values: string[]): SessionConfigOption => ({
+    id: "thinking",
+    name: "Thinking",
+    category: "thought_level",
+    type: "select",
+    currentValue,
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const model: SessionConfigOption = {
+    id: "model",
+    name: "Model",
+    category: "model",
+    type: "select",
+    currentValue: "deepseek/deepseek-flash",
+    options: [{ value: "deepseek/deepseek-flash", name: "DeepSeek Flash" }],
+  };
+
+  it("reports the level the session runs at when the harness changed the requested one", () => {
+    // The option @openma/pi-acp 0.1.7 with the Pi SDK 1.1.0 returned from
+    // `session/new` for `--model deepseek/deepseek-flash:medium` (captured in
+    // openma-ai/openma-common#45): Pi has no `medium` for this model.
+    const reported = thinking("high", ["off", "low", "high", "max"]);
+
+    expect(resolveAcpHeadlessThinkingLevel([model, reported], "medium")).toEqual({
+      requested: "medium",
+      effective: "high",
+      available: ["off", "low", "high", "max"],
+      status: "adjusted",
+    });
+  });
+
+  it("confirms a level the session runs at as requested", () => {
+    expect(resolveAcpHeadlessThinkingLevel([thinking("high", ["off", "high"])], "high")).toMatchObject({
+      effective: "high",
+      status: "applied",
+    });
+  });
+
+  it("reads grouped levels", () => {
+    const grouped: SessionConfigOption = {
+      id: "thinking",
+      name: "Thinking",
+      category: "thought_level",
+      type: "select",
+      currentValue: "b",
+      options: [
+        { group: "one", name: "One", options: [{ value: "a", name: "a" }] },
+        { group: "two", name: "Two", options: [{ value: "b", name: "b" }] },
+      ],
+    };
+
+    expect(resolveAcpHeadlessThinkingLevel([grouped], "a").available).toEqual(["a", "b"]);
+  });
+
+  it("says so when the session reports no thinking level", () => {
+    const unreported = { requested: "medium", available: [], status: "unreported" };
+    const toggle: SessionConfigOption = {
+      id: "thinking",
+      name: "Thinking",
+      category: "thought_level",
+      type: "boolean",
+      currentValue: true,
+    };
+
+    expect(resolveAcpHeadlessThinkingLevel([], "medium")).toEqual(unreported);
+    expect(resolveAcpHeadlessThinkingLevel([model], "medium")).toEqual(unreported);
+    // An on/off switch names no level to compare with.
+    expect(resolveAcpHeadlessThinkingLevel([toggle], "medium")).toEqual(unreported);
   });
 });
 

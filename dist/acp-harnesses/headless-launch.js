@@ -64,4 +64,23 @@ export function buildAcpHeadlessLaunch(entry, options = {}) {
     }
     return { args, env, unsupported };
 }
+/**
+ * Compares the thinking level a headless launch requested with the one the
+ * started session reports in its ACP `thought_level` config option. A harness
+ * resolves the level against the model's own capabilities and does not fail
+ * when it differs, so the launch arguments alone do not say what ran.
+ */
+export function resolveAcpHeadlessThinkingLevel(configOptions, requested) {
+    const option = configOptions.find((candidate) => candidate.type === "select" && candidate.category === "thought_level");
+    if (option?.type !== "select") {
+        return { requested, available: [], status: "unreported" };
+    }
+    const available = option.options.flatMap((choice) => "options" in choice ? choice.options.map(({ value }) => value) : [choice.value]);
+    return {
+        requested,
+        effective: option.currentValue,
+        available,
+        status: option.currentValue === requested ? "applied" : "adjusted",
+    };
+}
 //# sourceMappingURL=headless-launch.js.map
