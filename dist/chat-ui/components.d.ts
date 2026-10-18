@@ -175,6 +175,8 @@ export interface AgentUITurnViewProps {
     density?: AgentChatDensity;
     /** Deterministic clock for tests and non-live projections. */
     now?: number;
+    /** Initial expansion of a non-streaming turn's process strip. */
+    defaultProcessOpen?: boolean;
 }
 export interface AgentChatViewSlots {
     empty?: ReactNode;
@@ -226,6 +228,6 @@ export declare function AgentChatView({ sessionId, phase, surface, turns, though
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
 export declare function isTerminalTurnStatus(status: SessionTurnStatus): boolean;
-export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, }: AgentUITurnViewProps): import("react").JSX.Element;
+export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, defaultProcessOpen, }: AgentUITurnViewProps): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=components.d.ts.map

@@ -3,7 +3,7 @@ import { jsx as _jsx } from "react/jsx-runtime";
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, } from "react";
 import * as smd from "streaming-markdown";
 /** Frame batches driven by a jerk-limited velocity controller. */
-export function createStreamTextPacer({ write, schedule, cancel, onDrain }) {
+export function createStreamTextPacer({ write, schedule, cancel, onDrain, now = () => performance.now(), }) {
     let pending = "";
     let scheduled = null;
     let disposed = false;
@@ -14,10 +14,9 @@ export function createStreamTextPacer({ write, schedule, cancel, onDrain }) {
     let velocity = 1;
     let acceleration = 0;
     let credit = 0;
-    let lastStep = performance.now();
+    let lastStep = now();
     let lastWrite = -Infinity;
     let renderCost = 0;
-    const now = () => performance.now();
     const emit = (count) => {
         // Don't split UTF-16 surrogate pairs between parser writes.
         if (count < pending.length && /[\uD800-\uDBFF]/.test(pending[count - 1]))
@@ -42,9 +41,11 @@ export function createStreamTextPacer({ write, schedule, cancel, onDrain }) {
         scheduled = null;
         if (disposed || !pending)
             return;
-        // Integrate in small steps so dropped frames don't change the controller
-        // or dump the whole queue. Integer credit keeps slow output lossless.
-        let elapsed = Math.min(32, Math.max(0, now() - lastStep));
+        // Integrate the real elapsed time in small steps. Discarding the part of
+        // a slow frame beyond a budget turned expensive frames into a slower
+        // reveal; the jerk-limited controller already keeps a long gap from
+        // dumping the queue at once. Integer credit keeps slow output lossless.
+        let elapsed = Math.max(0, now() - lastStep);
         lastStep = now();
         while (elapsed > 0) {
             const dt = Math.min(4, elapsed);
@@ -101,6 +102,20 @@ export function createStreamTextPacer({ write, schedule, cancel, onDrain }) {
         },
     };
 }
+/** Elements that hold blocks, never text, while a stream is open. */
+const BLOCK_CONTAINERS = new Set([
+    "UL", "OL", "BLOCKQUOTE", "TABLE", "THEAD", "TBODY", "TR",
+]);
+/** Characters streaming-markdown may still turn into markup. */
+const MARKUP_CANDIDATES = new Set("\\`*_~|<>[]()!#$+-=:^&".split(""));
+/** One visible code point that cannot open or close markdown syntax. */
+function isPlainHeldCharacter(held) {
+    const characters = Array.from(held);
+    if (characters.length !== 1)
+        return false;
+    const character = characters[0];
+    return !MARKUP_CANDIDATES.has(character) && /^[\p{L}\p{N}\p{M}\p{P}\p{S}]$/u.test(character);
+}
 /** React binding for the framework-neutral Agent UI store. */
 export function useAgentUIState(store) {
     return useSyncExternalStore((notify) => store.subscribe(() => notify()), store.getSnapshot, store.getSnapshot);
@@ -117,38 +132,38 @@ export function AgentUIStreamingMarkdown({ store, turnId, kind, className = "", 
         if (!host)
             return;
         host.replaceChildren();
-        const parser = smd.parser(smd.default_renderer(host));
+        const renderer = smd.default_renderer(host);
+        const parser = smd.parser(renderer);
         // Consume records synchronously after parser writes. Text-only deltas need
         // no decoration; the callback never scans the accumulated transcript.
         const mutations = decorateNodes ? new MutationObserver(() => { }) : null;
         mutations?.observe(host, { childList: true, subtree: true, attributes: true, attributeFilter: ["href"] });
         let heldTail = null;
-        let lastWritten = "";
         const clearTail = () => {
             heldTail?.remove();
             heldTail = null;
         };
-        const deepestLast = (node) => {
-            let current = node;
-            while (current.lastElementChild) {
-                const next = current.lastElementChild;
-                if (next.matches("img, br, hr"))
-                    break;
-                current = next;
-            }
-            return current;
-        };
+        // streaming-markdown holds the last character back until the next one
+        // decides whether it opens markup. When the stream pauses, show a held
+        // plain-text character exactly where the parser will write it: its
+        // current insertion node. Markup candidates and characters the parser is
+        // still classifying (line starts, line breaks, URLs) stay hidden, so
+        // revealed text only ever grows in place.
         const showTail = () => {
             clearTail();
-            const character = Array.from(lastWritten).at(-1);
-            if (!character)
+            if (parser.token !== parser.tokens[parser.len])
                 return;
-            heldTail = document.createTextNode(character);
-            deepestLast(host).append(heldTail);
+            const held = parser.pending;
+            const node = renderer.data.nodes[renderer.data.index];
+            if (!node || node === host || !isPlainHeldCharacter(held))
+                return;
+            if (BLOCK_CONTAINERS.has(node.tagName))
+                return;
+            heldTail = document.createTextNode(held);
+            node.append(heldTail);
         };
         const write = (text) => {
             clearTail();
-            lastWritten = text;
             smd.parser_write(parser, text);
             if (mutations && decorateNodes) {
                 const changed = new Set();

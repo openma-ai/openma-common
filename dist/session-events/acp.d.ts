@@ -210,7 +210,6 @@ export declare function sessionUpdateInner(event: unknown): Record<string, unkno
 export declare function sessionUpdateType(event: unknown): string | undefined;
 export declare function sanitizeThoughtText(text: string): string;
 export declare function parseAcpEvent(event: unknown): ParsedAcpEvent;
-export declare function mergeStreamingText(accumulated: string, incoming: string): string;
 export declare function createTurnProjector(): {
     apply(entry: {
         payload: unknown;
