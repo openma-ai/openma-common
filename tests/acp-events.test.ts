@@ -591,6 +591,31 @@ describe("incremental ACP turn projection", () => {
     ]);
   });
 
+  it("keeps snapshot text equal to the timeline after every chunk", () => {
+    const projector = createTurnProjector();
+    const events = [
+      { sessionUpdate: "agent_thought_chunk", messageId: "t1", content: { type: "text", text: "plan " } },
+      { sessionUpdate: "agent_thought_chunk", messageId: "t1", content: { type: "text", text: "more" } },
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "a" } },
+      { sessionUpdate: "agent_message_chunk", messageId: "m1", content: { type: "text", text: "b" } },
+      { sessionUpdate: "agent_thought_chunk", messageId: "t2", content: { type: "text", text: "again" } },
+      { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "c" } },
+      { sessionUpdate: "agent_message_chunk", messageId: "m2", content: { type: "text", text: "d" } },
+    ];
+    for (const payload of events) {
+      projector.apply({ payload });
+      const out = projector.snapshot();
+      const join = (kind: string) => out.timeline
+        .filter((item) => item.kind === kind)
+        .map((item) => ("text" in item ? item.text : ""))
+        .join("");
+      expect(out.assistantText).toBe(join("assistant_text"));
+      expect(out.thoughtText).toBe(join("thought"));
+    }
+    expect(projector.snapshot().assistantText).toBe("abcd");
+    expect(projector.snapshot().thoughtText).toBe("plan moreagain");
+  });
+
   it("T2b keeps delta chunks that repeat the segment tail", () => {
     // Recorded Codex tokens: "#104" then "4", "=100" then "00", "\n\n" twice.
     const chunk = (text: string) => ({
