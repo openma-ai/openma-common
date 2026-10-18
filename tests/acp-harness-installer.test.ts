@@ -1,5 +1,5 @@
-import { access, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 
@@ -457,6 +457,54 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
       latestVersion: "0.1.6",
     });
 
+    await rm(root, { recursive: true, force: true });
+  });
+
+  unixIt("keeps only the active and the previous version after an upgrade", async () => {
+    const root = join(tmpdir(), `openma-acp-prune-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const registryDir = join(root, "registry", "example-agent");
+    const fakeNpm = await writeFakeNpm(root);
+    const install = (version: string) =>
+      installAcpRegistryAgent({
+        registryId: "example-agent",
+        shimName: "example-agent",
+        binDir,
+        installRoot: root,
+        npmCommand: fakeNpm,
+        registryAgent: {
+          id: "example-agent",
+          version,
+          distribution: { npx: { package: `@example/agent@${version}` } },
+        },
+      });
+    const versions = async () =>
+      (await readdir(registryDir)).filter((name) => name.startsWith("v_")).sort();
+
+    await install("1.0.0");
+    await install("2.0.0");
+    // An install interrupted by a crash, and one still running in another process.
+    const crashed = join(registryDir, "v_0.9.0_dead.tmp-999999-1");
+    const running = join(registryDir, `v_3.1.0_live.tmp-${process.pid}-1`);
+    await mkdir(crashed, { recursive: true });
+    await mkdir(running, { recursive: true });
+
+    await install("3.0.0");
+
+    const left = await versions();
+    expect(left.filter((name) => !name.includes(".tmp-")).map((name) => name.split("_")[1]))
+      .toEqual(["2.0.0", "3.0.0"]);
+    expect(left).toContain(basename(running));
+    expect(left).not.toContain(basename(crashed));
+    // The launcher still starts the active version.
+    const command = shellShimCommand(await readFile(join(binDir, "example-agent"), "utf8"));
+    expect(command).toContain("v_3.0.0_");
+    await expect(access(command)).resolves.toBeUndefined();
+
+    // Reinstalling the active version is not an upgrade: the previous one stays.
+    await install("3.0.0");
+    expect((await versions()).filter((name) => !name.includes(".tmp-")).map((name) => name.split("_")[1]))
+      .toEqual(["2.0.0", "3.0.0"]);
     await rm(root, { recursive: true, force: true });
   });
 });

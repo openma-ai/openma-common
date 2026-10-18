@@ -306,6 +306,62 @@ function requireInstallVersion(version: string | undefined, context: string): st
   return trimmed;
 }
 
+function registryInstallDir(root: string, registryId: string): string {
+  return join(root, "registry", sanitizePathComponent(registryId));
+}
+
+/** The version directory a launcher starts, by name. Works for the POSIX
+ *  shim and the Windows launcher alike: both embed the absolute path. */
+async function activeInstallDirName(registryDir: string, shimPath: string): Promise<string | undefined> {
+  const [shim, entries] = await Promise.all([
+    readFile(shimPath, "utf8").catch(() => ""),
+    readdir(registryDir).catch(() => [] as string[]),
+  ]);
+  if (!shim) return undefined;
+  return entries.find(
+    (name) => name.startsWith("v_") && !name.includes(".tmp-")
+      && (shim.includes(`/${name}/`) || shim.includes(`\\${name}\\`)),
+  );
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/**
+ * Every upgrade installs into a fresh version directory and nothing removed
+ * the old ones, so a harness kept every version it ever had — gigabytes for
+ * the npm-packaged ones. After the launcher switches to a new version, keep
+ * it and the one it replaced (sessions started before the upgrade still run
+ * from it) and remove the rest, plus staging left by installs that died.
+ * Housekeeping only: a failure here never fails the install.
+ */
+async function pruneSupersededInstalls(
+  registryDir: string,
+  shimPath: string,
+  previous: string | undefined,
+): Promise<void> {
+  const active = await activeInstallDirName(registryDir, shimPath);
+  if (!active) return;
+  const entries = await readdir(registryDir).catch(() => [] as string[]);
+  for (const name of entries) {
+    if (!name.startsWith("v_")) continue;
+    const staging = /\.tmp-(\d+)-/.exec(name);
+    if (staging) {
+      if (processAlive(Number(staging[1]))) continue;
+    } else if (active === previous || name === active || name === previous) {
+      // Reinstalling the active version is not an upgrade; keep what is there.
+      continue;
+    }
+    await rm(join(registryDir, name), { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 function registryInstallMetadataPath(root: string, registryId: string): string {
   return join(root, "registry", sanitizePathComponent(registryId), "install.json");
 }
@@ -852,6 +908,10 @@ export async function installAcpRegistryAgent(options: InstallAcpRegistryAgentOp
       `${agent.name ?? agent.id} does not install from npm on ${platformKey}, so npmOverrides cannot be applied`,
     );
   }
+  const installRoot = options.installRoot ?? options.binDir;
+  const registryDir = registryInstallDir(installRoot, options.registryId);
+  const shimPath = join(options.binDir, options.shimName);
+  const previous = await activeInstallDirName(registryDir, shimPath);
   let result: InstallResult;
   if (target) {
     result = await installBinaryDistribution(agent, target, {
@@ -905,6 +965,7 @@ export async function installAcpRegistryAgent(options: InstallAcpRegistryAgentOp
     ...(result.dependencies ? { dependencies: result.dependencies } : {}),
     installedAt: new Date().toISOString(),
   });
+  await pruneSupersededInstalls(registryDir, shimPath, previous);
   return result;
 }
 
@@ -928,6 +989,9 @@ export async function installPinnedAcpHarness(options: InstallPinnedAcpHarnessOp
   const pins = acpHarnessPinnedPackages(entry);
   const windows = (platform ?? process.platform) === "win32";
   const paths = pinnedAcpHarnessPaths(entry, install.binDir, { platform });
+  const registryDir = registryInstallDir(install.installRoot ?? install.binDir, paths.stateId);
+  const shimPath = join(install.binDir, paths.launcherName);
+  const previous = await activeInstallDirName(registryDir, shimPath);
   const result = await installNpxDistribution(
     { package: `${pins.package.name}@${pins.package.version}` },
     {
@@ -953,6 +1017,7 @@ export async function installPinnedAcpHarness(options: InstallPinnedAcpHarnessOp
       installedAt: new Date().toISOString(),
     },
   );
+  await pruneSupersededInstalls(registryDir, shimPath, previous);
   return result;
 }
 
