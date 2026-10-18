@@ -225,8 +225,6 @@ export type AgentChatViewProps = AgentChatViewBaseProps & (AgentChatViewHostTurn
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
 export declare function AgentChatView({ sessionId, phase, surface, turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density, }: AgentChatViewProps): import("react").JSX.Element;
-/** Backchat's complete turn component over the common Agent UI state shape.
- * Host products only supply content renderers and localized copy. */
 export declare function isTerminalTurnStatus(status: SessionTurnStatus): boolean;
 export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, defaultProcessOpen, }: AgentUITurnViewProps): import("react").JSX.Element;
 export {};

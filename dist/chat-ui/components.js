@@ -331,24 +331,20 @@ function ChatComposerFrame({ slots, home = false, style, }) {
 }
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
+// A Record keeps the classification exhaustive at compile time.
+const TERMINAL_TURN_STATUS = {
+    queued: false,
+    running: false,
+    unknown: false,
+    complete: true,
+    completed: true,
+    error: true,
+    errored: true,
+    cancelled: true,
+    terminated: true,
+};
 export function isTerminalTurnStatus(status) {
-    switch (status) {
-        case "queued":
-        case "running":
-        case "unknown":
-            return false;
-        case "complete":
-        case "completed":
-        case "error":
-        case "errored":
-        case "cancelled":
-        case "terminated":
-            return true;
-        default: {
-            const exhaustive = status;
-            return exhaustive;
-        }
-    }
+    return TERMINAL_TURN_STATUS[status];
 }
 export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, defaultProcessOpen = false, }) {
     const isStreaming = turn.status === "running";
@@ -444,7 +440,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                             item,
                             section: "process",
                             live: isStreaming && item === finalItem,
-                            prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                            prefixSkip: assistantPrefixes.get(item.id),
                         }) }, item.id));
                 }
                 continue;
@@ -556,7 +552,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                     item,
                                     section: "answer",
                                     live,
-                                    prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                                    prefixSkip: assistantPrefixes.get(item.id),
                                 }) }, item.id));
                         }
                         if (item.kind === "raw" && slots.renderRaw) {
@@ -584,6 +580,8 @@ function useAgentUITurnElapsedSeconds(turn, isStreaming, fixedNow) {
     }, [fixedNow, isStreaming]);
     return agentUITurnElapsedSeconds(turn, fixedNow ?? clock);
 }
+/** Text offset of every assistant message (or thought) in the turn, keyed by
+ * item id. Every item of the requested kind has an entry. */
 function streamPrefixes(items, kind) {
     const prefixes = new Map();
     let total = 0;

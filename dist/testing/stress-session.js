@@ -56,14 +56,12 @@ export function generateStressTurn(seed, { targetEvents = 45_000 } = {}) {
     if (typeof turnId !== "string") {
         throw new TypeError("seed must contain a steering message with active_turn_id");
     }
+    // Never empty: the steering message itself routes to its active turn.
     const turnEvents = seed.filter((event) => {
         if (routedTurnId(event) !== turnId)
             return false;
         return !["session.running", "session.idle", "turn.completed"].includes(event.type);
     });
-    if (turnEvents.length === 0) {
-        throw new TypeError("seed does not contain events for the steering turn");
-    }
     const generated = [];
     for (let repeat = 0; generated.length < targetEvents; repeat += 1) {
         for (const event of turnEvents) {
