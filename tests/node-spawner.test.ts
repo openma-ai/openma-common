@@ -325,7 +325,7 @@ setInterval(() => {}, 1000);
 const spawner = new NodeSpawner();
 const handle = await spawner.spawn({ command: process.execPath, args: ["-e", script] });
 const [childPid, grandchildPid] = (await readFirstLine(handle.stdout)).split(":").map(Number);
-await writeFile(${JSON.stringify(reportPath)}, JSON.stringify({
+const report = JSON.stringify({
   childPid,
   grandchildPid,
   electron: process.versions.electron ?? null,
@@ -334,8 +334,11 @@ await writeFile(${JSON.stringify(reportPath)}, JSON.stringify({
   sigint: process.listenerCount("SIGINT"),
   sigterm: process.listenerCount("SIGTERM"),
   exit: process.listenerCount("exit"),
-}));
+});
+// Install test handlers before publishing the report: the test signals the
+// host as soon as it reads the file, so a handler registered afterwards races.
 ${afterReport}
+await writeFile(${JSON.stringify(reportPath)}, report);
 setInterval(() => {}, 1000);
 `;
 }

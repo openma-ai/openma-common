@@ -24,7 +24,7 @@ export function projectAcpChatTurn(input, options = {}) {
     rendered.timeline.forEach((entry, index) => {
         if (entry.kind === "assistant_text") {
             items.push({
-                id: `${input.id}:assistant:${index}`,
+                id: `${input.id}:assistant:${entry.segmentId ?? index}`,
                 kind: "message",
                 role: "assistant",
                 text: entry.text,
@@ -38,9 +38,7 @@ export function projectAcpChatTurn(input, options = {}) {
         }
         if (entry.kind === "thought") {
             items.push({
-                id: entry.messageId
-                    ? `${input.id}:thought:${entry.messageId}`
-                    : `${input.id}:thought:${index}`,
+                id: `${input.id}:thought:${entry.segmentId ?? index}`,
                 ...(entry.messageId ? { messageId: entry.messageId } : {}),
                 kind: "thinking",
                 role: "assistant",
@@ -53,6 +51,18 @@ export function projectAcpChatTurn(input, options = {}) {
                     durationSeconds: thoughtDurations.get(thoughtTimingKey(entry.messageId)) ?? 0,
                 },
             });
+            return;
+        }
+        if (entry.kind === "user_input") {
+            const userInput = {
+                id: entry.clientId
+                    ? `${input.id}:user-input:${entry.clientId}`
+                    : `${input.id}:user-input:${index}`,
+                kind: "user_input",
+                text: entry.text,
+                ...(entry.clientId ? { clientId: entry.clientId } : {}),
+            };
+            items.push(userInput);
             return;
         }
         if (options.omitToolIds?.has(entry.toolCallId))

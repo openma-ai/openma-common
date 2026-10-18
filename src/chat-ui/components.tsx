@@ -23,6 +23,7 @@ import type {
   AgentUIRawItem,
   AgentUITimelineItem,
   AgentUIToolItem,
+  AgentUIUserInputItem,
   AgentUITurnState,
 } from "../agent-ui/index.js";
 import {
@@ -276,24 +277,16 @@ export interface ChatThoughtEventProjection {
 }
 
 export function projectChatThoughtEvent({
-  text,
   live,
   liveFallback,
   completedLabel,
-  renderLiveSummary,
 }: {
-  text: string;
   live: boolean;
   liveFallback: ReactNode;
   completedLabel: ReactNode;
-  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
 }): ChatThoughtEventProjection {
   if (live) {
-    const fallback = text.trim() || liveFallback;
-    return {
-      multiline: true,
-      summary: renderLiveSummary?.(fallback) ?? fallback,
-    };
+    return { summary: liveFallback };
   }
   return {
     leading: (
@@ -308,11 +301,9 @@ export function projectChatThoughtEvent({
 
 export function ChatThoughtEventRow({
   live,
-  text,
   liveFallback,
   completedLabel,
   projection,
-  renderLiveSummary,
   renderBody,
 }: {
   live: boolean;
@@ -320,7 +311,6 @@ export function ChatThoughtEventRow({
   liveFallback: ReactNode;
   completedLabel: ReactNode;
   projection?: ChatThoughtEventProjection;
-  renderLiveSummary?: (fallback: ReactNode) => ReactNode;
   renderBody: (input: { live: boolean }) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -330,11 +320,9 @@ export function ChatThoughtEventRow({
   const resolvedProjection =
     projection ??
     projectChatThoughtEvent({
-      text,
       live,
       liveFallback,
       completedLabel,
-      renderLiveSummary,
     });
 
   const toggleOpen = () => {
@@ -729,6 +717,9 @@ export interface AgentUITurnSlots {
   renderTool: (
     input: AgentUITurnRenderContext & { tool: AgentUIToolItem },
   ) => ReactNode;
+  renderUserInput?: (
+    input: AgentUITurnRenderContext & { item: AgentUIUserInputItem },
+  ) => ReactNode;
   renderRaw?: (
     input: AgentUITurnRenderContext & { item: AgentUIRawItem },
   ) => ReactNode;
@@ -797,6 +788,8 @@ export interface AgentUITurnViewProps {
   density?: AgentChatDensity;
   /** Deterministic clock for tests and non-live projections. */
   now?: number;
+  /** Initial expansion of a non-streaming turn's process strip. */
+  defaultProcessOpen?: boolean;
 }
 
 export interface AgentChatViewSlots {
@@ -1096,6 +1089,23 @@ function ChatComposerFrame({
 
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
+// A Record keeps the classification exhaustive at compile time.
+const TERMINAL_TURN_STATUS: Record<SessionTurnStatus, boolean> = {
+  queued: false,
+  running: false,
+  unknown: false,
+  complete: true,
+  completed: true,
+  error: true,
+  errored: true,
+  cancelled: true,
+  terminated: true,
+};
+
+export function isTerminalTurnStatus(status: SessionTurnStatus): boolean {
+  return TERMINAL_TURN_STATUS[status];
+}
+
 export function AgentUITurnView({
   sessionId,
   turn,
@@ -1108,15 +1118,31 @@ export function AgentUITurnView({
   activityTools = "latest",
   density = "comfortable",
   now,
+  defaultProcessOpen = false,
 }: AgentUITurnViewProps) {
   const isStreaming = turn.status === "running";
   const isCancelled = turn.status === "cancelled";
-  const [processOpen, setProcessOpen] = useState(isStreaming);
+  const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
+  const isStopped = !isStreaming && isTerminalTurnStatus(resolvedFrameStatus);
+  const [processOpen, setProcessOpen] = useState(isStreaming || defaultProcessOpen);
+  // Follow streaming transitions without an extra post-commit render. A turn
+  // that starts streaming opens its process; one that settles leaves it as
+  // the reader saw it — collapsing on stop moved the whole answer.
+  const [wasStreaming, setWasStreaming] = useState(isStreaming);
+  // Set once this view watched the turn settle, so only that footer fades in;
+  // history pages render their footers at rest.
+  const [settledLive, setSettledLive] = useState(false);
+  if (wasStreaming !== isStreaming) {
+    setWasStreaming(isStreaming);
+    if (isStreaming) setProcessOpen(true);
+    else setSettledLive(true);
+  }
+  // A collapsed process strip is not mounted until it is first opened, so a
+  // long history page does not render every tool row and Markdown body it
+  // hides. Once opened it stays mounted to keep nested disclosure state.
+  const [processMounted, setProcessMounted] = useState(processOpen);
+  if (processOpen && !processMounted) setProcessMounted(true);
   const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
-  useEffect(() => {
-    setProcessOpen(isStreaming);
-  }, [isStreaming]);
-
   const prompt = turn.items.find(
     (item): item is AgentUIMessageItem =>
       item.kind === "message" && item.role === "user",
@@ -1184,18 +1210,57 @@ export function AgentUITurnView({
     }
   }
 
-  const hasLiveTail = finalActivityItem && (
-    (finalActivityItem.kind === "message" || finalActivityItem.kind === "thinking")
-      ? finalActivityItem.status === "streaming" && finalActivityItem.text.trim().length > 0
-      : finalActivityItem.kind === "tool" && isAgentUIToolRunning(finalActivityItem.status)
+  // "Thinking…" is only a fallback for a turn that has nothing on screen yet.
+  // Once any block is visible, that block carries the turn's progress — a
+  // tool row says it is running, a thought or message streams — whatever its
+  // own status, so the fallback never sits beside it.
+  const hasVisibleBlock = items.some((item) =>
+    item.kind === "tool" ||
+    ((item.kind === "message" || item.kind === "thinking") &&
+      item.text.trim().length > 0)
   );
-  const showThinkingFallback = isStreaming && !hasLiveTail;
+  const showThinkingFallback = isStreaming && !hasVisibleBlock;
 
   const processActivitySequences = useMemo(() => {
+    if (!processMounted) return null;
     const sequences: ReactNode[] = [];
     for (let index = 0; index < processItems.length; index += 1) {
       const item = processItems[index];
-      if (item?.kind === "message") continue;
+      if (item?.kind === "message") {
+        if (item.role === "assistant") {
+          sequences.push(
+            <div key={item.id} className="min-w-0">
+              {slots.renderAssistant({
+                ...renderContext,
+                item,
+                section: "process",
+                live: isStreaming && item === finalItem,
+                prefixSkip: assistantPrefixes.get(item.id)!,
+              })}
+            </div>,
+          );
+        }
+        continue;
+      }
+      if (item?.kind === "user_input") {
+        sequences.push(
+          <div key={item.id} className="min-w-0">
+            {slots.renderUserInput?.({
+              ...renderContext,
+              item,
+              live: isStreaming && item === finalItem,
+            }) ?? (
+              <div
+                className="ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted"
+                style={{ maxWidth: "var(--chat-user-message-max-width, 88%)" }}
+              >
+                {item.text}
+              </div>
+            )}
+          </div>,
+        );
+        continue;
+      }
       const group = activityGroups.get(index);
       if (!group) continue;
       const groupTools = group.flatMap((child) =>
@@ -1286,6 +1351,8 @@ export function AgentUITurnView({
     finalActivityItem,
     isStreaming,
     labels,
+    finalItem,
+    processMounted,
     processItems,
     renderContext,
     slots,
@@ -1363,7 +1430,7 @@ export function AgentUITurnView({
               <div className="space-y-1" data-session-process-activity="true">
                 {processActivitySequences}
               </div>
-            ) : (
+            ) : processMounted ? (
               <div
                 className="space-y-1"
                 data-session-process-activity="true"
@@ -1373,26 +1440,10 @@ export function AgentUITurnView({
               >
                 {processActivitySequences}
               </div>
-            )}
+            ) : null}
             <ChatReasoningContent>
               <div className="space-y-1">
                 {slots.renderProcessBefore?.(renderContext)}
-                {processItems.map((item, index) => {
-                  if (item.kind !== "message" || item.role !== "assistant") {
-                    return null;
-                  }
-                  return (
-                    <div key={item.id} className="min-w-0">
-                      {slots.renderAssistant({
-                        ...renderContext,
-                        item,
-                        section: "process",
-                        live: isStreaming && item === finalItem,
-                        prefixSkip: assistantPrefixes.get(item.id) ?? 0,
-                      })}
-                    </div>
-                  );
-                })}
                 {slots.renderProcessAfter?.(renderContext)}
               </div>
             </ChatReasoningContent>
@@ -1413,7 +1464,7 @@ export function AgentUITurnView({
                   item,
                   section: "answer",
                   live,
-                  prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                  prefixSkip: assistantPrefixes.get(item.id)!,
                 })}
               </div>
             );
@@ -1439,7 +1490,19 @@ export function AgentUITurnView({
           </p>
         ) : null}
         {slots.renderAfterAnswer?.(renderContext)}
-        {slots.renderFooter?.(renderContext)}
+        {slots.renderFooter && (isStreaming || isStopped) ? (
+          // One slot for the footer's whole life: while the turn streams it
+          // holds the footer's height empty, so the stop only fills it in.
+          <div
+            className="chat-turn-footer-slot"
+            data-session-turn-footer-slot={
+              isStreaming ? "reserved" : settledLive ? "entering" : "settled"
+            }
+            aria-hidden={isStreaming ? true : undefined}
+          >
+            {isStopped ? slots.renderFooter(renderContext) : null}
+          </div>
+        ) : null}
       </SessionTurnFrame>
     </>
   );
@@ -1460,6 +1523,8 @@ function useAgentUITurnElapsedSeconds(
   return agentUITurnElapsedSeconds(turn, fixedNow ?? clock);
 }
 
+/** Text offset of every assistant message (or thought) in the turn, keyed by
+ * item id. Every item of the requested kind has an entry. */
 function streamPrefixes(
   items: readonly AgentUITimelineItem[],
   kind: "assistant" | "thought",

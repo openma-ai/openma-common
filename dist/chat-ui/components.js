@@ -105,31 +105,25 @@ export function ChatConversationScrollButton({ className, icon = _jsx(ArrowDownI
 export function ChatDisclosureChevron({ open, className, }) {
     return (_jsx("span", { className: chatClassNames("activity-disclosure-chevron", className), "data-disclosure-chevron-slot": "true", "aria-hidden": "true", children: _jsx(ChevronRightIcon, { className: chatClassNames("size-3.5 text-fg-subtle transition-transform", open && "rotate-90") }) }));
 }
-export function projectChatThoughtEvent({ text, live, liveFallback, completedLabel, renderLiveSummary, }) {
+export function projectChatThoughtEvent({ live, liveFallback, completedLabel, }) {
     if (live) {
-        const fallback = text.trim() || liveFallback;
-        return {
-            multiline: true,
-            summary: renderLiveSummary?.(fallback) ?? fallback,
-        };
+        return { summary: liveFallback };
     }
     return {
         leading: (_jsx(BrainIcon, { className: "chat-activity-icon shrink-0", "aria-hidden": "true" })),
         summary: completedLabel,
     };
 }
-export function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, projection, renderLiveSummary, renderBody, }) {
+export function ChatThoughtEventRow({ live, liveFallback, completedLabel, projection, renderBody, }) {
     const [open, setOpen] = useState(false);
     const stick = useOptionalChatStickToBottom();
     const triggerRef = useRef(null);
     const panelId = useId();
     const resolvedProjection = projection ??
         projectChatThoughtEvent({
-            text,
             live,
             liveFallback,
             completedLabel,
-            renderLiveSummary,
         });
     const toggleOpen = () => {
         preserveChatScrollAnchor({
@@ -337,14 +331,48 @@ function ChatComposerFrame({ slots, home = false, style, }) {
 }
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
-export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, }) {
+// A Record keeps the classification exhaustive at compile time.
+const TERMINAL_TURN_STATUS = {
+    queued: false,
+    running: false,
+    unknown: false,
+    complete: true,
+    completed: true,
+    error: true,
+    errored: true,
+    cancelled: true,
+    terminated: true,
+};
+export function isTerminalTurnStatus(status) {
+    return TERMINAL_TURN_STATUS[status];
+}
+export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, defaultProcessOpen = false, }) {
     const isStreaming = turn.status === "running";
     const isCancelled = turn.status === "cancelled";
-    const [processOpen, setProcessOpen] = useState(isStreaming);
+    const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
+    const isStopped = !isStreaming && isTerminalTurnStatus(resolvedFrameStatus);
+    const [processOpen, setProcessOpen] = useState(isStreaming || defaultProcessOpen);
+    // Follow streaming transitions without an extra post-commit render. A turn
+    // that starts streaming opens its process; one that settles leaves it as
+    // the reader saw it — collapsing on stop moved the whole answer.
+    const [wasStreaming, setWasStreaming] = useState(isStreaming);
+    // Set once this view watched the turn settle, so only that footer fades in;
+    // history pages render their footers at rest.
+    const [settledLive, setSettledLive] = useState(false);
+    if (wasStreaming !== isStreaming) {
+        setWasStreaming(isStreaming);
+        if (isStreaming)
+            setProcessOpen(true);
+        else
+            setSettledLive(true);
+    }
+    // A collapsed process strip is not mounted until it is first opened, so a
+    // long history page does not render every tool row and Markdown body it
+    // hides. Once opened it stays mounted to keep nested disclosure state.
+    const [processMounted, setProcessMounted] = useState(processOpen);
+    if (processOpen && !processMounted)
+        setProcessMounted(true);
     const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
-    useEffect(() => {
-        setProcessOpen(isStreaming);
-    }, [isStreaming]);
     const prompt = turn.items.find((item) => item.kind === "message" && item.role === "user");
     const items = projectAgentUITurnItems(turn, { thoughts }).filter((item) => item.kind !== "message" || item.role !== "user");
     const processEndIndex = agentUIProcessEndIndex(items);
@@ -391,16 +419,40 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
             break;
         }
     }
-    const hasLiveTail = finalActivityItem && ((finalActivityItem.kind === "message" || finalActivityItem.kind === "thinking")
-        ? finalActivityItem.status === "streaming" && finalActivityItem.text.trim().length > 0
-        : finalActivityItem.kind === "tool" && isAgentUIToolRunning(finalActivityItem.status));
-    const showThinkingFallback = isStreaming && !hasLiveTail;
+    // "Thinking…" is only a fallback for a turn that has nothing on screen yet.
+    // Once any block is visible, that block carries the turn's progress — a
+    // tool row says it is running, a thought or message streams — whatever its
+    // own status, so the fallback never sits beside it.
+    const hasVisibleBlock = items.some((item) => item.kind === "tool" ||
+        ((item.kind === "message" || item.kind === "thinking") &&
+            item.text.trim().length > 0));
+    const showThinkingFallback = isStreaming && !hasVisibleBlock;
     const processActivitySequences = useMemo(() => {
+        if (!processMounted)
+            return null;
         const sequences = [];
         for (let index = 0; index < processItems.length; index += 1) {
             const item = processItems[index];
-            if (item?.kind === "message")
+            if (item?.kind === "message") {
+                if (item.role === "assistant") {
+                    sequences.push(_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
+                            ...renderContext,
+                            item,
+                            section: "process",
+                            live: isStreaming && item === finalItem,
+                            prefixSkip: assistantPrefixes.get(item.id),
+                        }) }, item.id));
+                }
                 continue;
+            }
+            if (item?.kind === "user_input") {
+                sequences.push(_jsx("div", { className: "min-w-0", children: slots.renderUserInput?.({
+                        ...renderContext,
+                        item,
+                        live: isStreaming && item === finalItem,
+                    }) ?? (_jsx("div", { className: "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted", style: { maxWidth: "var(--chat-user-message-max-width, 88%)" }, children: item.text })) }, item.id));
+                continue;
+            }
             const group = activityGroups.get(index);
             if (!group)
                 continue;
@@ -471,6 +523,8 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         finalActivityItem,
         isStreaming,
         labels,
+        finalItem,
+        processMounted,
         processItems,
         renderContext,
         slots,
@@ -490,18 +544,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                 setProcessOpen(open);
                         }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
                                                     ? labels.workingFor(elapsedSeconds)
-                                                    : labels.workedFor(elapsedSeconds)] })] })) }), processOpen ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: processActivitySequences })) : (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", hidden: true, "aria-hidden": "true", inert: true, children: processActivitySequences })), _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), processItems.map((item, index) => {
-                                            if (item.kind !== "message" || item.role !== "assistant") {
-                                                return null;
-                                            }
-                                            return (_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
-                                                    ...renderContext,
-                                                    item,
-                                                    section: "process",
-                                                    live: isStreaming && item === finalItem,
-                                                    prefixSkip: assistantPrefixes.get(item.id) ?? 0,
-                                                }) }, item.id));
-                                        }), slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
+                                                    : labels.workedFor(elapsedSeconds)] })] })) }), processOpen ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: processActivitySequences })) : processMounted ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", hidden: true, "aria-hidden": "true", inert: true, children: processActivitySequences })) : null, _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
                         const live = isStreaming && item === finalItem;
                         if (item.kind === "message" && item.role === "assistant") {
                             return (_jsx("div", { className: "min-w-0", "data-session-turn-answer": "true", children: slots.renderAssistant({
@@ -509,7 +552,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                                     item,
                                     section: "answer",
                                     live,
-                                    prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                                    prefixSkip: assistantPrefixes.get(item.id),
                                 }) }, item.id));
                         }
                         if (item.kind === "raw" && slots.renderRaw) {
@@ -521,7 +564,10 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                             });
                         }
                         return null;
-                    }), showThinkingFallback ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderAfterAnswer?.(renderContext), slots.renderFooter?.(renderContext)] })] }));
+                    }), showThinkingFallback ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderAfterAnswer?.(renderContext), slots.renderFooter && (isStreaming || isStopped) ? (
+                    // One slot for the footer's whole life: while the turn streams it
+                    // holds the footer's height empty, so the stop only fills it in.
+                    _jsx("div", { className: "chat-turn-footer-slot", "data-session-turn-footer-slot": isStreaming ? "reserved" : settledLive ? "entering" : "settled", "aria-hidden": isStreaming ? true : undefined, children: isStopped ? slots.renderFooter(renderContext) : null })) : null] })] }));
 }
 function useAgentUITurnElapsedSeconds(turn, isStreaming, fixedNow) {
     const [clock, setClock] = useState(() => fixedNow ?? Date.now());
@@ -534,6 +580,8 @@ function useAgentUITurnElapsedSeconds(turn, isStreaming, fixedNow) {
     }, [fixedNow, isStreaming]);
     return agentUITurnElapsedSeconds(turn, fixedNow ?? clock);
 }
+/** Text offset of every assistant message (or thought) in the turn, keyed by
+ * item id. Every item of the requested kind has an entry. */
 function streamPrefixes(items, kind) {
     const prefixes = new Map();
     let total = 0;

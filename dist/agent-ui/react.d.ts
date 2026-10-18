@@ -9,9 +9,11 @@ export interface StreamTextPacerOptions {
     schedule(callback: () => void, delayMs: number): unknown;
     cancel(handle: unknown): void;
     onDrain?(): void;
+    /** Monotonic clock in milliseconds; defaults to `performance.now`. */
+    now?(): number;
 }
 /** Frame batches driven by a jerk-limited velocity controller. */
-export declare function createStreamTextPacer({ write, schedule, cancel, onDrain }: StreamTextPacerOptions): StreamTextPacer;
+export declare function createStreamTextPacer({ write, schedule, cancel, onDrain, now, }: StreamTextPacerOptions): StreamTextPacer;
 /** React binding for the framework-neutral Agent UI store. */
 export declare function useAgentUIState(store: AgentUIStore): AgentUIState;
 export interface AgentUIStreamingMarkdownProps {

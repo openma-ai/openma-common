@@ -230,6 +230,8 @@ export function acpEventToOpenMA(
           ...(parsed.messageId ? { message_id: parsed.messageId } : {}),
         },
       });
+    case "user_input":
+      return snapshotCanonicalOpenMAEvent(parsed.event as OpenMAEvent, context);
     case "notice":
       return createOpenMAEvent({
         ...envelope,

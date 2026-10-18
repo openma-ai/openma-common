@@ -118,7 +118,11 @@ describe("nested chat disclosure state", () => {
       expect(
         computed.paddingInlineStart || computed.getPropertyValue("padding-inline-start"),
       ).toBe("0px");
-      expect(computed.fontSize).toBe("13px");
+      // Hosts size rows through --chat-transcript-row-font-size; happy-dom
+      // leaves var() unresolved, so assert the 13px default it falls back to.
+      expect(["13px", "var(--chat-transcript-row-font-size, 13px)"]).toContain(
+        computed.fontSize,
+      );
       expect(computed.width).not.toBe("fit-content");
     }
 

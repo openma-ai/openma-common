@@ -1,7 +1,7 @@
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
-import type { AgentUIMessageItem, AgentUIRawItem, AgentUIToolItem, AgentUITurnState } from "../agent-ui/index.js";
+import type { AgentUIMessageItem, AgentUIRawItem, AgentUIToolItem, AgentUIUserInputItem, AgentUITurnState } from "../agent-ui/index.js";
 import { type AgentUIThoughtPresentation } from "../agent-ui/presentation.js";
 import { type SessionTurnStatus } from "../session-ui/index.js";
 /** Shared marker for transcript disclosure controls (process + tool rows). */
@@ -42,20 +42,17 @@ export interface ChatThoughtEventProjection {
     multiline?: boolean;
     summary: ReactNode;
 }
-export declare function projectChatThoughtEvent({ text, live, liveFallback, completedLabel, renderLiveSummary, }: {
-    text: string;
+export declare function projectChatThoughtEvent({ live, liveFallback, completedLabel, }: {
     live: boolean;
     liveFallback: ReactNode;
     completedLabel: ReactNode;
-    renderLiveSummary?: (fallback: ReactNode) => ReactNode;
 }): ChatThoughtEventProjection;
-export declare function ChatThoughtEventRow({ live, text, liveFallback, completedLabel, projection, renderLiveSummary, renderBody, }: {
+export declare function ChatThoughtEventRow({ live, liveFallback, completedLabel, projection, renderBody, }: {
     live: boolean;
     text: string;
     liveFallback: ReactNode;
     completedLabel: ReactNode;
     projection?: ChatThoughtEventProjection;
-    renderLiveSummary?: (fallback: ReactNode) => ReactNode;
     renderBody: (input: {
         live: boolean;
     }) => ReactNode;
@@ -128,6 +125,9 @@ export interface AgentUITurnSlots {
     renderTool: (input: AgentUITurnRenderContext & {
         tool: AgentUIToolItem;
     }) => ReactNode;
+    renderUserInput?: (input: AgentUITurnRenderContext & {
+        item: AgentUIUserInputItem;
+    }) => ReactNode;
     renderRaw?: (input: AgentUITurnRenderContext & {
         item: AgentUIRawItem;
     }) => ReactNode;
@@ -175,6 +175,8 @@ export interface AgentUITurnViewProps {
     density?: AgentChatDensity;
     /** Deterministic clock for tests and non-live projections. */
     now?: number;
+    /** Initial expansion of a non-streaming turn's process strip. */
+    defaultProcessOpen?: boolean;
 }
 export interface AgentChatViewSlots {
     empty?: ReactNode;
@@ -223,8 +225,7 @@ export type AgentChatViewProps = AgentChatViewBaseProps & (AgentChatViewHostTurn
 /** Backchat's full scroll/composer shell. Products inject content and actions,
  * but do not own the conversation geometry or turn lifecycle. */
 export declare function AgentChatView({ sessionId, phase, surface, turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density, }: AgentChatViewProps): import("react").JSX.Element;
-/** Backchat's complete turn component over the common Agent UI state shape.
- * Host products only supply content renderers and localized copy. */
-export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, }: AgentUITurnViewProps): import("react").JSX.Element;
+export declare function isTerminalTurnStatus(status: SessionTurnStatus): boolean;
+export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, defaultProcessOpen, }: AgentUITurnViewProps): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=components.d.ts.map

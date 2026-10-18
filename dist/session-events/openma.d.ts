@@ -298,7 +298,23 @@ export interface WorkItemRegistry {
 }
 export declare function createWorkItemRegistry(): WorkItemRegistry;
 export declare function reduceWorkItemEvent(registry: WorkItemRegistry, event: OpenMAEvent): WorkItemRegistry;
+/** Linear-time reduction. One working registry is mutated in place; the
+ * input events are never mutated. */
 export declare function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistry;
+export interface WorkItemProjector {
+    /** Applies one event. Returns true when the projected items changed. */
+    apply(event: OpenMAEvent): boolean;
+    /** Current registry. Identity is stable until an applied event changes an
+     * item; unchanged items keep their identity across snapshots. Treat the
+     * result as read-only. */
+    snapshot(): WorkItemRegistry;
+}
+/** Incremental equivalent of `reduceWorkItems`: constant work per in-order
+ * event. Events that arrive out of `seq` order (for example an older history
+ * page) mark the projection dirty; the next `snapshot()` re-reduces once, so a
+ * whole prepended page costs one O(n) pass. The result always equals
+ * `reduceWorkItems(allEvents)`. */
+export declare function createWorkItemProjector(): WorkItemProjector;
 export declare function finalizeWorkItems(registry: WorkItemRegistry): WorkItemRegistry;
 export {};
 //# sourceMappingURL=openma.d.ts.map

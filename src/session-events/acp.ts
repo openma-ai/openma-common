@@ -17,9 +17,8 @@
  *   - `current_mode_update` → REPLACE the agent's current mode id.
  *   - session-level metadata is handled by SessionStore before this reducer.
  *
- * Designed to be pure: pass an immutable event list, get a snapshot.
- * Re-running on each render is cheap because events list grows linearly
- * with the turn length (a few hundred at most).
+ * reduceTurn is the pure convenience wrapper; live callers retain a projector
+ * and apply only newly received events.
  */
 
 import { extractAcpSystemNotice } from "./acp-system-notices.js";
@@ -125,17 +124,16 @@ export interface PlanDocument {
 
 export type TimelineItem =
   | {
-      /** Continuous block of assistant text — concatenated agent_message_chunk
-       *  events that arrived without being interrupted by a tool_call. The
-       *  next tool_call starts a new segment. */
+      /** Adjacent assistant chunks in the same phase and message append here. */
       kind: "assistant_text";
+      segmentId?: number;
       text: string;
       phase?: "commentary" | "final_answer";
     }
   | {
-      /** One logical thought message. Chunks sharing a messageId patch this
-       * item; a new messageId appends a new item to the activity timeline. */
+      /** Adjacent chunks sharing a messageId patch the open thought item. */
       kind: "thought";
+      segmentId?: number;
       messageId?: string;
       text: string;
     }
@@ -145,12 +143,16 @@ export type TimelineItem =
        *  that PATCH the tool still flow through. */
       kind: "tool";
       toolCallId: string;
+    }
+  | {
+      kind: "user_input";
+      text: string;
+      clientId?: string;
     };
 
 export interface TurnRender {
   thoughtText: string;
-  /** The current, replaceable thought status at the tail of a running
-   * activity stream. Cleared as soon as commentary or a tool follows it. */
+  /** The latest text from the open thought segment, if one exists. */
   currentThoughtText: string;
   assistantText: string;
   tools: ToolEntry[];
@@ -216,6 +218,12 @@ export type ParsedAcpEvent =
       messageId?: string;
       /** Claude Agent ACP's nested transcript correlation. */
       parentToolUseId?: string;
+      event: unknown;
+    }
+  | {
+      kind: "user_input";
+      text: string;
+      clientId?: string;
       event: unknown;
     }
   | { kind: "notice"; notice: string; event: unknown }
@@ -514,7 +522,8 @@ function getEventSummary(event: Record<string, unknown>): string | undefined {
 export function parseAcpEvent(event: unknown): ParsedAcpEvent {
   const eventRecord = objectField(event);
   const isCanonicalOpenMAEvent =
-    eventRecord.schema_version === "oma.event.v1";
+    eventRecord.schema_version === "oma.event.v1" ||
+    eventRecord.schema === "oma.event.v1";
   const canonicalTool = isCanonicalOpenMAEvent
     ? normalizeCanonicalToolEvent(eventRecord)
     : null;
@@ -523,6 +532,23 @@ export function parseAcpEvent(event: unknown): ParsedAcpEvent {
     ? stringValue(eventRecord.type)
     : undefined;
   const canonicalData = objectField(eventRecord.data);
+  if (
+    canonicalType === "user.message" &&
+    canonicalData.input_kind === "steering" &&
+    canonicalData.outcome === "injected"
+  ) {
+    const text =
+      stringValue(canonicalData.text)
+      ?? extractTextBlocks(canonicalData.content)
+      ?? "";
+    const clientId = stringValue(eventRecord.turn_id);
+    return {
+      kind: "user_input",
+      text,
+      ...(clientId ? { clientId } : {}),
+      event,
+    };
+  }
   if (canonicalType === "agent.message" || canonicalType === "agent.message_chunk") {
     const text =
       stringValue(canonicalData.text)
@@ -896,31 +922,23 @@ function isEmptyObject(value: unknown): boolean {
   return Object.keys(value as Record<string, unknown>).length === 0;
 }
 
-const MIN_OVERLAP = 8;
-const SNAPSHOT_HEAD_PROBE = 16;
-
-export function mergeStreamingText(accumulated: string, incoming: string): string {
-  if (!accumulated) return incoming;
-  if (!incoming) return accumulated;
-  if (incoming === accumulated) return accumulated;
-  if (incoming.startsWith(accumulated)) return incoming;
-  if (accumulated.endsWith(incoming)) return accumulated;
-  if (incoming.length >= accumulated.length) {
-    const head = Math.min(SNAPSHOT_HEAD_PROBE, accumulated.length);
-    if (head > 0 && incoming.slice(0, head) === accumulated.slice(0, head)) {
-      return incoming;
+type OpenSegment =
+  | {
+      kind: "thought";
+      messageId?: string;
+      item: Extract<TimelineItem, { kind: "thought" }>;
     }
-  }
-  const maxOverlap = Math.min(accumulated.length, incoming.length);
-  for (let k = maxOverlap; k >= MIN_OVERLAP; k--) {
-    if (accumulated.endsWith(incoming.slice(0, k))) {
-      return accumulated + incoming.slice(k);
-    }
-  }
-  return accumulated + incoming;
-}
+  | {
+      kind: "assistant_text";
+      messageId?: string;
+      phase?: "commentary" | "final_answer";
+      item: Extract<TimelineItem, { kind: "assistant_text" }>;
+    };
 
-export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender {
+export function createTurnProjector(): {
+  apply(entry: { payload: unknown }): void;
+  snapshot(): TurnRender;
+} {
   const out: TurnRender = {
     thoughtText: "",
     currentThoughtText: "",
@@ -932,49 +950,66 @@ export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender 
   };
   const toolById = new Map<string, ToolEntry>();
   let toolsOrder: string[] = [];
-  // Running buffer for the current assistant_text segment. Flushed into
-  // out.timeline when a tool_call event arrives (which breaks the run)
-  // or at end-of-stream. Same chunk concatenation we used to do into
-  // assistantText, but segment-aware.
-  let textBuf = "";
-  let textPhase: "commentary" | "final_answer" | undefined;
-  const flushText = () => {
-    if (textBuf) {
-      out.timeline.push({
-        kind: "assistant_text",
-        text: textBuf,
-        ...(textPhase ? { phase: textPhase } : {}),
-      });
-      textBuf = "";
-      textPhase = undefined;
-    }
-  };
-  const thoughtIndexByMessageId = new Map<string, number>();
+  let openSegment: OpenSegment | undefined;
   let currentPlanId: string | undefined;
-  let anonymousThoughtIndex: number | undefined;
+  const planIndexById = new Map<string, number>();
+  let toolsVersion = 0;
+  let snapshotToolsVersion = 0;
+  let snapshotTools: ToolEntry[] = [];
+  let planVersion = 0;
+  let snapshotPlanVersion = 0;
+  let snapshotPlan: PlanEntry[] = [];
+  let timelineVersion = 0;
+  let snapshotTimelineVersion = 0;
+  let snapshotTimeline: TimelineItem[] = [];
+  // Running concatenations of every thought / assistant segment. Segments
+  // only ever grow at the end and the timeline only appends, so each chunk
+  // extends these by its own text. Rebuilding them from the timeline on every
+  // snapshot made a long turn's per-event cost grow with all text so far.
+  let thoughtText = "";
+  let assistantText = "";
+  const closeOpenSegment = () => {
+    openSegment = undefined;
+  };
+  const appendTimelineItem = (item: TimelineItem) => {
+    out.timeline.push(item);
+    timelineVersion += 1;
+  };
+  const replaceOpenTimelineItem = (item: TimelineItem) => {
+    out.timeline[out.timeline.length - 1] = item;
+    timelineVersion += 1;
+  };
+  // ACP content chunks and OpenMA `agent.*` chunk events are deltas: the
+  // text of a segment is their plain concatenation. A chunk that repeats the
+  // segment's tail ("4" after "#104", "\n\n" after "\n\n") is new text.
   const appendThought = (parsed: Extract<ParsedAcpEvent, { kind: "thought" }>) => {
-    const id = parsed.messageId;
-    const existingIndex = id
-      ? thoughtIndexByMessageId.get(id)
-      : anonymousThoughtIndex;
-    if (existingIndex !== undefined) {
-      const existing = out.timeline[existingIndex];
-      if (existing?.kind === "thought") {
-        existing.text = mergeStreamingText(existing.text, parsed.text);
-        out.currentThoughtText = latestThoughtSegment(existing.text);
-        return;
-      }
+    if (
+      openSegment?.kind === "thought" &&
+      openSegment.messageId === parsed.messageId
+    ) {
+      const item = {
+        ...openSegment.item,
+        text: openSegment.item.text + parsed.text,
+      };
+      replaceOpenTimelineItem(item);
+      openSegment.item = item;
+      thoughtText += parsed.text;
+      return;
     }
-    flushText();
-    const item: TimelineItem = {
+    closeOpenSegment();
+    thoughtText += parsed.text;
+    const item: Extract<TimelineItem, { kind: "thought" }> = {
       kind: "thought",
+      segmentId: out.timeline.length,
       text: parsed.text,
-      ...(id ? { messageId: id } : {}),
+      ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
     };
-    const index = out.timeline.push(item) - 1;
-    if (id) thoughtIndexByMessageId.set(id, index);
-    else anonymousThoughtIndex = index;
-    out.currentThoughtText = latestThoughtSegment(parsed.text);
+    appendTimelineItem(item);
+    openSegment = {
+      kind: "thought",
+      messageId: parsed.messageId,
+      item,
+    };
   };
   const appendOutputDelta = (
     current: unknown,
@@ -990,29 +1025,9 @@ export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender 
     }
     return current + delta.separator + delta.data;
   };
-  const mergePlanEntries = (
-    current: readonly PlanEntry[],
-    incoming: readonly PlanEntry[],
-  ): PlanEntry[] => {
-    const next = [...current];
-    const indexById = new Map<string, number>();
-    next.forEach((entry, index) => {
-      if (entry.id) indexById.set(entry.id, index);
-    });
-    for (const entry of incoming) {
-      const existingIndex = entry.id ? indexById.get(entry.id) : undefined;
-      if (existingIndex === undefined) {
-        if (entry.id) indexById.set(entry.id, next.length);
-        next.push(entry);
-      } else {
-        next[existingIndex] = entry;
-      }
-    }
-    return next;
-  };
-  const upsertTool = (incoming: NormalizedToolPatch) => {
+  const upsertTool = (incoming: NormalizedToolPatch): boolean => {
     const id = incoming.toolCallId;
-    if (!id) return;
+    if (!id) return false;
     const prev = toolById.get(id);
     if (!prev) {
       const entry: ToolEntry = {
@@ -1037,75 +1052,145 @@ export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender 
         entry.status = "completed";
       }
       toolById.set(id, entry);
-      if (!toolsOrder.includes(id)) {
-        toolsOrder.push(id);
-        flushText();
-        out.timeline.push({ kind: "tool", toolCallId: id });
-      }
-      return;
+      toolsOrder.push(id);
+      toolsVersion += 1;
+      return true;
     }
 
-    if (incoming.title !== undefined) prev.title = incoming.title;
-    if (incoming.kind !== undefined) prev.kind = incoming.kind;
-    if (incoming.status !== undefined) prev.status = incoming.status;
-    if (incoming.toolName !== undefined) prev.toolName = incoming.toolName;
+    const next: ToolEntry = { ...prev };
+    if (incoming.title !== undefined) next.title = incoming.title;
+    if (incoming.kind !== undefined) next.kind = incoming.kind;
+    if (incoming.status !== undefined) next.status = incoming.status;
+    if (incoming.toolName !== undefined) next.toolName = incoming.toolName;
     if (incoming.meta !== undefined) {
-      prev.meta = {
-        ...(prev.meta ?? {}),
+      next.meta = {
+        ...(next.meta ?? {}),
         ...incoming.meta,
       };
     }
     if (incoming.parentToolUseId !== undefined) {
-      prev.parentToolUseId = incoming.parentToolUseId;
+      next.parentToolUseId = incoming.parentToolUseId;
     }
     if (incoming.rawInput !== undefined) {
       const incEmpty = isEmptyObject(incoming.rawInput);
-      const prevHasContent = !isEmptyObject(prev.rawInput);
-      if (!(incEmpty && prevHasContent)) prev.rawInput = incoming.rawInput;
+      const prevHasContent = !isEmptyObject(next.rawInput);
+      if (!(incEmpty && prevHasContent)) next.rawInput = incoming.rawInput;
     }
     if (incoming.rawOutput !== undefined) {
       // A native ACP rawOutput is a complete snapshot and therefore replaces
       // any adapter deltas accumulated before it.
-      prev.rawOutput = incoming.rawOutput;
+      next.rawOutput = incoming.rawOutput;
     } else if (incoming.outputDelta !== undefined) {
-      prev.rawOutput = appendOutputDelta(prev.rawOutput, incoming.outputDelta);
+      next.rawOutput = appendOutputDelta(next.rawOutput, incoming.outputDelta);
     }
-    if (incoming.content !== undefined) prev.content = incoming.content;
-    if (incoming.locations !== undefined) prev.locations = incoming.locations;
+    if (incoming.content !== undefined) next.content = incoming.content;
+    if (incoming.locations !== undefined) next.locations = incoming.locations;
     if (
-      prev.status === "in_progress" &&
-      prev.content?.some((b) => b.type === "content" && b.content?.type === "image")
+      next.status === "in_progress" &&
+      next.content?.some((b) => b.type === "content" && b.content?.type === "image")
     ) {
-      prev.status = "completed";
+      next.status = "completed";
     }
+    toolById.set(id, next);
+    toolsVersion += 1;
+    return false;
   };
 
-  for (const ev of events) {
-    const parsed = parseAcpEvent(ev.payload);
+  const addPlanEntries = (
+    incoming: readonly PlanEntry[],
+    merge: boolean,
+  ) => {
+    if (!merge) {
+      out.plan = incoming.map((entry) => ({ ...entry }));
+      planIndexById.clear();
+      out.plan.forEach((entry, index) => {
+        if (entry.id) planIndexById.set(entry.id, index);
+      });
+      planVersion += 1;
+      return;
+    }
+    let changed = false;
+    for (const entry of incoming) {
+      const existingIndex = entry.id
+        ? planIndexById.get(entry.id)
+        : undefined;
+      if (existingIndex === undefined) {
+        if (entry.id) planIndexById.set(entry.id, out.plan.length);
+        out.plan.push({ ...entry });
+        changed = true;
+      } else {
+        out.plan[existingIndex] = { ...entry };
+        changed = true;
+      }
+    }
+    if (changed) planVersion += 1;
+  };
+
+  const apply = ({ payload }: { payload: unknown }) => {
+    const parsed = parseAcpEvent(payload);
     switch (parsed.kind) {
+      case "user_input":
+        closeOpenSegment();
+        appendTimelineItem({
+          kind: "user_input",
+          text: parsed.text,
+          ...(parsed.clientId ? { clientId: parsed.clientId } : {}),
+        });
+        break;
       case "thought":
-        out.thoughtText = mergeStreamingText(out.thoughtText, parsed.text);
         appendThought(parsed);
         break;
-      case "text":
-        out.currentThoughtText = "";
-        if (textBuf && textPhase !== parsed.phase) flushText();
-        textPhase = parsed.phase;
-        textBuf = mergeStreamingText(textBuf, parsed.text);
+      case "text": {
+        if (
+          openSegment?.kind === "assistant_text" &&
+          openSegment.messageId === parsed.messageId &&
+          openSegment.phase === parsed.phase
+        ) {
+          const item = {
+            ...openSegment.item,
+            text: openSegment.item.text + parsed.text,
+          };
+          replaceOpenTimelineItem(item);
+          openSegment.item = item;
+          assistantText += parsed.text;
+          break;
+        }
+        closeOpenSegment();
+        const item: Extract<TimelineItem, { kind: "assistant_text" }> = {
+          kind: "assistant_text",
+          segmentId: out.timeline.length,
+          text: parsed.text,
+          ...(parsed.phase ? { phase: parsed.phase } : {}),
+        };
+        appendTimelineItem(item);
+        assistantText += parsed.text;
+        openSegment = {
+          kind: "assistant_text",
+          messageId: parsed.messageId,
+          phase: parsed.phase,
+          item,
+        };
         break;
-      case "tool_call":
-        out.currentThoughtText = "";
-        upsertTool(parsed.tool);
+      }
+      case "tool_call": {
+        const created = upsertTool(parsed.tool);
+        if (created) {
+          closeOpenSegment();
+          appendTimelineItem({
+            kind: "tool",
+            toolCallId: parsed.tool.toolCallId,
+          });
+        }
         break;
+      }
       case "plan":
-        out.plan = parsed.updateMode === "merge"
-          && (
-            currentPlanId === undefined
-            || parsed.planId === undefined
-            || parsed.planId === currentPlanId
-          )
-          ? mergePlanEntries(out.plan, parsed.plan)
-          : parsed.plan;
+        addPlanEntries(
+          parsed.plan,
+          parsed.updateMode === "merge" &&
+            (currentPlanId === undefined ||
+              parsed.planId === undefined ||
+              parsed.planId === currentPlanId),
+        );
         if (parsed.document) out.planDocument = parsed.document;
         currentPlanId = parsed.planId;
         break;
@@ -1115,7 +1200,9 @@ export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender 
         break;
       case "plan_removed":
         if (parsed.planId === undefined || parsed.planId === currentPlanId) {
+          if (out.plan.length > 0) planVersion += 1;
           out.plan = [];
+          planIndexById.clear();
           out.planDocument = undefined;
           currentPlanId = undefined;
         }
@@ -1126,29 +1213,49 @@ export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender 
       case "commands":
       case "notice":
       case "silent":
-        break;
       case "raw":
-        // Drop raw events from the primary chat surface. They are still
-        // available in the persisted event stream for debugging.
         break;
     }
-  }
-  // Flush any trailing assistant text so the closing message segment
-  // makes it into the timeline.
-  flushText();
+  };
 
-  out.tools = toolsOrder
-    .map((id) => toolById.get(id))
-    .filter((e): e is ToolEntry => !!e);
-  // For back-compat with code still reading TurnRender.assistantText —
-  // the streaming track and a few legacy spots — concatenate the segments.
-  out.assistantText = out.timeline
-    .filter((t): t is Extract<TimelineItem, { kind: "assistant_text" }> =>
-      t.kind === "assistant_text",
-    )
-    .map((t) => t.text)
-    .join("");
-  return out;
+  const snapshot = (): TurnRender => {
+    if (timelineVersion !== snapshotTimelineVersion) {
+      snapshotTimeline = out.timeline.slice();
+      snapshotTimelineVersion = timelineVersion;
+    }
+    const timeline = snapshotTimeline;
+    if (snapshotToolsVersion !== toolsVersion) {
+      snapshotTools = toolsOrder
+        .map((id) => toolById.get(id))
+        .filter((tool): tool is ToolEntry => !!tool);
+      snapshotToolsVersion = toolsVersion;
+    }
+    if (snapshotPlanVersion !== planVersion) {
+      snapshotPlan = out.plan.slice();
+      snapshotPlanVersion = planVersion;
+    }
+    return {
+      thoughtText,
+      currentThoughtText:
+        openSegment?.kind === "thought"
+          ? latestThoughtSegment(openSegment.item.text)
+          : "",
+      assistantText,
+      tools: snapshotTools,
+      plan: snapshotPlan,
+      planDocument: out.planDocument ? { ...out.planDocument } : undefined,
+      notes: [...out.notes],
+      timeline,
+    };
+  };
+
+  return { apply, snapshot };
+}
+
+export function reduceTurn(events: readonly { payload: unknown }[]): TurnRender {
+  const projector = createTurnProjector();
+  for (const event of events) projector.apply(event);
+  return projector.snapshot();
 }
 
 export function latestThoughtSegment(text: string): string {

@@ -821,19 +821,108 @@ export function reduceWorkItemEvent(
   return next;
 }
 
-export function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistry {
-  let registry = createWorkItemRegistry();
-  const ordered = events.map((event, index) => ({ event, index })).sort((a, b) => {
+/** Sequenced events in `seq` order, then unsequenced events in arrival order. */
+function orderWorkItemEvents(events: readonly OpenMAEvent[]): OpenMAEvent[] {
+  return events.map((event, index) => ({ event, index })).sort((a, b) => {
     if (a.event.seq === undefined && b.event.seq === undefined) return a.index - b.index;
     if (a.event.seq === undefined) return 1;
     if (b.event.seq === undefined) return -1;
     return a.event.seq - b.event.seq || a.index - b.index;
-  });
+  }).map(({ event }) => event);
+}
 
-  for (const { event } of ordered) {
-    registry = reduceWorkItemEvent(registry, event);
+/** Ids whose snapshots an event may change; copied before mutation so
+ * previously returned snapshots stay immutable. */
+function touchedWorkItemIds(event: WorkItemEvent): string[] {
+  const ids = event.work_item_id ? [event.work_item_id] : [];
+  if (event.type !== "work_item.reidentified") return ids;
+  return [(event.data as WorkItemReidentifiedData).previous_work_item_id, ...ids];
+}
+
+/** Linear-time reduction. One working registry is mutated in place; the
+ * input events are never mutated. */
+export function reduceWorkItems(events: readonly OpenMAEvent[]): WorkItemRegistry {
+  const registry = createWorkItemRegistry();
+  for (const event of orderWorkItemEvents(events)) {
+    if (registry.seen_event_ids.has(event.event_id)) continue;
+    registry.seen_event_ids.add(event.event_id);
+    if (isWorkItemEvent(event)) applyWorkItemEvent(registry.items, event);
   }
   return registry;
+}
+
+export interface WorkItemProjector {
+  /** Applies one event. Returns true when the projected items changed. */
+  apply(event: OpenMAEvent): boolean;
+  /** Current registry. Identity is stable until an applied event changes an
+   * item; unchanged items keep their identity across snapshots. Treat the
+   * result as read-only. */
+  snapshot(): WorkItemRegistry;
+}
+
+/** Incremental equivalent of `reduceWorkItems`: constant work per in-order
+ * event. Events that arrive out of `seq` order (for example an older history
+ * page) mark the projection dirty; the next `snapshot()` re-reduces once, so a
+ * whole prepended page costs one O(n) pass. The result always equals
+ * `reduceWorkItems(allEvents)`. */
+export function createWorkItemProjector(): WorkItemProjector {
+  const received: OpenMAEvent[] = [];
+  const receivedIds = new Set<string>();
+  let items = new Map<string, WorkItemSnapshot>();
+  let seen = new Set<string>();
+  let maxSeq: number | undefined;
+  let sawUnsequenced = false;
+  let dirty = false;
+  let version = 0;
+  let snapshotVersion = -1;
+  let current: WorkItemRegistry = createWorkItemRegistry();
+
+  const applyInOrder = (event: OpenMAEvent): boolean => {
+    seen.add(event.event_id);
+    if (!isWorkItemEvent(event)) return false;
+    for (const id of touchedWorkItemIds(event)) {
+      const item = items.get(id);
+      if (item) items.set(id, { ...item, output: [...item.output] });
+    }
+    applyWorkItemEvent(items, event);
+    return true;
+  };
+
+  return {
+    apply(event) {
+      // A replayed event id is the same event; it can never change the result.
+      if (receivedIds.has(event.event_id)) return false;
+      receivedIds.add(event.event_id);
+      received.push(event);
+      const inOrder = event.seq === undefined
+        ? true
+        : !sawUnsequenced && (maxSeq === undefined || event.seq >= maxSeq);
+      if (event.seq === undefined) sawUnsequenced = true;
+      else maxSeq = maxSeq === undefined ? event.seq : Math.max(maxSeq, event.seq);
+      if (dirty) return isWorkItemEvent(event);
+      if (!inOrder) {
+        dirty = true;
+        return true;
+      }
+      if (!applyInOrder(event)) return false;
+      version += 1;
+      return true;
+    },
+    snapshot() {
+      if (dirty) {
+        const registry = reduceWorkItems(received);
+        items = registry.items;
+        seen = registry.seen_event_ids;
+        dirty = false;
+        version += 1;
+      }
+      if (snapshotVersion !== version) {
+        current = { items: new Map(items), seen_event_ids: seen };
+        snapshotVersion = version;
+      }
+      return current;
+    },
+  };
 }
 
 export function finalizeWorkItems(registry: WorkItemRegistry): WorkItemRegistry {

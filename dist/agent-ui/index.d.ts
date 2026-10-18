@@ -40,7 +40,13 @@ export interface AgentUIRawItem {
     kind: "raw";
     event: OpenMAEvent;
 }
-export type AgentUITimelineItem = AgentUIMessageItem | AgentUIToolItem | AgentUIRawItem;
+export interface AgentUIUserInputItem {
+    id: string;
+    kind: "user_input";
+    text: string;
+    clientId?: string;
+}
+export type AgentUITimelineItem = AgentUIMessageItem | AgentUIToolItem | AgentUIRawItem | AgentUIUserInputItem;
 export interface AgentUIWorkItemState {
     id: string;
     kind: WorkItemKind;

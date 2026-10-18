@@ -524,7 +524,35 @@ button.activity-disclosure-row.activity-disclosure-row,
   cursor: default;
 }
 
-/* Transcript disclosure rows (tools, thoughts, process/worked-for). */
+/* Turn footer slot. It exists from the first streamed frame, holding the
+   footer's height empty, so the stop fills it rather than growing the turn.
+   The footer of a turn the reader watched settle fades in; history footers
+   render at rest.
+     --chat-turn-footer-height  (default 0px) the host footer's row height */
+.chat-turn-footer-slot {
+  min-height: var(--chat-turn-footer-height, 0px);
+}
+.chat-turn-footer-slot[data-session-turn-footer-slot="entering"] {
+  animation: chat-turn-footer-enter 240ms ease-out both;
+}
+@keyframes chat-turn-footer-enter {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-turn-footer-slot[data-session-turn-footer-slot="entering"] {
+    animation: none;
+  }
+}
+
+/* Transcript disclosure rows (tools, thoughts, process/worked-for).
+   Hosts tune size, weight and tone through these variables rather than by
+   out-ranking the selectors below:
+     --chat-transcript-row-font-size    (default 13px)
+     --chat-transcript-row-line-height  (default inherit)
+     --chat-transcript-row-font-weight  (default inherit)
+     --chat-transcript-row-fg           (default --chat-fg-muted) */
 button.chat-interactive-surface--transcript.activity-disclosure-row.activity-disclosure-row {
   width: 100%;
   max-width: 100%;
@@ -532,19 +560,27 @@ button.chat-interactive-surface--transcript.activity-disclosure-row.activity-dis
   height: auto;
   padding: 0;
   padding-inline-start: 0;
-  font-size: 13px;
+  font-size: var(--chat-transcript-row-font-size, 13px);
+  line-height: var(--chat-transcript-row-line-height, inherit);
+  font-weight: var(--chat-transcript-row-font-weight, inherit);
 }
 
 button.chat-interactive-surface--transcript.activity-disclosure-row
   .chat-transcript-disclosure-summary,
 button.chat-interactive-surface--transcript.chat-reasoning-trigger.activity-disclosure-row
   .chat-transcript-disclosure-summary {
-  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+  color: var(
+    --chat-transcript-row-fg,
+    var(--chat-fg-muted, var(--fg-muted, currentColor))
+  );
 }
 
 button.chat-interactive-surface--transcript.activity-disclosure-row
   .chat-activity-icon {
-  color: var(--chat-fg-muted, var(--fg-muted, currentColor));
+  color: var(
+    --chat-transcript-row-fg,
+    var(--chat-fg-muted, var(--fg-muted, currentColor))
+  );
 }
 
 /* Standalone thought/reasoning chip (showIcon on ChatReasoningTrigger). */

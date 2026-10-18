@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
     "type": "git",
@@ -65,6 +65,10 @@
     "./session-events/acp": {
       "types": "./dist/session-events/acp.d.ts",
       "import": "./dist/session-events/acp.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/stress-session.d.ts",
+      "import": "./dist/testing/stress-session.js"
     },
     "./session-kernel": {
       "types": "./dist/session-kernel/index.d.ts",
@@ -165,6 +169,7 @@
     "link:consumers": "node scripts/consumers.mjs link",
     "unlink:consumers": "node scripts/consumers.mjs unlink",
     "test": "vitest run",
+    "test:perf": "NODE_OPTIONS=--expose-gc vitest run --config vitest.perf.config.ts --pool=forks --reporter=verbose --silent=false",
     "test:coverage": "vitest run --coverage",
     "test:live:cursor-cloud": "vitest run --config vitest.live.config.ts",
     "test:watch": "vitest",

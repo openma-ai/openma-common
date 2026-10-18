@@ -17,9 +17,8 @@
  *   - `current_mode_update` → REPLACE the agent's current mode id.
  *   - session-level metadata is handled by SessionStore before this reducer.
  *
- * Designed to be pure: pass an immutable event list, get a snapshot.
- * Re-running on each render is cheap because events list grows linearly
- * with the turn length (a few hundred at most).
+ * reduceTurn is the pure convenience wrapper; live callers retain a projector
+ * and apply only newly received events.
  */
 export { extractAcpSystemNotice, type AcpSystemNotice } from "./acp-system-notices.js";
 /** Internal transport context added when the ACP SDK gives OpenMA a
@@ -102,16 +101,15 @@ export interface PlanDocument {
     uri?: string;
 }
 export type TimelineItem = {
-    /** Continuous block of assistant text — concatenated agent_message_chunk
-     *  events that arrived without being interrupted by a tool_call. The
-     *  next tool_call starts a new segment. */
+    /** Adjacent assistant chunks in the same phase and message append here. */
     kind: "assistant_text";
+    segmentId?: number;
     text: string;
     phase?: "commentary" | "final_answer";
 } | {
-    /** One logical thought message. Chunks sharing a messageId patch this
-     * item; a new messageId appends a new item to the activity timeline. */
+    /** Adjacent chunks sharing a messageId patch the open thought item. */
     kind: "thought";
+    segmentId?: number;
     messageId?: string;
     text: string;
 } | {
@@ -120,11 +118,14 @@ export type TimelineItem = {
      *  that PATCH the tool still flow through. */
     kind: "tool";
     toolCallId: string;
+} | {
+    kind: "user_input";
+    text: string;
+    clientId?: string;
 };
 export interface TurnRender {
     thoughtText: string;
-    /** The current, replaceable thought status at the tail of a running
-     * activity stream. Cleared as soon as commentary or a tool follows it. */
+    /** The latest text from the open thought segment, if one exists. */
     currentThoughtText: string;
     assistantText: string;
     tools: ToolEntry[];
@@ -161,6 +162,11 @@ export type ParsedAcpEvent = {
     messageId?: string;
     /** Claude Agent ACP's nested transcript correlation. */
     parentToolUseId?: string;
+    event: unknown;
+} | {
+    kind: "user_input";
+    text: string;
+    clientId?: string;
     event: unknown;
 } | {
     kind: "notice";
@@ -204,7 +210,12 @@ export declare function sessionUpdateInner(event: unknown): Record<string, unkno
 export declare function sessionUpdateType(event: unknown): string | undefined;
 export declare function sanitizeThoughtText(text: string): string;
 export declare function parseAcpEvent(event: unknown): ParsedAcpEvent;
-export declare function mergeStreamingText(accumulated: string, incoming: string): string;
+export declare function createTurnProjector(): {
+    apply(entry: {
+        payload: unknown;
+    }): void;
+    snapshot(): TurnRender;
+};
 export declare function reduceTurn(events: readonly {
     payload: unknown;
 }[]): TurnRender;
