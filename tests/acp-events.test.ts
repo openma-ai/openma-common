@@ -591,6 +591,35 @@ describe("incremental ACP turn projection", () => {
     ]);
   });
 
+  it("T2b keeps delta chunks that repeat the segment tail", () => {
+    // Recorded Codex tokens: "#104" then "4", "=100" then "00", "\n\n" twice.
+    const chunk = (text: string) => ({
+      sessionUpdate: "agent_message_chunk",
+      messageId: "message-1",
+      content: { type: "text", text },
+    });
+    const thought = (text: string) => ({
+      sessionUpdate: "agent_thought_chunk",
+      messageId: "thought-1",
+      content: { type: "text", text },
+    });
+    const out = render(
+      thought("\n\n"),
+      thought("\n\n"),
+      chunk("run #104"),
+      chunk("4, max_execution_time=100"),
+      chunk("00"),
+    );
+    expect(out.timeline).toEqual([
+      { kind: "thought", segmentId: 0, messageId: "thought-1", text: "\n\n\n\n" },
+      {
+        kind: "assistant_text",
+        segmentId: 1,
+        text: "run #1044, max_execution_time=10000",
+      },
+    ]);
+  });
+
   it("T3 patches known tools in place without closing the open thought segment", () => {
     const projector = createTurnProjector();
     const apply = (payload: unknown) => projector.apply({ payload });

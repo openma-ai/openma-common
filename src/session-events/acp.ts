@@ -922,30 +922,6 @@ function isEmptyObject(value: unknown): boolean {
   return Object.keys(value as Record<string, unknown>).length === 0;
 }
 
-const MIN_OVERLAP = 8;
-const SNAPSHOT_HEAD_PROBE = 16;
-
-export function mergeStreamingText(accumulated: string, incoming: string): string {
-  if (!accumulated) return incoming;
-  if (!incoming) return accumulated;
-  if (incoming === accumulated) return accumulated;
-  if (incoming.startsWith(accumulated)) return incoming;
-  if (accumulated.endsWith(incoming)) return accumulated;
-  if (incoming.length >= accumulated.length) {
-    const head = Math.min(SNAPSHOT_HEAD_PROBE, accumulated.length);
-    if (head > 0 && incoming.slice(0, head) === accumulated.slice(0, head)) {
-      return incoming;
-    }
-  }
-  const maxOverlap = Math.min(accumulated.length, incoming.length);
-  for (let k = maxOverlap; k >= MIN_OVERLAP; k--) {
-    if (accumulated.endsWith(incoming.slice(0, k))) {
-      return accumulated + incoming.slice(k);
-    }
-  }
-  return accumulated + incoming;
-}
-
 type OpenSegment =
   | {
       kind: "thought";
@@ -1003,6 +979,9 @@ export function createTurnProjector(): {
     out.timeline[out.timeline.length - 1] = item;
     timelineVersion += 1;
   };
+  // ACP content chunks and OpenMA `agent.*` chunk events are deltas: the
+  // text of a segment is their plain concatenation. A chunk that repeats the
+  // segment's tail ("4" after "#104", "\n\n" after "\n\n") is new text.
   const appendThought = (parsed: Extract<ParsedAcpEvent, { kind: "thought" }>) => {
     if (
       openSegment?.kind === "thought" &&
@@ -1010,7 +989,7 @@ export function createTurnProjector(): {
     ) {
       const item = {
         ...openSegment.item,
-        text: mergeStreamingText(openSegment.item.text, parsed.text),
+        text: openSegment.item.text + parsed.text,
       };
       replaceOpenTimelineItem(item);
       openSegment.item = item;
@@ -1168,7 +1147,7 @@ export function createTurnProjector(): {
         ) {
           const item = {
             ...openSegment.item,
-            text: mergeStreamingText(openSegment.item.text, parsed.text),
+            text: openSegment.item.text + parsed.text,
           };
           replaceOpenTimelineItem(item);
           openSegment.item = item;
