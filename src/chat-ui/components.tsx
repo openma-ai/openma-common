@@ -1089,24 +1089,21 @@ function ChatComposerFrame({
 
 /** Backchat's complete turn component over the common Agent UI state shape.
  * Host products only supply content renderers and localized copy. */
+// A Record keeps the classification exhaustive at compile time.
+const TERMINAL_TURN_STATUS: Record<SessionTurnStatus, boolean> = {
+  queued: false,
+  running: false,
+  unknown: false,
+  complete: true,
+  completed: true,
+  error: true,
+  errored: true,
+  cancelled: true,
+  terminated: true,
+};
+
 export function isTerminalTurnStatus(status: SessionTurnStatus): boolean {
-  switch (status) {
-    case "queued":
-    case "running":
-    case "unknown":
-      return false;
-    case "complete":
-    case "completed":
-    case "error":
-    case "errored":
-    case "cancelled":
-    case "terminated":
-      return true;
-    default: {
-      const exhaustive: never = status;
-      return exhaustive;
-    }
-  }
+  return TERMINAL_TURN_STATUS[status];
 }
 
 export function AgentUITurnView({
@@ -1238,7 +1235,7 @@ export function AgentUITurnView({
                 item,
                 section: "process",
                 live: isStreaming && item === finalItem,
-                prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                prefixSkip: assistantPrefixes.get(item.id)!,
               })}
             </div>,
           );
@@ -1467,7 +1464,7 @@ export function AgentUITurnView({
                   item,
                   section: "answer",
                   live,
-                  prefixSkip: assistantPrefixes.get(item.id) ?? 0,
+                  prefixSkip: assistantPrefixes.get(item.id)!,
                 })}
               </div>
             );
@@ -1526,6 +1523,8 @@ function useAgentUITurnElapsedSeconds(
   return agentUITurnElapsedSeconds(turn, fixedNow ?? clock);
 }
 
+/** Text offset of every assistant message (or thought) in the turn, keyed by
+ * item id. Every item of the requested kind has an entry. */
 function streamPrefixes(
   items: readonly AgentUITimelineItem[],
   kind: "assistant" | "thought",

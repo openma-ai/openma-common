@@ -460,6 +460,27 @@ await writeFile(join(prefix, "node_modules", ".bin", binName), "#!/bin/sh\\nexit
     await rm(root, { recursive: true, force: true });
   });
 
+  unixIt("installs under the bin directory when no install root is given", async () => {
+    const root = join(tmpdir(), `openma-acp-binroot-${process.pid}-${Date.now()}`);
+    const binDir = join(root, "bin");
+    const fakeNpm = await writeFakeNpm(root);
+    await installAcpRegistryAgent({
+      registryId: "example-agent",
+      shimName: "example-agent",
+      binDir,
+      npmCommand: fakeNpm,
+      registryAgent: {
+        id: "example-agent",
+        version: "1.0.0",
+        distribution: { npx: { package: "@example/agent@1.0.0" } },
+      },
+    });
+    const installed = (await readdir(join(binDir, "registry", "example-agent")))
+      .filter((name) => name.startsWith("v_"));
+    expect(installed.map((name) => name.split("_")[1])).toEqual(["1.0.0"]);
+    await rm(root, { recursive: true, force: true });
+  });
+
   unixIt("keeps only the active and the previous version after an upgrade", async () => {
     const root = join(tmpdir(), `openma-acp-prune-${process.pid}-${Date.now()}`);
     const binDir = join(root, "bin");

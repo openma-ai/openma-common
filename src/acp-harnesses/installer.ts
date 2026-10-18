@@ -347,6 +347,9 @@ async function pruneSupersededInstalls(
   previous: string | undefined,
 ): Promise<void> {
   const active = await activeInstallDirName(registryDir, shimPath);
+  // Only reachable when another process rewrites the launcher mid-install.
+  // Without a known active directory nothing is safe to remove.
+  /* v8 ignore next */
   if (!active) return;
   const entries = await readdir(registryDir).catch(() => [] as string[]);
   for (const name of entries) {

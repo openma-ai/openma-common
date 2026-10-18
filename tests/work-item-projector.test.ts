@@ -157,4 +157,14 @@ describe("WorkItem projector history prepend", () => {
     expect(afterPrepend.items.get("w")).toMatchObject({ title: "old", status: "running" });
     expect(projector.snapshot()).toBe(afterPrepend);
   });
+  it("ignores a work-item event whose id is empty", () => {
+    const projector = createWorkItemProjector();
+    const empty = {
+      ...event("work_item.started", { kind: "bash", title: "nameless" }, { event_id: "e-empty", seq: 1 }),
+      work_item_id: "",
+    } as OpenMAEvent;
+    expect(projector.apply(empty)).toBe(true);
+    expect(projector.snapshot().items.size).toBe(0);
+    expect(reduceWorkItems([empty]).items.size).toBe(0);
+  });
 });
