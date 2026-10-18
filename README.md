@@ -40,8 +40,9 @@ or wire-event shapes into product state.
 - `@openma/common/acp-harnesses` — shared PATH-based ACP harness catalog (`DEFAULT_ACP_HARNESSES`) and persisted-catalog cloning and validation.
 - `@openma/common/acp-harnesses/registry` — official ACP registry fetch/cache plus OpenMA overlay (`known-agents`), and managed-bin / PATH detection.
 - `@openma/common/acp-harnesses/installer` — registry-backed npm/uvx/binary installs into a managed bin directory (host-agnostic `npmCommand` / `npmEnv`).
-- `@openma/common/acp-harnesses/headless-launch` — `buildAcpHeadlessLaunch(entry, options)`: the launch arguments and variables for one unattended run, built from the harness's own recipe (`KnownAgentEntry.headless`). See [Unattended runs and pinned installs](#unattended-runs-and-pinned-installs).
+- `@openma/common/acp-harnesses/headless-launch` — `buildAcpHeadlessLaunch(entry, options)`: the launch arguments and variables for one unattended run, built from the harness's own recipe (`KnownAgentEntry.headless`). `resolveAcpHeadlessThinkingLevel(configOptions, requested)`: the thinking level the started session runs at. See [Unattended runs and pinned installs](#unattended-runs-and-pinned-installs).
 - `@openma/common/acp-harnesses/agent-setup` — install/upgrade/uninstall and capability inspection service used by Backchat. See [Managed ACP harness installation](#managed-acp-harness-installation).
+- `@openma/common/acp-harnesses/custom-agents` — shared store for custom ACP agent definitions under `~/.oma`: `config.toml` `[[agents]]` override rows plus compatible reads of Martty `settings.json` `harnesses[]` rows (migrated on write). Versions in `args` are kept verbatim.
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
@@ -91,14 +92,27 @@ Adapters that implement the request advertise `sessionCapabilities.fork` togethe
 
 Truncation keeps the selected assistant message and everything before it, and drops everything after it. If that message contains tool calls whose results sit after the message, adapters remove those tool calls from the truncated message. The new session stays a legal model transcript, and `session/load` replay still ends on the target message. Tool calls that already completed before that message stay as they were. The contract, client example, and dependency order are in [docs/fork-support.md](./docs/fork-support.md).
 
-## Install from Git
-
-Use an immutable release tag in `package.json`:
+## Install from npm
 
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.8.0"
+    "@openma/common": "^0.9.2"
+  }
+}
+```
+
+Release tags are published to npm by CI with provenance. Built `dist/` output
+is what ships, so installs do not run package lifecycle scripts.
+
+## Install from Git
+
+Git installs keep working for pinned commits. Use an immutable release tag in `package.json`:
+
+```json
+{
+  "dependencies": {
+    "@openma/common": "github:openma-ai/openma-common#v0.9.2"
   }
 }
 ```
@@ -328,6 +342,22 @@ carry: one the recipe has no flag or variable for, and a `provider` or
 `thinkingLevel` given without a `model` (both are written inside the model
 value). A host that depends on an option, such as `agentDir` for isolation,
 must stop when the list is not empty. An entry without a recipe throws.
+
+**Thinking level.** The launch only requests a level. A harness resolves it
+against the model and does not fail when the model has no such level: Pi runs
+`deepseek-flash:medium` at `high`. After the session starts, read what it
+reports:
+
+```ts
+import { resolveAcpHeadlessThinkingLevel } from "@openma/common/acp-harnesses/headless-launch";
+
+const thinking = resolveAcpHeadlessThinkingLevel(session.configOptions, "medium");
+// { requested: "medium", effective: "high", available: ["off", "low", "high", "max"], status: "adjusted" }
+```
+
+`status` is `applied` (the session runs at the requested level), `adjusted`
+(the harness chose another one; record `effective`), or `unreported` (the
+session has no `thought_level` select option, so the request had no effect).
 
 **Pinned install.** `installPinnedAcpHarness` installs `entry.pinned`: the
 adapter package at one exact version, with `entry.pinned.dependencies` written

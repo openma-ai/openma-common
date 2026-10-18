@@ -1,17 +1,69 @@
 name: CI
 
+# Fast path only: the Linux verify (tests, typecheck, build, dist freshness,
+# coverage for the Codecov patch check) and the PR-scoped release gate on every
+# change that can affect them. The Windows verify and the Playwright
+# chat-interactive-surface suite moved to ci-heavy.yml — they run post-merge on
+# main, on a pull request carrying the `full-ci` label, or manually through
+# workflow_dispatch.
+
 on:
   pull_request:
   push:
     branches: [main]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  # dorny/paths-filter lists changed files through the Pulls API on pull_request.
+  pull-requests: read
   actions: write
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Skipped jobs report success, so a docs-only pull request stays mergeable
+  # without burning runner minutes on work it cannot affect.
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.resolve.outputs.code }}
+    steps:
+      - name: Check out source
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
+        uses: actions/checkout@v4
+
+      - name: Detect code-path changes
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/'))
+        id: filter
+        uses: dorny/paths-filter@v4
+        with:
+          # 'some' ignores '!' patterns; 'some-with-excludes' makes a file
+          # match only when it hits at least one pattern and no negated one.
+          predicate-quantifier: 'some-with-excludes'
+          filters: |
+            code:
+              - "**"
+              - "!docs/**"
+              - "!artifacts/**"
+              - "!*.md"
+              - "!LICENSE"
+
+      - name: Resolve the code flag
+        id: resolve
+        env:
+          FILTER_CODE: ${{ steps.filter.outputs.code }}
+        run: |
+          # No diff context (dispatch, tag push): run everything.
+          echo "code=${FILTER_CODE:-true}" >> "$GITHUB_OUTPUT"
+
   verify:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,19 +82,6 @@ jobs:
       - run: pnpm verify
       - name: Verify turn projector performance
         run: pnpm test:perf
-      - name: Install Playwright Chromium for chat UI surface checks
-        run: pnpm exec playwright install chromium
-      - name: Verify chat UI interactive surface states
-        run: pnpm verify:chat-ui-interactive-surface
-        env:
-          ARTIFACT_DIR: ${{ github.workspace }}/artifacts/chat-ui-interactive-surface
-      - name: Upload chat UI interactive surface screenshots
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: chat-ui-interactive-surface-${{ github.run_id }}
-          path: artifacts/chat-ui-interactive-surface/
-          if-no-files-found: warn
       - name: Verify acp-fork browser bundle
         run: node scripts/verify-acp-fork-browser.mjs
       - name: Verify committed build output is current
@@ -82,59 +121,3 @@ jobs:
         env:
           RELEASE_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: node scripts/release-check.mjs
-
-  verify-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: pnpm
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          version: "0.12.17"
-          enable-cache: false
-      - name: Install a Python interpreter for uvx tests
-        run: uv python install 3.12
-      - name: Add Git gzip, bzip2, and OpenSSL to PATH
-        shell: pwsh
-        run: |
-          $gitUsr = "C:\Program Files\Git\usr\bin"
-          foreach ($tool in @("gzip.exe", "bzip2.exe", "openssl.exe")) {
-            if (-not (Test-Path (Join-Path $gitUsr $tool))) {
-              throw "Missing $tool in $gitUsr"
-            }
-          }
-          Add-Content -Path $env:GITHUB_PATH -Value $gitUsr
-      - name: Install official xz
-        shell: pwsh
-        run: |
-          # windows-2025 Git for Windows ships gzip, bzip2, and openssl under
-          # usr\bin, and does not ship xz.exe there or in mingw64\bin.
-          # Chocolatey community has no xz package. Use the official XZ Utils
-          # Windows build and keep it off the Git/MSYS tool directories.
-          $gitXz = @(
-            "C:\Program Files\Git\usr\bin\xz.exe",
-            "C:\Program Files\Git\mingw64\bin\xz.exe"
-          )
-          foreach ($candidate in $gitXz) {
-            if (Test-Path $candidate) { Write-Host "Git also has $candidate" }
-            else { Write-Host "Not present: $candidate" }
-          }
-          $version = "5.8.4"
-          $expected = "f31af7638391ecf286d48bc8555ce6e131691a1c52a9e44303bce57069e9de56"
-          $zip = Join-Path $env:RUNNER_TEMP "xz-windows.zip"
-          $dest = Join-Path $env:RUNNER_TEMP "xz"
-          Invoke-WebRequest -Uri "https://github.com/tukaani-project/xz/releases/download/v$version/xz-$version-windows.zip" -OutFile $zip
-          $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "xz zip checksum mismatch: $actual" }
-          Expand-Archive -Path $zip -DestinationPath $dest
-          $bin = Join-Path $dest "bin_x86-64"
-          $xz = Join-Path $bin "xz.exe"
-          if (-not (Test-Path $xz)) { throw "xz.exe missing from $bin" }
-          Add-Content -Path $env:GITHUB_PATH -Value $bin
-          & $xz --version
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm verify
