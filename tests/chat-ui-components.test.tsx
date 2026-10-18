@@ -264,7 +264,7 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).not.toContain('data-thinking-fallback="true"');
   });
 
-  it.each(["commentary", "final_answer"] as const)("keeps a tail fallback after a completed %s while the turn is running", (phase) => {
+  it.each(["commentary", "final_answer"] as const)("shows no thinking fallback once a %s block is on screen", (phase) => {
     const render = (status: AgentUITurnState["status"]) => renderToStaticMarkup(
       <AgentUITurnView
         turn={{ id: "waiting-tail", status, items: [activityTool("done"), assistant("finished-message", "Finished paragraph", phase)] }}
@@ -273,10 +273,9 @@ describe("Backchat main AgentUITurnView", () => {
         slots={slots}
       />,
     );
-    const html = render("running");
-    expect(html).toContain('data-thinking-fallback="true"');
-    expect(html.indexOf('data-thinking-fallback="true"')).toBeGreaterThan(html.indexOf("Finished paragraph"));
-    for (const status of ["completed", "failed", "cancelled"] as const) {
+    // The visible blocks carry the turn's progress; "Thinking" is only for
+    // a turn with nothing on screen yet.
+    for (const status of ["running", "completed", "failed", "cancelled"] as const) {
       expect(render(status)).not.toContain('data-thinking-fallback="true"');
     }
   });
@@ -329,7 +328,7 @@ describe("Backchat main AgentUITurnView", () => {
     );
   });
 
-  it("hides the complete process while retaining nested disclosure state", () => {
+  it("does not mount a collapsed completed process until it is opened", () => {
     const turn: AgentUITurnState = {
       id: "turn-complete",
       status: "completed",
@@ -354,9 +353,28 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).toContain('data-session-process-state="complete"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('data-state="closed"');
-    expect(html).toContain('aria-hidden="true" inert=""');
-    expect(html).toContain('data-tool-item="one"');
-    expect(html).toContain('data-tool-item="two"');
+    // Collapsed history does not mount its hidden tool rows.
+    expect(html).not.toContain('data-tool-item="one"');
+    expect(html).not.toContain('data-session-process-activity="true"');
+
+    const opened = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-1"
+        turn={turn}
+        thoughts="transient"
+        defaultProcessOpen
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+    expect(opened).toContain('data-tool-item="one"');
+    expect(opened).toContain('data-tool-item="two"');
   });
 
   it("opens the live activity group while its latest tool is running", () => {
@@ -430,7 +448,9 @@ describe("Backchat main AgentUITurnView", () => {
     expect(uninterrupted).toContain("Running Command one");
     expect(uninterrupted).toContain('data-tool-live="false"');
     expect(uninterrupted).toContain("Ran Command one");
-    expect(uninterrupted).toContain('data-thinking-fallback="true"');
+    // The last block reads as running even though the tool finished, so the
+    // generic fallback stays away.
+    expect(uninterrupted).not.toContain('data-thinking-fallback="true"');
 
     const interrupted = render([
       activityTool("one"),
@@ -469,6 +489,7 @@ describe("Backchat main AgentUITurnView", () => {
   it("renders assistant messages and activity groups in chronological order", () => {
     const html = renderToStaticMarkup(
       <AgentUITurnView
+        defaultProcessOpen
         turn={{
           id: "turn-chronological",
           status: "completed",
@@ -527,6 +548,7 @@ describe("Backchat main AgentUITurnView", () => {
           ],
         }}
         thoughts="history"
+        defaultProcessOpen
         labels={{
           workingFor: () => "Working",
           workedFor: () => "Worked",
@@ -547,6 +569,7 @@ describe("Backchat main AgentUITurnView", () => {
     const footer = vi.fn(() => <footer data-turn-footer>Footer</footer>);
     const html = renderToStaticMarkup(
       <AgentUITurnView
+        defaultProcessOpen
         turn={{
           id: "turn-interleaved-rounds",
           status: "completed",
@@ -643,7 +666,7 @@ describe("Backchat main AgentUITurnView", () => {
       },
       slots,
     };
-    const html = renderToStaticMarkup(<AgentUITurnView {...props} />);
+    const html = renderToStaticMarkup(<AgentUITurnView {...props} defaultProcessOpen />);
     const inputIndex = html.indexOf("Check the cache path.");
     expect(inputIndex).toBeGreaterThan(html.indexOf(">Before</p>"));
     expect(inputIndex).toBeLessThan(html.indexOf('data-tool-item="after-steer"'));
@@ -655,6 +678,7 @@ describe("Backchat main AgentUITurnView", () => {
 
     const slotted = renderToStaticMarkup(
       <AgentUITurnView
+        defaultProcessOpen
         {...props}
         slots={{
           ...slots,

@@ -788,6 +788,8 @@ export interface AgentUITurnViewProps {
   density?: AgentChatDensity;
   /** Deterministic clock for tests and non-live projections. */
   now?: number;
+  /** Initial expansion of a non-streaming turn's process strip. */
+  defaultProcessOpen?: boolean;
 }
 
 export interface AgentChatViewSlots {
@@ -1119,17 +1121,31 @@ export function AgentUITurnView({
   activityTools = "latest",
   density = "comfortable",
   now,
+  defaultProcessOpen = false,
 }: AgentUITurnViewProps) {
   const isStreaming = turn.status === "running";
   const isCancelled = turn.status === "cancelled";
   const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
   const isStopped = !isStreaming && isTerminalTurnStatus(resolvedFrameStatus);
-  const [processOpen, setProcessOpen] = useState(isStreaming);
+  const [processOpen, setProcessOpen] = useState(isStreaming || defaultProcessOpen);
+  // Follow streaming transitions without an extra post-commit render. A turn
+  // that starts streaming opens its process; one that settles leaves it as
+  // the reader saw it — collapsing on stop moved the whole answer.
+  const [wasStreaming, setWasStreaming] = useState(isStreaming);
+  // Set once this view watched the turn settle, so only that footer fades in;
+  // history pages render their footers at rest.
+  const [settledLive, setSettledLive] = useState(false);
+  if (wasStreaming !== isStreaming) {
+    setWasStreaming(isStreaming);
+    if (isStreaming) setProcessOpen(true);
+    else setSettledLive(true);
+  }
+  // A collapsed process strip is not mounted until it is first opened, so a
+  // long history page does not render every tool row and Markdown body it
+  // hides. Once opened it stays mounted to keep nested disclosure state.
+  const [processMounted, setProcessMounted] = useState(processOpen);
+  if (processOpen && !processMounted) setProcessMounted(true);
   const elapsedSeconds = useAgentUITurnElapsedSeconds(turn, isStreaming, now);
-  useEffect(() => {
-    setProcessOpen(isStreaming);
-  }, [isStreaming]);
-
   const prompt = turn.items.find(
     (item): item is AgentUIMessageItem =>
       item.kind === "message" && item.role === "user",
@@ -1197,14 +1213,19 @@ export function AgentUITurnView({
     }
   }
 
-  const hasLiveTail = finalActivityItem && (
-    (finalActivityItem.kind === "message" || finalActivityItem.kind === "thinking")
-      ? finalActivityItem.status === "streaming" && finalActivityItem.text.trim().length > 0
-      : finalActivityItem.kind === "tool" && isAgentUIToolRunning(finalActivityItem.status)
+  // "Thinking…" is only a fallback for a turn that has nothing on screen yet.
+  // Once any block is visible, that block carries the turn's progress — a
+  // tool row says it is running, a thought or message streams — whatever its
+  // own status, so the fallback never sits beside it.
+  const hasVisibleBlock = items.some((item) =>
+    item.kind === "tool" ||
+    ((item.kind === "message" || item.kind === "thinking") &&
+      item.text.trim().length > 0)
   );
-  const showThinkingFallback = isStreaming && !hasLiveTail;
+  const showThinkingFallback = isStreaming && !hasVisibleBlock;
 
   const processActivitySequences = useMemo(() => {
+    if (!processMounted) return null;
     const sequences: ReactNode[] = [];
     for (let index = 0; index < processItems.length; index += 1) {
       const item = processItems[index];
@@ -1334,6 +1355,7 @@ export function AgentUITurnView({
     isStreaming,
     labels,
     finalItem,
+    processMounted,
     processItems,
     renderContext,
     slots,
@@ -1411,7 +1433,7 @@ export function AgentUITurnView({
               <div className="space-y-1" data-session-process-activity="true">
                 {processActivitySequences}
               </div>
-            ) : (
+            ) : processMounted ? (
               <div
                 className="space-y-1"
                 data-session-process-activity="true"
@@ -1421,7 +1443,7 @@ export function AgentUITurnView({
               >
                 {processActivitySequences}
               </div>
-            )}
+            ) : null}
             <ChatReasoningContent>
               <div className="space-y-1">
                 {slots.renderProcessBefore?.(renderContext)}
@@ -1471,7 +1493,19 @@ export function AgentUITurnView({
           </p>
         ) : null}
         {slots.renderAfterAnswer?.(renderContext)}
-        {isStopped ? slots.renderFooter?.(renderContext) : null}
+        {slots.renderFooter && (isStreaming || isStopped) ? (
+          // One slot for the footer's whole life: while the turn streams it
+          // holds the footer's height empty, so the stop only fills it in.
+          <div
+            className="chat-turn-footer-slot"
+            data-session-turn-footer-slot={
+              isStreaming ? "reserved" : settledLive ? "entering" : "settled"
+            }
+            aria-hidden={isStreaming ? true : undefined}
+          >
+            {isStopped ? slots.renderFooter(renderContext) : null}
+          </div>
+        ) : null}
       </SessionTurnFrame>
     </>
   );
