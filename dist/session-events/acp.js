@@ -724,12 +724,12 @@ export function createTurnProjector() {
     let timelineVersion = 0;
     let snapshotTimelineVersion = 0;
     let snapshotTimeline = [];
-    let thoughtTextVersion = 0;
-    let snapshotThoughtTextVersion = 0;
-    let snapshotThoughtText = "";
-    let assistantTextVersion = 0;
-    let snapshotAssistantTextVersion = 0;
-    let snapshotAssistantText = "";
+    // Running concatenations of every thought / assistant segment. Segments
+    // only ever grow at the end and the timeline only appends, so each chunk
+    // extends these by its own text. Rebuilding them from the timeline on every
+    // snapshot made a long turn's per-event cost grow with all text so far.
+    let thoughtText = "";
+    let assistantText = "";
     const closeOpenSegment = () => {
         openSegment = undefined;
     };
@@ -753,9 +753,11 @@ export function createTurnProjector() {
             };
             replaceOpenTimelineItem(item);
             openSegment.item = item;
+            thoughtText += parsed.text;
             return;
         }
         closeOpenSegment();
+        thoughtText += parsed.text;
         const item = {
             kind: "thought",
             segmentId: out.timeline.length,
@@ -896,7 +898,6 @@ export function createTurnProjector() {
                 break;
             case "thought":
                 appendThought(parsed);
-                thoughtTextVersion += 1;
                 break;
             case "text": {
                 if (openSegment?.kind === "assistant_text" &&
@@ -908,7 +909,7 @@ export function createTurnProjector() {
                     };
                     replaceOpenTimelineItem(item);
                     openSegment.item = item;
-                    assistantTextVersion += 1;
+                    assistantText += parsed.text;
                     break;
                 }
                 closeOpenSegment();
@@ -919,7 +920,7 @@ export function createTurnProjector() {
                     ...(parsed.phase ? { phase: parsed.phase } : {}),
                 };
                 appendTimelineItem(item);
-                assistantTextVersion += 1;
+                assistantText += parsed.text;
                 openSegment = {
                     kind: "assistant_text",
                     messageId: parsed.messageId,
@@ -979,20 +980,6 @@ export function createTurnProjector() {
             snapshotTimelineVersion = timelineVersion;
         }
         const timeline = snapshotTimeline;
-        if (snapshotThoughtTextVersion !== thoughtTextVersion) {
-            snapshotThoughtText = timeline
-                .filter((item) => item.kind === "thought")
-                .map((item) => item.text)
-                .join("");
-            snapshotThoughtTextVersion = thoughtTextVersion;
-        }
-        if (snapshotAssistantTextVersion !== assistantTextVersion) {
-            snapshotAssistantText = timeline
-                .filter((item) => item.kind === "assistant_text")
-                .map((item) => item.text)
-                .join("");
-            snapshotAssistantTextVersion = assistantTextVersion;
-        }
         if (snapshotToolsVersion !== toolsVersion) {
             snapshotTools = toolsOrder
                 .map((id) => toolById.get(id))
@@ -1004,11 +991,11 @@ export function createTurnProjector() {
             snapshotPlanVersion = planVersion;
         }
         return {
-            thoughtText: snapshotThoughtText,
+            thoughtText,
             currentThoughtText: openSegment?.kind === "thought"
                 ? latestThoughtSegment(openSegment.item.text)
                 : "",
-            assistantText: snapshotAssistantText,
+            assistantText,
             tools: snapshotTools,
             plan: snapshotPlan,
             planDocument: out.planDocument ? { ...out.planDocument } : undefined,
