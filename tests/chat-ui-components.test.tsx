@@ -234,50 +234,21 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).toContain("Thinking");
   });
 
-  it("removes the generic fallback as soon as a visible answer event arrives", () => {
-    const html = renderToStaticMarkup(
-      <AgentUITurnView
-        sessionId="session-answering"
-        turn={{
-          id: "turn-answering",
-          status: "running",
-          items: [
-            {
-              ...assistant("answer-live", "Answering"),
-              status: "streaming",
-            },
-          ],
-        }}
-        thoughts="history"
-        labels={{
-          workingFor: (seconds) => `Working ${seconds}s`,
-          workedFor: (seconds) => `Worked ${seconds}s`,
-          thinking: "Thinking",
-          toolRunSummary: () => "Ran commands",
-          toolActivity: (tool) => tool.title ?? "Tool",
-        }}
-        slots={slots}
-      />,
+  it.each(["commentary", "final_answer"] as const)("keeps one live fallback after %s text until the turn resolves", (phase) => {
+    const render = (status: AgentUITurnState["status"]) => renderToStaticMarkup(
+      <AgentUITurnView turn={{ id: "waiting-tail", status, items: [assistant("message", "Interim paragraph", phase)] }} thoughts="history"
+        labels={{ workingFor: () => "Working", workedFor: () => "Worked", thinking: "Thinking", toolRunSummary: () => "Ran commands", toolActivity: () => "Tool" }} slots={slots} />,
     );
-
-    expect(html).toContain("Answering");
-    expect(html).not.toContain('data-thinking-fallback="true"');
+    expect(render("running").match(/data-thinking-fallback="true"/g)).toHaveLength(1);
+    for (const status of ["completed", "failed", "cancelled"] as const) expect(render(status)).not.toContain('data-thinking-fallback="true"');
   });
 
-  it.each(["commentary", "final_answer"] as const)("shows no thinking fallback once a %s block is on screen", (phase) => {
-    const render = (status: AgentUITurnState["status"]) => renderToStaticMarkup(
-      <AgentUITurnView
-        turn={{ id: "waiting-tail", status, items: [activityTool("done"), assistant("finished-message", "Finished paragraph", phase)] }}
-        thoughts="history"
-        labels={{ workingFor: () => "Working", workedFor: () => "Worked", thinking: "Thinking", toolRunSummary: () => "Ran commands", toolActivity: () => "Tool" }}
-        slots={slots}
-      />,
-    );
-    // The visible blocks carry the turn's progress; "Thinking" is only for
-    // a turn with nothing on screen yet.
-    for (const status of ["running", "completed", "failed", "cancelled"] as const) {
-      expect(render(status)).not.toContain('data-thinking-fallback="true"');
-    }
+  it("does not duplicate fallback beside a genuinely running tool or thought", () => {
+    const render = (item: AgentUITurnState["items"][number]) => renderToStaticMarkup(<AgentUITurnView turn={{ id: "live", status: "running", items: [item] }} thoughts="history"
+      labels={{ workingFor: () => "Working", workedFor: () => "Worked", thinking: "Thinking", toolRunSummary: () => "Ran commands", toolActivity: () => "Tool" }} slots={slots} />);
+    expect(render({ ...activityTool("tool"), status: "in_progress" })).not.toContain('data-thinking-fallback="true"');
+    expect(render({ id: "thought", kind: "thinking", role: "assistant", status: "streaming", text: "Internal reasoning" })).not.toContain('data-thinking-fallback="true"');
+    expect(render(activityTool("done"))).toContain('data-thinking-fallback="true"');
   });
 
   it("gives the footer only the rendered final answer text", () => {
@@ -406,7 +377,7 @@ describe("Backchat main AgentUITurnView", () => {
     expect(html).toContain('data-tool-item="two"');
   });
 
-  it("keeps a completed tail tool live until assistant text breaks its activity stretch", () => {
+  it("shows completed tools as completed while the unresolved turn thinks", () => {
     const render = (items: AgentUITurnState["items"]) =>
       renderToStaticMarkup(
         <AgentUITurnView
@@ -441,16 +412,9 @@ describe("Backchat main AgentUITurnView", () => {
       );
 
     const uninterrupted = render([activityTool("one")]);
-    expect(uninterrupted).toContain('data-collapsible-event-count="1"');
-    expect(uninterrupted).toMatch(
-      /data-collapsible-event-count="1"[\s\S]*aria-expanded="false"/,
-    );
-    expect(uninterrupted).toContain("Running Command one");
-    expect(uninterrupted).toContain('data-tool-live="false"');
+    expect(uninterrupted).not.toContain("Running Command one");
     expect(uninterrupted).toContain("Ran Command one");
-    // The last block reads as running even though the tool finished, so the
-    // generic fallback stays away.
-    expect(uninterrupted).not.toContain('data-thinking-fallback="true"');
+    expect(uninterrupted).toContain('data-thinking-fallback="true"');
 
     const interrupted = render([
       activityTool("one"),

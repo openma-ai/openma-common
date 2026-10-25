@@ -3,6 +3,23 @@ import { describe, expect, it } from "vitest";
 import { projectAcpChatTurn } from "../src/chat-ui/acp.js";
 
 describe("ACP chat turn projection", () => {
+  it("patches one standard compaction entity in place, including summary reset and replay", () => {
+    const event = (payload: unknown) => ({ payload });
+    const events = [
+      event({ sessionUpdate: "compaction_summary_chunk", compactionId: "c", content: { type: "text", text: "old" } }),
+      event({ sessionUpdate: "agent_message_chunk", messageId: "m", content: { type: "text", text: "After boundary" } }),
+      event({ sessionUpdate: "compaction_update", compactionId: "c", status: "completed", summary: [{ type: "text", text: "replacement" }], _meta: { keep: true } }),
+      event({ sessionUpdate: "compaction_summary_chunk", compactionId: "c", content: { type: "text", text: " tail" } }),
+    ];
+    const project = (extra: unknown[] = []) => projectAcpChatTurn({ id: "t", promptText: "", status: "running", events: [...events, ...extra.map(event)] });
+    const first = project();
+    expect(first.items.map(item => item.kind)).toEqual(["message", "message"]);
+    expect(first.items[0]).toMatchObject({ content: { compaction: { id: "c", status: "completed", summary: [{ type: "text", text: "replacement" }, { type: "text", text: " tail" }], meta: { keep: true } } } });
+    expect(project([{ sessionUpdate: "compaction_update", compactionId: "c", status: "failed", summary: null, _meta: null, error: "failure" }]).items[0]).toMatchObject({ content: { compaction: { status: "failed", summary: undefined, meta: undefined, error: "failure" } } });
+    expect(project([{ sessionUpdate: "compaction_update", compactionId: "c", status: "_future", error: null }]).items[0]).toMatchObject({ content: { compaction: { status: "_future", error: undefined } } });
+    expect(project([{ sessionUpdate: "compaction_update", compactionId: "c", status: "cancelled", summary: [] }]).items[0]).toMatchObject({ content: { compaction: { status: "cancelled", summary: [] } } });
+  });
+
   it("uses positional ids when a host supplies legacy timeline items without segment ids", () => {
     const turn = projectAcpChatTurn({
       id: "turn-positional",
@@ -101,5 +118,20 @@ describe("ACP chat turn projection", () => {
       kind: "tool",
       status: "cancelled",
     });
+  });
+});
+
+
+describe("injected steering rich input", () => {
+  it("retains the structured attachment and input identity without inventing a new turn", () => {
+    const image = { id: "image-1", name: "screen.png", kind: "image", mimeType: "image/png", uri: "file:///tmp/screen.png", path: "/tmp/screen.png", data: "aW1hZ2U=" };
+    const event = { schema: "oma.event.v1", event_id: "steer-event", session_id: "session", turn_id: "steer-turn", source: { kind: "user" }, occurred_at: "2026-10-23T05:00:00.000Z", type: "user.message", data: { text: "Look here", client_id: "client-steer", input_kind: "steering", outcome: "injected", active_turn_id: "active-turn", attachments: [image] } };
+    const projected = projectAcpChatTurn({ id: "active-turn", promptText: "Original request", status: "running", events: [{ payload: event, receivedAt: 1792731600000 }] });
+    expect(projected.id).toBe("active-turn");
+    expect(projected.status).toBe("running");
+    expect(projected.items.filter(item => item.kind === "user_input")).toEqual([{
+      id: "active-turn:user-input:steer-turn", kind: "user_input", text: "Look here", clientId: "steer-turn",
+      attachments: [image], startedAt: "2026-10-23T05:00:00.000Z",
+    }]);
   });
 });

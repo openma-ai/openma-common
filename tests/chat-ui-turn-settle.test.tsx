@@ -96,8 +96,8 @@ describe("AgentUITurnView settle lifecycle", () => {
     // Closing keeps the body mounted but inert, so nested state survives.
     const trigger = container.querySelector<HTMLButtonElement>('[data-slot="collapsible-trigger"], button[aria-expanded]')!;
     await act(async () => trigger.click());
-    expect(processBody()?.hidden).toBe(true);
-    expect(processBody()?.hasAttribute("inert")).toBe(true);
+    expect(processBody()?.closest("[inert]")).not.toBeNull();
+    expect(processBody()?.closest('[aria-hidden="true"]')).not.toBeNull();
 
     // A follow-up run on the same turn reopens the process.
     await act(async () => root.render(view("running")));

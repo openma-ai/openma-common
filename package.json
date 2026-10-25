@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
     "type": "git",
@@ -200,7 +200,7 @@
     "vitest": "^4.1.3"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^1.3.0",
+    "@agentclientprotocol/sdk": "^1.9.0",
     "@radix-ui/react-collapsible": "^1.1.12",
     "@tanstack/react-virtual": "^3.14.11",
     "clsx": "^2.1.1",

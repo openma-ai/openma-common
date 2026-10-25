@@ -1,3 +1,4 @@
+import type * as nes from "@agentclientprotocol/sdk/experimental/nes";
 import type * as schema from "@agentclientprotocol/sdk";
 import { type AcpForkSupport } from "./fork-support.js";
 import type { AcpSession, ChildHandle, SessionOptions, SteeringOutcome } from "./types.js";
@@ -41,8 +42,8 @@ export declare class AcpSessionImpl implements AcpSession {
     get supportsLogout(): boolean;
     get supportsProviders(): boolean;
     get supportsNes(): boolean;
-    get nesCapabilities(): schema.NesCapabilities | null;
-    get positionEncoding(): schema.PositionEncodingKind | null;
+    get nesCapabilities(): nes.NesCapabilities | null;
+    get positionEncoding(): nes.PositionEncodingKind | null;
     get supportsSteering(): boolean;
     init(): Promise<void>;
     authenticate(methodId: string): Promise<void>;
@@ -56,16 +57,16 @@ export declare class AcpSessionImpl implements AcpSession {
     disableProvider(providerId: schema.ProviderId): Promise<void>;
     requestExtension(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
     notifyExtension(method: string, params?: Record<string, unknown>): Promise<void>;
-    startNes(params: schema.StartNesRequest): Promise<schema.StartNesResponse>;
-    suggestNes(params: schema.SuggestNesRequest): Promise<schema.SuggestNesResponse>;
-    closeNes(params: schema.CloseNesRequest): Promise<schema.CloseNesResponse | void>;
-    didOpenDocument(params: schema.DidOpenDocumentNotification): Promise<void>;
-    didChangeDocument(params: schema.DidChangeDocumentNotification): Promise<void>;
-    didCloseDocument(params: schema.DidCloseDocumentNotification): Promise<void>;
-    didSaveDocument(params: schema.DidSaveDocumentNotification): Promise<void>;
-    didFocusDocument(params: schema.DidFocusDocumentNotification): Promise<void>;
-    acceptNes(params: schema.AcceptNesNotification): Promise<void>;
-    rejectNes(params: schema.RejectNesNotification): Promise<void>;
+    startNes(params: nes.StartNesRequest): Promise<nes.StartNesResponse>;
+    suggestNes(params: nes.SuggestNesRequest): Promise<nes.SuggestNesResponse>;
+    closeNes(params: nes.CloseNesRequest): Promise<nes.CloseNesResponse | void>;
+    didOpenDocument(params: nes.DidOpenDocumentNotification): Promise<void>;
+    didChangeDocument(params: nes.DidChangeDocumentNotification): Promise<void>;
+    didCloseDocument(params: nes.DidCloseDocumentNotification): Promise<void>;
+    didSaveDocument(params: nes.DidSaveDocumentNotification): Promise<void>;
+    didFocusDocument(params: nes.DidFocusDocumentNotification): Promise<void>;
+    acceptNes(params: nes.AcceptNesNotification): Promise<void>;
+    rejectNes(params: nes.RejectNesNotification): Promise<void>;
     prompt(input: string | readonly schema.ContentBlock[], options?: {
         abortSignal?: AbortSignal;
     }): AsyncIterable<unknown>;

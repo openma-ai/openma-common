@@ -56,12 +56,14 @@ function handleTranscriptDisclosureKeyDown(
   }
 }
 
-type ChatScrollAnchorValue = Pick<
+export type ChatScrollAnchorValue = Pick<
   ReturnType<typeof useStickToBottomContext>,
   "isAtBottom" | "scrollToBottom" | "stopScroll"
 > & {
   contentRef: { current: HTMLElement | null };
   scrollRef: { current: HTMLElement | null };
+  /** Locate by stable identity even when the virtual row is not mounted. */
+  scrollToTurn?: (turnId: string) => void;
 };
 
 const FALLBACK_CHAT_SCROLL_ANCHOR = {
@@ -76,7 +78,9 @@ const ChatScrollAnchorContext = createContext<ChatScrollAnchorValue | null>(
   null,
 );
 
-function useOptionalChatStickToBottom() {
+/** Scroll ownership shared by ordinary and virtual transcripts. Host slots must
+ * use this bridge instead of the small-list-only StickToBottom context. */
+export function useChatScrollAnchor(): ChatScrollAnchorValue {
   return useContext(ChatScrollAnchorContext) ?? FALLBACK_CHAT_SCROLL_ANCHOR;
 }
 
@@ -218,7 +222,7 @@ export function ChatConversationScrollButton({
   renderButton,
   ...props
 }: ChatConversationScrollButtonProps) {
-  const { isAtBottom, scrollToBottom } = useOptionalChatStickToBottom();
+  const { isAtBottom, scrollToBottom } = useChatScrollAnchor();
   const handleScrollToBottom = useCallback(() => {
     void scrollToBottom();
   }, [scrollToBottom]);
@@ -314,7 +318,7 @@ export function ChatThoughtEventRow({
   renderBody: (input: { live: boolean }) => ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const stick = useOptionalChatStickToBottom();
+  const stick = useChatScrollAnchor();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
   const resolvedProjection =
@@ -420,7 +424,7 @@ export const ChatReasoning = memo(function ChatReasoning({
   children,
   ...props
 }: ChatReasoningProps) {
-  const stick = useOptionalChatStickToBottom();
+  const stick = useChatScrollAnchor();
   const resolvedDefaultOpen = defaultOpen ?? isStreaming;
   const isExplicitlyClosed = defaultOpen === false;
   const [isOpen, setIsOpen] = useChatControllableState<boolean>({
@@ -614,7 +618,7 @@ function ChatCollapsibleEventSequenceGroup({
   completedProjection: ChatCollapsibleEventNode["projection"];
 }) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
-  const stick = useOptionalChatStickToBottom();
+  const stick = useChatScrollAnchor();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelId = useId();
   const open = manualOpen ?? false;
@@ -711,6 +715,7 @@ export interface AgentUITurnSlots {
       section: "process" | "answer";
     },
   ) => ReactNode;
+  renderCompaction?: (input: AgentUITurnRenderContext & { item: AgentUIMessageItem }) => ReactNode;
   renderThought?: (
     input: AgentUITurnRenderContext & { item: AgentUIMessageItem },
   ) => ReactNode;
@@ -790,6 +795,8 @@ export interface AgentUITurnViewProps {
   now?: number;
   /** Initial expansion of a non-streaming turn's process strip. */
   defaultProcessOpen?: boolean;
+  /** Fold the process in place when a live turn finishes; never remount the prompt. */
+  collapseProcessOnComplete?: boolean;
 }
 
 export interface AgentChatViewSlots {
@@ -965,15 +972,16 @@ export function AgentChatView({
   );
 }
 
-/** Start at the tail after history hydration and once per new turn.
- * Same-turn streaming updates must preserve a reader's scroll position. */
+/** Initial landing only. Appended turns are followed by the scroll owner;
+ * forcing an instant jump here would race a host's smooth follow-on-send. */
 function ChatTranscriptInitialScroll({ tailTurnId }: { tailTurnId?: string }) {
-  const stick = useOptionalChatStickToBottom();
+  const stick = useChatScrollAnchor();
+  const landed = useRef(false);
   useLayoutEffect(() => {
-    const scroller = stick.scrollRef.current;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    if (landed.current || !tailTurnId) return;
+    landed.current = true;
     void stick.scrollToBottom({ animation: "instant" });
-  }, [tailTurnId]);
+  }, [tailTurnId, stick]);
   return null;
 }
 
@@ -1007,6 +1015,11 @@ function ChatVirtualConversation({ turns, renderTurn, slots, transcriptRef }: {
     scrollRef,
     contentRef,
     isAtBottom: virtualizer.isAtEnd(),
+    scrollToTurn: (turnId) => {
+      const index = turns.findIndex(turn => turn.id === turnId);
+      if (index < 0) return;
+      virtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+    },
     scrollToBottom: async () => {
       virtualizer.scrollToEnd({ behavior: "auto" });
       return true;
@@ -1119,6 +1132,7 @@ export function AgentUITurnView({
   density = "comfortable",
   now,
   defaultProcessOpen = false,
+  collapseProcessOnComplete = false,
 }: AgentUITurnViewProps) {
   const isStreaming = turn.status === "running";
   const isCancelled = turn.status === "cancelled";
@@ -1135,7 +1149,10 @@ export function AgentUITurnView({
   if (wasStreaming !== isStreaming) {
     setWasStreaming(isStreaming);
     if (isStreaming) setProcessOpen(true);
-    else setSettledLive(true);
+    else {
+      setSettledLive(true);
+      if (collapseProcessOnComplete) setProcessOpen(false);
+    }
   }
   // A collapsed process strip is not mounted until it is first opened, so a
   // long history page does not render every tool row and Markdown body it
@@ -1210,25 +1227,31 @@ export function AgentUITurnView({
     }
   }
 
-  // "Thinking…" is only a fallback for a turn that has nothing on screen yet.
-  // Once any block is visible, that block carries the turn's progress — a
-  // tool row says it is running, a thought or message streams — whatever its
-  // own status, so the fallback never sits beside it.
-  const hasVisibleBlock = items.some((item) =>
-    item.kind === "tool" ||
-    ((item.kind === "message" || item.kind === "thinking") &&
-      item.text.trim().length > 0)
-  );
-  const showThinkingFallback = isStreaming && !hasVisibleBlock;
+  // Prompt completion, not the presence of historical output, owns liveness.
+  // A real tool/thought supplies its own feedback; otherwise the turn has one
+  // tail fallback, including gaps after commentary and injected input.
+  const hasRunningTool = items.some(item => item.kind === "tool" && isAgentUIToolRunning(item.status));
+  const tailActivity = [...items].reverse().find(item => item.kind !== "user_input");
+  const inputIsTail = items.at(-1)?.kind === "user_input";
+  const hasLiveThought = !inputIsTail && tailActivity?.kind === "thinking" && tailActivity.status === "streaming";
+  const hasActiveCompaction = items.some(item => item.kind === "message" && item.role === "system" && item.status === "streaming" && item.content && typeof item.content === "object" && "compaction" in item.content);
+  const showThinkingFallback = isStreaming && !hasRunningTool && !hasLiveThought && !hasActiveCompaction;
+  // A waiting process owns the one live status in its disclosure header.
+  // Historical output never ends the prompt, and historical groups never
+  // become live merely because another group is waiting.
+  const thinkingInProcessHeader = showThinkingFallback && !inputIsTail && answerItems.length === 0
+    && (tailActivity?.kind === "tool" || tailActivity?.kind === "thinking");
 
   const processActivitySequences = useMemo(() => {
-    if (!processMounted) return null;
-    const sequences: ReactNode[] = [];
+    const sequences: Array<{ kind: "input" | "activity"; node: ReactNode }> = [];
     for (let index = 0; index < processItems.length; index += 1) {
       const item = processItems[index];
       if (item?.kind === "message") {
+        if (item.role === "system" && item.content && typeof item.content === "object" && "compaction" in item.content) {
+          sequences.push({ kind: "activity", node: <div key={item.id}>{slots.renderCompaction?.({ ...renderContext, item })}</div> });
+        }
         if (item.role === "assistant") {
-          sequences.push(
+          sequences.push({ kind: "activity", node: (
             <div key={item.id} className="min-w-0">
               {slots.renderAssistant({
                 ...renderContext,
@@ -1237,13 +1260,13 @@ export function AgentUITurnView({
                 live: isStreaming && item === finalItem,
                 prefixSkip: assistantPrefixes.get(item.id)!,
               })}
-            </div>,
-          );
+            </div>
+          ) });
         }
         continue;
       }
       if (item?.kind === "user_input") {
-        sequences.push(
+        sequences.push({ kind: "input", node: (
           <div key={item.id} className="min-w-0">
             {slots.renderUserInput?.({
               ...renderContext,
@@ -1257,8 +1280,8 @@ export function AgentUITurnView({
                 {item.text}
               </div>
             )}
-          </div>,
-        );
+          </div>
+        ) });
         continue;
       }
       const group = activityGroups.get(index);
@@ -1267,13 +1290,16 @@ export function AgentUITurnView({
         "tool" in child ? [child.tool] : [],
       );
       const lastGroupChild = group.at(-1);
-      const active =
-        isStreaming && lastGroupChild?.item === finalActivityItem;
-      const forceGroup =
+      const active = isStreaming && lastGroupChild?.item === finalActivityItem
+        && (lastGroupChild?.item.kind === "thinking"
+          ? lastGroupChild.item.status === "streaming"
+          : lastGroupChild?.item.kind === "tool" && isAgentUIToolRunning(lastGroupChild.item.status));
+      const waiting = thinkingInProcessHeader && lastGroupChild?.item === finalActivityItem;
+      const forceGroup = waiting || (
         active &&
         lastGroupChild !== undefined &&
         "tool" in lastGroupChild &&
-        !isAgentUIToolRunning(lastGroupChild.tool.status);
+        !isAgentUIToolRunning(lastGroupChild.tool.status));
       const nodes: ChatCollapsibleEventNode[] = group.map((child) => {
         if (!("tool" in child)) {
           const live = active && child === lastGroupChild;
@@ -1327,13 +1353,15 @@ export function AgentUITurnView({
           }),
         };
       });
-      sequences.push(
+      sequences.push({ kind: "activity", node: (
         <ChatCollapsibleEventSequence
           key={`event-sequence-${index}`}
           nodes={nodes}
           active={active}
           forceGroup={forceGroup}
-          completedProjection={
+          completedProjection={waiting ? {
+            summary: <span role="status" aria-live="polite" data-thinking-fallback="true">{labels.thinking}</span>,
+          } : (
             slots.projectToolRun?.({
               turn,
               tools: groupTools,
@@ -1341,13 +1369,14 @@ export function AgentUITurnView({
             }) ?? {
               summary: labels.toolRunSummary(groupTools),
             }
-          }
-        />,
-      );
+          )}
+        />
+      ) });
     }
     return sequences;
   }, [
     activityGroups,
+    thinkingInProcessHeader,
     finalActivityItem,
     isStreaming,
     labels,
@@ -1359,6 +1388,17 @@ export function AgentUITurnView({
     thoughtPrefixes,
     turn,
   ]);
+
+  const processSections: Array<{ kind: "input" | "activity"; nodes: ReactNode[] }> = [];
+  for (const sequence of processActivitySequences) {
+    const previous = processSections.at(-1);
+    if (sequence.kind === "activity" && previous?.kind === "activity") previous.nodes.push(sequence.node);
+    else processSections.push({kind: sequence.kind, nodes: [sequence.node]});
+  }
+  if (!processSections.length && hasProcess) processSections.push({kind: "activity", nodes: []});
+  // Sections are chronological presentation slices, not prompt turns. One
+  // controller/clock owns all slices; injected input stays outside their folds.
+  const processHeaderIndex = processSections.findIndex(section => section.kind === "activity");
 
   return (
     <>
@@ -1393,8 +1433,11 @@ export function AgentUITurnView({
         }
       >
         {slots.renderResponseBeforeProcess?.(renderContext)}
-        {hasProcess ? (
+        {processSections.map((section, sectionIndex) => section.kind === "input" ? (
+          <div key={`user-input-section-${sectionIndex}`} data-user-input-outside-process="true">{section.nodes}</div>
+        ) : (
           <ChatReasoning
+            key={`process-section-${sectionIndex}`}
             isStreaming={isStreaming}
             open={processOpen}
             onOpenChange={(open) => {
@@ -1403,7 +1446,8 @@ export function AgentUITurnView({
             data-session-process-state={isStreaming ? "running" : "complete"}
             primitives={collapsiblePrimitives}
           >
-            <ChatReasoningTrigger
+            {sectionIndex === processHeaderIndex ? <ChatReasoningTrigger
+              data-turn-process-header="true"
               disabled={isStreaming}
               aria-disabled={isStreaming}
               showIcon={false}
@@ -1425,30 +1469,22 @@ export function AgentUITurnView({
                   </span>
                 </>
               )}
-            />
-            {processOpen ? (
-              <div className="space-y-1" data-session-process-activity="true">
-                {processActivitySequences}
-              </div>
-            ) : processMounted ? (
-              <div
-                className="space-y-1"
-                data-session-process-activity="true"
-                hidden
-                aria-hidden="true"
-                inert={true}
-              >
-                {processActivitySequences}
-              </div>
-            ) : null}
+            /> : null}
             <ChatReasoningContent>
-              <div className="space-y-1">
-                {slots.renderProcessBefore?.(renderContext)}
-                {slots.renderProcessAfter?.(renderContext)}
-              </div>
+              {processMounted ? (
+                <div className="space-y-1" data-session-process-activity="true">
+                  {section.nodes}
+                </div>
+              ) : null}
+              {sectionIndex === processSections.length - 1 ? (
+                <div className="space-y-1">
+                  {slots.renderProcessBefore?.(renderContext)}
+                  {slots.renderProcessAfter?.(renderContext)}
+                </div>
+              ) : null}
             </ChatReasoningContent>
           </ChatReasoning>
-        ) : null}
+        ))}
 
         {answerItems.map((item) => {
           const live = isStreaming && item === finalItem;
@@ -1479,7 +1515,7 @@ export function AgentUITurnView({
           }
           return null;
         })}
-        {showThinkingFallback ? (
+        {showThinkingFallback && !thinkingInProcessHeader ? (
           <p
             className="min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted"
             role="status"

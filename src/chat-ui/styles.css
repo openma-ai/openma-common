@@ -675,11 +675,13 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
 }
 
 .reasoning-collapse[data-state="closed"] > .reasoning-collapse-inner {
+  width: 100%;
   height: 0;
   opacity: 0;
 }
 
 .reasoning-collapse-inner {
+  width: 100%;
   height: 0;
   interpolate-size: allow-keywords;
   min-height: 0;

@@ -80,6 +80,9 @@ export interface AgentUIUserInputItem {
   kind: "user_input";
   text: string;
   clientId?: string;
+  attachments?: unknown[];
+      annotations?: unknown[];
+  startedAt?: string;
 }
 
 export type AgentUITimelineItem =

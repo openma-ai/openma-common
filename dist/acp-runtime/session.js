@@ -363,7 +363,7 @@ export class AcpSessionImpl {
             killTerminal: callbacks.killTerminal
                 ? async (params) => this.#runClientRequest("terminal/kill", params, () => callbacks.killTerminal(params))
                 : undefined,
-            unstable_createElicitation: callbacks.createElicitation
+            createElicitation: callbacks.createElicitation
                 ? async (params) => {
                     const response = await this.#runClientRequest("elicitation/create", params, () => callbacks.createElicitation(params));
                     if (params.mode === "url"
@@ -374,7 +374,7 @@ export class AcpSessionImpl {
                     return response;
                 }
                 : undefined,
-            unstable_completeElicitation: supportsUrlElicitation
+            completeElicitation: supportsUrlElicitation
                 ? async (params) => {
                     if (!this.#outstandingUrlElicitations.delete(params.elicitationId))
                         return;
@@ -603,44 +603,44 @@ export class AcpSessionImpl {
         await this.#agent.extNotification(method, params);
     }
     async startNes(params) {
-        this.#assertNesMethod(this.#agent?.unstable_startNes, "nes/start");
-        return this.#agent.unstable_startNes(params);
+        this.#assertNesMethod(this.#agent?.extMethod, "nes/start");
+        return this.#agent.extMethod("nes/start", params);
     }
     async suggestNes(params) {
-        this.#assertNesMethod(this.#agent?.unstable_suggestNes, "nes/suggest");
-        return this.#agent.unstable_suggestNes(params);
+        this.#assertNesMethod(this.#agent?.extMethod, "nes/suggest");
+        return this.#agent.extMethod("nes/suggest", params);
     }
     async closeNes(params) {
-        this.#assertNesMethod(this.#agent?.unstable_closeNes, "nes/close");
-        return this.#agent.unstable_closeNes(params);
+        this.#assertNesMethod(this.#agent?.extMethod, "nes/close");
+        return this.#agent.extMethod("nes/close", params);
     }
     async didOpenDocument(params) {
-        this.#assertNesDocumentEvent("didOpen", this.#agent?.unstable_didOpenDocument);
-        await this.#agent.unstable_didOpenDocument(params);
+        this.#assertNesDocumentEvent("didOpen", this.#agent?.extNotification);
+        await this.#agent.extNotification("document/didOpen", params);
     }
     async didChangeDocument(params) {
-        this.#assertNesDocumentEvent("didChange", this.#agent?.unstable_didChangeDocument);
-        await this.#agent.unstable_didChangeDocument(params);
+        this.#assertNesDocumentEvent("didChange", this.#agent?.extNotification);
+        await this.#agent.extNotification("document/didChange", params);
     }
     async didCloseDocument(params) {
-        this.#assertNesDocumentEvent("didClose", this.#agent?.unstable_didCloseDocument);
-        await this.#agent.unstable_didCloseDocument(params);
+        this.#assertNesDocumentEvent("didClose", this.#agent?.extNotification);
+        await this.#agent.extNotification("document/didClose", params);
     }
     async didSaveDocument(params) {
-        this.#assertNesDocumentEvent("didSave", this.#agent?.unstable_didSaveDocument);
-        await this.#agent.unstable_didSaveDocument(params);
+        this.#assertNesDocumentEvent("didSave", this.#agent?.extNotification);
+        await this.#agent.extNotification("document/didSave", params);
     }
     async didFocusDocument(params) {
-        this.#assertNesDocumentEvent("didFocus", this.#agent?.unstable_didFocusDocument);
-        await this.#agent.unstable_didFocusDocument(params);
+        this.#assertNesDocumentEvent("didFocus", this.#agent?.extNotification);
+        await this.#agent.extNotification("document/didFocus", params);
     }
     async acceptNes(params) {
-        this.#assertNesMethod(this.#agent?.unstable_acceptNes, "nes/accept");
-        await this.#agent.unstable_acceptNes(params);
+        this.#assertNesMethod(this.#agent?.extNotification, "nes/accept");
+        await this.#agent.extNotification("nes/accept", params);
     }
     async rejectNes(params) {
-        this.#assertNesMethod(this.#agent?.unstable_rejectNes, "nes/reject");
-        await this.#agent.unstable_rejectNes(params);
+        this.#assertNesMethod(this.#agent?.extNotification, "nes/reject");
+        await this.#agent.extNotification("nes/reject", params);
     }
     #assertNesMethod(method, name) {
         if (!this.#supportsNes || typeof method !== "function") {

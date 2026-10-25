@@ -25,7 +25,9 @@ const FALLBACK_CHAT_SCROLL_ANCHOR = {
     stopScroll: () => { },
 };
 const ChatScrollAnchorContext = createContext(null);
-function useOptionalChatStickToBottom() {
+/** Scroll ownership shared by ordinary and virtual transcripts. Host slots must
+ * use this bridge instead of the small-list-only StickToBottom context. */
+export function useChatScrollAnchor() {
     return useContext(ChatScrollAnchorContext) ?? FALLBACK_CHAT_SCROLL_ANCHOR;
 }
 function ChatScrollAnchorBridge({ children }) {
@@ -86,7 +88,7 @@ export function ChatConversationContent({ className, ...props }) {
     return (_jsx(StickToBottom.Content, { className: chatClassNames("flex flex-col gap-8 p-4", className), scrollClassName: "chat-scrollbar", ...props }));
 }
 export function ChatConversationScrollButton({ className, icon = _jsx(ArrowDownIcon, { className: "size-4" }), renderButton, ...props }) {
-    const { isAtBottom, scrollToBottom } = useOptionalChatStickToBottom();
+    const { isAtBottom, scrollToBottom } = useChatScrollAnchor();
     const handleScrollToBottom = useCallback(() => {
         void scrollToBottom();
     }, [scrollToBottom]);
@@ -116,7 +118,7 @@ export function projectChatThoughtEvent({ live, liveFallback, completedLabel, })
 }
 export function ChatThoughtEventRow({ live, liveFallback, completedLabel, projection, renderBody, }) {
     const [open, setOpen] = useState(false);
-    const stick = useOptionalChatStickToBottom();
+    const stick = useChatScrollAnchor();
     const triggerRef = useRef(null);
     const panelId = useId();
     const resolvedProjection = projection ??
@@ -145,7 +147,7 @@ function useChatReasoning() {
     return context;
 }
 export const ChatReasoning = memo(function ChatReasoning({ className, isStreaming = false, open, defaultOpen, onOpenChange, duration: durationProp, primitives = defaultChatCollapsiblePrimitives, children, ...props }) {
-    const stick = useOptionalChatStickToBottom();
+    const stick = useChatScrollAnchor();
     const resolvedDefaultOpen = defaultOpen ?? isStreaming;
     const isExplicitlyClosed = defaultOpen === false;
     const [isOpen, setIsOpen] = useChatControllableState({
@@ -220,7 +222,7 @@ export function ChatCollapsibleEventSequence({ nodes, active, forceGroup = false
 }
 function ChatCollapsibleEventSequenceGroup({ nodes, active, completedProjection, }) {
     const [manualOpen, setManualOpen] = useState(null);
-    const stick = useOptionalChatStickToBottom();
+    const stick = useChatScrollAnchor();
     const triggerRef = useRef(null);
     const panelId = useId();
     const open = manualOpen ?? false;
@@ -269,16 +271,17 @@ export function AgentChatView({ sessionId, phase = "active", surface = "main", t
         }) }, turn.id)) : (_jsx(AgentUITurnView, { sessionId: sessionId, turn: turn, thoughts: thoughts, labels: labels, slots: turnSlots, collapsiblePrimitives: collapsiblePrimitives, activityTools: activityTools, density: density }, turn.id)));
     return (_jsx("div", { className: chatClassNames("flex h-full min-h-0 flex-col", className), "data-chat-surface": surface, ...densityAttributes, children: isEmpty ? (_jsxs("div", { className: "home-empty-stage flex h-full min-h-0 flex-col", style: homeStyle, children: [_jsx("div", { className: "home-empty-content flex min-h-0 w-full flex-1 items-center justify-center overflow-y-auto px-4", children: _jsx("div", { className: "home-empty-stack flex w-full max-w-[1120px] flex-col items-center gap-6", children: slots.empty }) }), _jsx(ChatComposerFrame, { slots: slots, home: true, style: homeComposerStyle }), slots.emptyAfter] })) : (_jsxs(_Fragment, { children: [transcriptTurns.length > 16 ? (_jsx(ChatVirtualConversation, { turns: transcriptTurns, renderTurn: renderTranscriptTurn, slots: slots, transcriptRef: transcriptRef }, sessionId ?? "none")) : (_jsxs(ChatConversation, { className: "flex-1 min-h-0", children: [_jsx(ChatConversationContent, { className: "w-full px-0 py-6 flex min-h-full flex-col", children: wrapAgentChatConversationContent(slots, _jsxs(_Fragment, { children: [_jsxs("div", { ref: transcriptRef, className: CHAT_TURN_FRAME_CLASS, "data-chat-column": "turns", children: [_jsx(ChatTranscriptInitialScroll, { tailTurnId: transcriptTurns.at(-1)?.id }), transcriptTurns.map(renderTranscriptTurn)] }), slots.conversationContentAfter] })) }), _jsx(ChatConversationScrollButton, { renderButton: slots.renderScrollButton }), slots.conversationOverlay] }, sessionId ?? "none")), _jsx(ChatComposerFrame, { slots: slots })] })) }));
 }
-/** Start at the tail after history hydration and once per new turn.
- * Same-turn streaming updates must preserve a reader's scroll position. */
+/** Initial landing only. Appended turns are followed by the scroll owner;
+ * forcing an instant jump here would race a host's smooth follow-on-send. */
 function ChatTranscriptInitialScroll({ tailTurnId }) {
-    const stick = useOptionalChatStickToBottom();
+    const stick = useChatScrollAnchor();
+    const landed = useRef(false);
     useLayoutEffect(() => {
-        const scroller = stick.scrollRef.current;
-        if (scroller)
-            scroller.scrollTop = scroller.scrollHeight;
+        if (landed.current || !tailTurnId)
+            return;
+        landed.current = true;
         void stick.scrollToBottom({ animation: "instant" });
-    }, [tailTurnId]);
+    }, [tailTurnId, stick]);
     return null;
 }
 /** Long transcripts have one scroll owner. TanStack keeps dynamic rows and
@@ -306,6 +309,12 @@ function ChatVirtualConversation({ turns, renderTurn, slots, transcriptRef }) {
         scrollRef,
         contentRef,
         isAtBottom: virtualizer.isAtEnd(),
+        scrollToTurn: (turnId) => {
+            const index = turns.findIndex(turn => turn.id === turnId);
+            if (index < 0)
+                return;
+            virtualizer.scrollToIndex(index, { align: "start", behavior: "auto" });
+        },
         scrollToBottom: async () => {
             virtualizer.scrollToEnd({ behavior: "auto" });
             return true;
@@ -346,7 +355,7 @@ const TERMINAL_TURN_STATUS = {
 export function isTerminalTurnStatus(status) {
     return TERMINAL_TURN_STATUS[status];
 }
-export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, defaultProcessOpen = false, }) {
+export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools = "latest", density = "comfortable", now, defaultProcessOpen = false, collapseProcessOnComplete = false, }) {
     const isStreaming = turn.status === "running";
     const isCancelled = turn.status === "cancelled";
     const resolvedFrameStatus = frameStatus ?? sessionTurnStatus(turn);
@@ -363,8 +372,11 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         setWasStreaming(isStreaming);
         if (isStreaming)
             setProcessOpen(true);
-        else
+        else {
             setSettledLive(true);
+            if (collapseProcessOnComplete)
+                setProcessOpen(false);
+        }
     }
     // A collapsed process strip is not mounted until it is first opened, so a
     // long history page does not render every tool row and Markdown body it
@@ -419,38 +431,45 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
             break;
         }
     }
-    // "Thinking…" is only a fallback for a turn that has nothing on screen yet.
-    // Once any block is visible, that block carries the turn's progress — a
-    // tool row says it is running, a thought or message streams — whatever its
-    // own status, so the fallback never sits beside it.
-    const hasVisibleBlock = items.some((item) => item.kind === "tool" ||
-        ((item.kind === "message" || item.kind === "thinking") &&
-            item.text.trim().length > 0));
-    const showThinkingFallback = isStreaming && !hasVisibleBlock;
+    // Prompt completion, not the presence of historical output, owns liveness.
+    // A real tool/thought supplies its own feedback; otherwise the turn has one
+    // tail fallback, including gaps after commentary and injected input.
+    const hasRunningTool = items.some(item => item.kind === "tool" && isAgentUIToolRunning(item.status));
+    const tailActivity = [...items].reverse().find(item => item.kind !== "user_input");
+    const inputIsTail = items.at(-1)?.kind === "user_input";
+    const hasLiveThought = !inputIsTail && tailActivity?.kind === "thinking" && tailActivity.status === "streaming";
+    const hasActiveCompaction = items.some(item => item.kind === "message" && item.role === "system" && item.status === "streaming" && item.content && typeof item.content === "object" && "compaction" in item.content);
+    const showThinkingFallback = isStreaming && !hasRunningTool && !hasLiveThought && !hasActiveCompaction;
+    // A waiting process owns the one live status in its disclosure header.
+    // Historical output never ends the prompt, and historical groups never
+    // become live merely because another group is waiting.
+    const thinkingInProcessHeader = showThinkingFallback && !inputIsTail && answerItems.length === 0
+        && (tailActivity?.kind === "tool" || tailActivity?.kind === "thinking");
     const processActivitySequences = useMemo(() => {
-        if (!processMounted)
-            return null;
         const sequences = [];
         for (let index = 0; index < processItems.length; index += 1) {
             const item = processItems[index];
             if (item?.kind === "message") {
+                if (item.role === "system" && item.content && typeof item.content === "object" && "compaction" in item.content) {
+                    sequences.push({ kind: "activity", node: _jsx("div", { children: slots.renderCompaction?.({ ...renderContext, item }) }, item.id) });
+                }
                 if (item.role === "assistant") {
-                    sequences.push(_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
-                            ...renderContext,
-                            item,
-                            section: "process",
-                            live: isStreaming && item === finalItem,
-                            prefixSkip: assistantPrefixes.get(item.id),
-                        }) }, item.id));
+                    sequences.push({ kind: "activity", node: (_jsx("div", { className: "min-w-0", children: slots.renderAssistant({
+                                ...renderContext,
+                                item,
+                                section: "process",
+                                live: isStreaming && item === finalItem,
+                                prefixSkip: assistantPrefixes.get(item.id),
+                            }) }, item.id)) });
                 }
                 continue;
             }
             if (item?.kind === "user_input") {
-                sequences.push(_jsx("div", { className: "min-w-0", children: slots.renderUserInput?.({
-                        ...renderContext,
-                        item,
-                        live: isStreaming && item === finalItem,
-                    }) ?? (_jsx("div", { className: "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted", style: { maxWidth: "var(--chat-user-message-max-width, 88%)" }, children: item.text })) }, item.id));
+                sequences.push({ kind: "input", node: (_jsx("div", { className: "min-w-0", children: slots.renderUserInput?.({
+                            ...renderContext,
+                            item,
+                            live: isStreaming && item === finalItem,
+                        }) ?? (_jsx("div", { className: "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted", style: { maxWidth: "var(--chat-user-message-max-width, 88%)" }, children: item.text })) }, item.id)) });
                 continue;
             }
             const group = activityGroups.get(index);
@@ -458,11 +477,15 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                 continue;
             const groupTools = group.flatMap((child) => "tool" in child ? [child.tool] : []);
             const lastGroupChild = group.at(-1);
-            const active = isStreaming && lastGroupChild?.item === finalActivityItem;
-            const forceGroup = active &&
+            const active = isStreaming && lastGroupChild?.item === finalActivityItem
+                && (lastGroupChild?.item.kind === "thinking"
+                    ? lastGroupChild.item.status === "streaming"
+                    : lastGroupChild?.item.kind === "tool" && isAgentUIToolRunning(lastGroupChild.item.status));
+            const waiting = thinkingInProcessHeader && lastGroupChild?.item === finalActivityItem;
+            const forceGroup = waiting || (active &&
                 lastGroupChild !== undefined &&
                 "tool" in lastGroupChild &&
-                !isAgentUIToolRunning(lastGroupChild.tool.status);
+                !isAgentUIToolRunning(lastGroupChild.tool.status));
             const nodes = group.map((child) => {
                 if (!("tool" in child)) {
                     const live = active && child === lastGroupChild;
@@ -509,17 +532,20 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                     }),
                 };
             });
-            sequences.push(_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, forceGroup: forceGroup, completedProjection: slots.projectToolRun?.({
-                    turn,
-                    tools: groupTools,
-                    active,
-                }) ?? {
-                    summary: labels.toolRunSummary(groupTools),
-                } }, `event-sequence-${index}`));
+            sequences.push({ kind: "activity", node: (_jsx(ChatCollapsibleEventSequence, { nodes: nodes, active: active, forceGroup: forceGroup, completedProjection: waiting ? {
+                        summary: _jsx("span", { role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking }),
+                    } : (slots.projectToolRun?.({
+                        turn,
+                        tools: groupTools,
+                        active,
+                    }) ?? {
+                        summary: labels.toolRunSummary(groupTools),
+                    }) }, `event-sequence-${index}`)) });
         }
         return sequences;
     }, [
         activityGroups,
+        thinkingInProcessHeader,
         finalActivityItem,
         isStreaming,
         labels,
@@ -531,6 +557,19 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
         thoughtPrefixes,
         turn,
     ]);
+    const processSections = [];
+    for (const sequence of processActivitySequences) {
+        const previous = processSections.at(-1);
+        if (sequence.kind === "activity" && previous?.kind === "activity")
+            previous.nodes.push(sequence.node);
+        else
+            processSections.push({ kind: sequence.kind, nodes: [sequence.node] });
+    }
+    if (!processSections.length && hasProcess)
+        processSections.push({ kind: "activity", nodes: [] });
+    // Sections are chronological presentation slices, not prompt turns. One
+    // controller/clock owns all slices; injected input stays outside their folds.
+    const processHeaderIndex = processSections.findIndex(section => section.kind === "activity");
     return (_jsxs(_Fragment, { children: [slots.renderBeforeTurn?.({ turn }), _jsxs(SessionTurnFrame, { turnId: turn.id, sessionId: sessionId, status: frameStatus ?? sessionTurnStatus(turn), errorMessage: turn.error, labels: labels.cancelled === undefined
                     ? undefined
                     : { cancelled: labels.cancelled }, hideStatusMessage: hasProcess && isCancelled, className: chatClassNames(density === "compact"
@@ -539,12 +578,12 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                     ? slots.renderPrompt({ item: prompt, turn })
                     : undefined, promptText: prompt && !slots.renderPrompt ? prompt.text : undefined, errorNotice: turn.status === "failed" && slots.renderError
                     ? slots.renderError({ turn, message: turn.error })
-                    : undefined, children: [slots.renderResponseBeforeProcess?.(renderContext), hasProcess ? (_jsxs(ChatReasoning, { isStreaming: isStreaming, open: processOpen, onOpenChange: (open) => {
+                    : undefined, children: [slots.renderResponseBeforeProcess?.(renderContext), processSections.map((section, sectionIndex) => section.kind === "input" ? (_jsx("div", { "data-user-input-outside-process": "true", children: section.nodes }, `user-input-section-${sectionIndex}`)) : (_jsxs(ChatReasoning, { isStreaming: isStreaming, open: processOpen, onOpenChange: (open) => {
                             if (!isStreaming)
                                 setProcessOpen(open);
-                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [_jsx(ChatReasoningTrigger, { disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
+                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [sectionIndex === processHeaderIndex ? _jsx(ChatReasoningTrigger, { "data-turn-process-header": "true", disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
                                                     ? labels.workingFor(elapsedSeconds)
-                                                    : labels.workedFor(elapsedSeconds)] })] })) }), processOpen ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: processActivitySequences })) : processMounted ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", hidden: true, "aria-hidden": "true", inert: true, children: processActivitySequences })) : null, _jsx(ChatReasoningContent, { children: _jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), slots.renderProcessAfter?.(renderContext)] }) })] })) : null, answerItems.map((item) => {
+                                                    : labels.workedFor(elapsedSeconds)] })] })) }) : null, _jsxs(ChatReasoningContent, { children: [processMounted ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: section.nodes })) : null, sectionIndex === processSections.length - 1 ? (_jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), slots.renderProcessAfter?.(renderContext)] })) : null] })] }, `process-section-${sectionIndex}`))), answerItems.map((item) => {
                         const live = isStreaming && item === finalItem;
                         if (item.kind === "message" && item.role === "assistant") {
                             return (_jsx("div", { className: "min-w-0", "data-session-turn-answer": "true", children: slots.renderAssistant({
@@ -564,7 +603,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                             });
                         }
                         return null;
-                    }), showThinkingFallback ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderAfterAnswer?.(renderContext), slots.renderFooter && (isStreaming || isStopped) ? (
+                    }), showThinkingFallback && !thinkingInProcessHeader ? (_jsx("p", { className: "min-h-6 truncate text-left font-chat text-[13px] leading-6 text-fg-muted", role: "status", "aria-live": "polite", "data-thinking-fallback": "true", children: labels.thinking })) : null, slots.renderAfterAnswer?.(renderContext), slots.renderFooter && (isStreaming || isStopped) ? (
                     // One slot for the footer's whole life: while the turn streams it
                     // holds the footer's height empty, so the stop only fills it in.
                     _jsx("div", { className: "chat-turn-footer-slot", "data-session-turn-footer-slot": isStreaming ? "reserved" : settledLive ? "entering" : "settled", "aria-hidden": isStreaming ? true : undefined, children: isStopped ? slots.renderFooter(renderContext) : null })) : null] })] }));
