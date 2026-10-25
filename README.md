@@ -113,7 +113,7 @@ Git installs keep working for pinned commits. Use an immutable release tag in `p
 ```json
 {
   "dependencies": {
-    "@openma/common": "github:openma-ai/openma-common#v0.11.0"
+    "@openma/common": "github:openma-ai/openma-common#v0.11.1"
   }
 }
 ```

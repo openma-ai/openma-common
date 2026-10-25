@@ -1,3 +1,4 @@
+import { agent as nesAgent, type InitializeResponse as NesInitializeResponse } from "@agentclientprotocol/sdk/experimental/nes";
 import {
   AgentSideConnection,
   PROTOCOL_VERSION,
@@ -1341,7 +1342,7 @@ describe("shared ACP session runtime", () => {
         await terminal.waitForExit();
         await terminal.kill();
         await terminal.release();
-        await conn.unstable_createElicitation({
+        await conn.createElicitation({
           mode: "form",
           sessionId: "callback-audit-session",
           message: "Choose",
@@ -1657,15 +1658,15 @@ describe("shared ACP session runtime", () => {
         return { sessionId: "elicitation-session" };
       },
       async prompt() {
-        elicitationResponse = await conn.unstable_createElicitation({
+        elicitationResponse = await conn.createElicitation({
           mode: "url",
           sessionId: "elicitation-session",
           message: "Authorize repository access",
           elicitationId: "release-channel",
           url: "https://agent.example.com/connect",
         });
-        await conn.unstable_completeElicitation({ elicitationId: "release-channel" });
-        await conn.unstable_completeElicitation({ elicitationId: "release-channel" });
+        await conn.completeElicitation({ elicitationId: "release-channel" });
+        await conn.completeElicitation({ elicitationId: "release-channel" });
         return { stopReason: "end_turn" };
       },
       async cancel() {},
@@ -1724,14 +1725,14 @@ describe("shared ACP session runtime", () => {
         return { sessionId: "url-elicitation-session" };
       },
       async prompt() {
-        elicitationResponse = await conn.unstable_createElicitation({
+        elicitationResponse = await conn.createElicitation({
           mode: "url",
           sessionId: "url-elicitation-session",
           message: "Authorize repository access",
           elicitationId: "url-without-host-callback",
           url: "https://agent.example.com/connect",
         });
-        await conn.unstable_completeElicitation({
+        await conn.completeElicitation({
           elicitationId: "url-without-host-callback",
         });
         return { stopReason: "end_turn" };
@@ -1782,7 +1783,7 @@ describe("shared ACP session runtime", () => {
         return { sessionId: "unknown-url-completion-session" };
       },
       async prompt() {
-        await conn.unstable_completeElicitation({ elicitationId: "unknown-url" });
+        await conn.completeElicitation({ elicitationId: "unknown-url" });
         return { stopReason: "end_turn" };
       },
       async cancel() {},
@@ -1866,7 +1867,7 @@ describe("shared ACP session runtime", () => {
           },
           messageMcp: async (params) => {
             received.push({ method: "mcp/message:request", params });
-            return { tools: [{ name: "inspect" }] };
+            return { result: { tools: [{ name: "inspect" }] } };
           },
           notifyMcp: async (params) => {
             received.push({ method: "mcp/message:notification", params });
@@ -1884,7 +1885,7 @@ describe("shared ACP session runtime", () => {
     for await (const event of session.prompt("list tools")) events.push(event);
     await session.dispose();
 
-    expect(listed).toEqual({ tools: [{ name: "inspect" }] });
+    expect(listed).toEqual({ result: { tools: [{ name: "inspect" }] } });
     expect(received).toEqual([
       { method: "mcp/connect", params: { serverId: "openma-tools" } },
       {
@@ -1924,8 +1925,8 @@ describe("shared ACP session runtime", () => {
   it("negotiates and sends the complete ACP NES and document-input lifecycle", async () => {
     let initializeRequest: { clientCapabilities?: Record<string, unknown> } | undefined;
     const received: Array<{ method: string; params: unknown }> = [];
-    const harness = createHarness(() => ({
-      async initialize(params) {
+    const harness = createNesHarness(() => ({
+      async initialize(params): Promise<NesInitializeResponse> {
         initializeRequest = params as typeof initializeRequest;
         return {
           protocolVersion: PROTOCOL_VERSION,
@@ -1948,38 +1949,14 @@ describe("shared ACP session runtime", () => {
       async newSession() {
         return { sessionId: "conversation-session" };
       },
-      async unstable_startNes(params) {
-        received.push({ method: "nes/start", params });
-        return { sessionId: "nes-session" };
-      },
-      async unstable_suggestNes(params) {
-        received.push({ method: "nes/suggest", params });
-        return { suggestions: [] };
-      },
-      async unstable_closeNes(params) {
-        received.push({ method: "nes/close", params });
+      async extMethod(method, params) {
+        received.push({ method, params });
+        if (method === "nes/start") return { sessionId: "nes-session" };
+        if (method === "nes/suggest") return { suggestions: [] };
         return {};
       },
-      async unstable_didOpenDocument(params) {
-        received.push({ method: "document/didOpen", params });
-      },
-      async unstable_didChangeDocument(params) {
-        received.push({ method: "document/didChange", params });
-      },
-      async unstable_didCloseDocument(params) {
-        received.push({ method: "document/didClose", params });
-      },
-      async unstable_didSaveDocument(params) {
-        received.push({ method: "document/didSave", params });
-      },
-      async unstable_didFocusDocument(params) {
-        received.push({ method: "document/didFocus", params });
-      },
-      async unstable_acceptNes(params) {
-        received.push({ method: "nes/accept", params });
-      },
-      async unstable_rejectNes(params) {
-        received.push({ method: "nes/reject", params });
+      async extNotification(method, params) {
+        received.push({ method, params });
       },
       async prompt() {
         return { stopReason: "end_turn" };
@@ -3048,4 +3025,25 @@ function createHarness(toAgent: (conn: AgentSideConnection) => Agent): { child: 
       },
     },
   };
+}
+
+function createNesHarness(toAgent: (conn: AgentSideConnection) => Omit<Agent, "initialize"> & { initialize(params: Parameters<Agent["initialize"]>[0]): Promise<NesInitializeResponse> }): { child: ChildHandle } {
+  const clientToAgent = new TransformStream<Uint8Array, Uint8Array>();
+  const agentToClient = new TransformStream<Uint8Array, Uint8Array>();
+  const pair = { agentInput: clientToAgent.readable, agentOutput: agentToClient.writable,
+    child: { stdin: clientToAgent.writable, stdout: agentToClient.readable,
+      stderr: new ReadableStream<Uint8Array>({ start(c) { c.close(); } }),
+      exited: Promise.resolve({ code: 0, signal: null }), async kill() {} } };
+  const implementation = toAgent({} as AgentSideConnection);
+  const app = nesAgent();
+  app.onRequest("initialize", ({ params }) => implementation.initialize(params));
+  app.onRequest("session/new", ({ params }) => implementation.newSession(params));
+  for (const method of ["nes/start", "nes/suggest", "nes/close"]) {
+    app.onRequest(method, (value: unknown) => value as Record<string, unknown>, ({ params }) => implementation.extMethod!(method, params));
+  }
+  for (const method of ["document/didOpen", "document/didChange", "document/didClose", "document/didSave", "document/didFocus", "nes/accept", "nes/reject"]) {
+    app.onNotification(method, (value: unknown) => value as Record<string, unknown>, ({ params }) => implementation.extNotification!(method, params));
+  }
+  app.connect(ndJsonStream(pair.agentOutput, pair.agentInput));
+  return { child: pair.child };
 }

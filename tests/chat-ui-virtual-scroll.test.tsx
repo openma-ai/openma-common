@@ -38,7 +38,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-it("mounts the tail window, virtualizes older turns, and preserves reading position during a turn and follows a new turn", async () => {
+it("mounts the tail window, virtualizes older turns, and preserves reading position during a turn and an unrelated appended turn", async () => {
   const turns: AgentUITurnState[] = Array.from({ length: 200 }, (_, index) => ({
     id: `turn-${index}`, status: "completed", items: [],
   }));
@@ -60,7 +60,8 @@ it("mounts the tail window, virtualizes older turns, and preserves reading posit
   expect(host.querySelector('[data-turn="turn-199"]')).toBeNull();
   turns.push({ id: "new-output", status: "running", items: [] });
   await act(async () => { root.render(view()); });
-  expect(host.querySelector('[data-turn="new-output"]')).not.toBeNull();
+  expect(scroll.scrollTop).toBe(0);
+  expect(host.querySelector('[data-turn="new-output"]')).toBeNull();
   await act(async () => { root.unmount(); });
 });
 

@@ -1,3 +1,5 @@
+import type { ConnectMcpRequest, DisconnectMcpRequest } from "./types.js";
+import type * as nes from "@agentclientprotocol/sdk/experimental/nes";
 import {
   ClientSideConnection,
   RequestError,
@@ -73,8 +75,8 @@ export class AcpSessionImpl implements AcpSession {
   #supportsLogout = false;
   #supportsProviders = false;
   #supportsNes = false;
-  #nesCapabilities: schema.NesCapabilities | null = null;
-  #positionEncoding: schema.PositionEncodingKind | null = null;
+  #nesCapabilities: nes.NesCapabilities | null = null;
+  #positionEncoding: nes.PositionEncodingKind | null = null;
   #supportsSteering = false;
   #nextClientRequestId = 1;
   #outstandingUrlElicitations = new Set<string>();
@@ -175,11 +177,11 @@ export class AcpSessionImpl implements AcpSession {
     return this.#supportsNes;
   }
 
-  get nesCapabilities(): schema.NesCapabilities | null {
+  get nesCapabilities(): nes.NesCapabilities | null {
     return this.#nesCapabilities;
   }
 
-  get positionEncoding(): schema.PositionEncodingKind | null {
+  get positionEncoding(): nes.PositionEncodingKind | null {
     return this.#positionEncoding;
   }
 
@@ -284,9 +286,9 @@ export class AcpSessionImpl implements AcpSession {
       initialized.agentCapabilities?.sessionCapabilities?.additionalDirectories != null;
     this.#supportsLogout = initialized.agentCapabilities?.auth?.logout != null;
     this.#supportsProviders = initialized.agentCapabilities?.providers != null;
-    this.#nesCapabilities = initialized.agentCapabilities?.nes ?? null;
+    this.#nesCapabilities = (initialized.agentCapabilities as nes.AgentCapabilities | undefined)?.nes ?? null;
     this.#supportsNes = this.#nesCapabilities != null;
-    this.#positionEncoding = initialized.agentCapabilities?.positionEncoding ?? null;
+    this.#positionEncoding = (initialized.agentCapabilities as nes.AgentCapabilities | undefined)?.positionEncoding ?? null;
     this.#supportsSteering =
       (initialized._meta as { steering?: { supported?: unknown } } | undefined)
         ?.steering?.supported === true;
@@ -483,7 +485,7 @@ export class AcpSessionImpl implements AcpSession {
             () => callbacks.killTerminal!(params),
           )
         : undefined,
-      unstable_createElicitation: callbacks.createElicitation
+      createElicitation: callbacks.createElicitation
         ? async (params) => {
             const response = await this.#runClientRequest(
               "elicitation/create",
@@ -500,7 +502,7 @@ export class AcpSessionImpl implements AcpSession {
             return response;
           }
         : undefined,
-      unstable_completeElicitation: supportsUrlElicitation
+      completeElicitation: supportsUrlElicitation
         ? async (params) => {
             if (!this.#outstandingUrlElicitations.delete(params.elicitationId)) return;
             this.#receiveClientNotification("elicitation/complete", params);
@@ -517,7 +519,7 @@ export class AcpSessionImpl implements AcpSession {
         params,
         async () => {
           if (method === "mcp/connect" && callbacks.connectMcp) {
-            return callbacks.connectMcp(params as schema.ConnectMcpRequest);
+            return callbacks.connectMcp(params as ConnectMcpRequest);
           }
           if (method === "mcp/message" && callbacks.messageMcp) {
             return await callbacks.messageMcp(
@@ -526,7 +528,7 @@ export class AcpSessionImpl implements AcpSession {
           }
           if (method === "mcp/disconnect" && callbacks.disconnectMcp) {
             return (await callbacks.disconnectMcp(
-              params as schema.DisconnectMcpRequest,
+              params as DisconnectMcpRequest,
             )) ?? {};
           }
           this.#receiveInboundEvent({
@@ -768,84 +770,84 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   async startNes(
-    params: schema.StartNesRequest,
-  ): Promise<schema.StartNesResponse> {
-    this.#assertNesMethod(this.#agent?.unstable_startNes, "nes/start");
-    return this.#agent.unstable_startNes(params);
+    params: nes.StartNesRequest,
+  ): Promise<nes.StartNesResponse> {
+    this.#assertNesMethod(this.#agent?.extMethod, "nes/start");
+    return this.#agent.extMethod("nes/start", params) as Promise<nes.StartNesResponse>;
   }
 
   async suggestNes(
-    params: schema.SuggestNesRequest,
-  ): Promise<schema.SuggestNesResponse> {
-    this.#assertNesMethod(this.#agent?.unstable_suggestNes, "nes/suggest");
-    return this.#agent.unstable_suggestNes(params);
+    params: nes.SuggestNesRequest,
+  ): Promise<nes.SuggestNesResponse> {
+    this.#assertNesMethod(this.#agent?.extMethod, "nes/suggest");
+    return this.#agent.extMethod("nes/suggest", params) as Promise<nes.SuggestNesResponse>;
   }
 
   async closeNes(
-    params: schema.CloseNesRequest,
-  ): Promise<schema.CloseNesResponse | void> {
-    this.#assertNesMethod(this.#agent?.unstable_closeNes, "nes/close");
-    return this.#agent.unstable_closeNes(params);
+    params: nes.CloseNesRequest,
+  ): Promise<nes.CloseNesResponse | void> {
+    this.#assertNesMethod(this.#agent?.extMethod, "nes/close");
+    return this.#agent.extMethod("nes/close", params) as Promise<nes.CloseNesResponse>;
   }
 
   async didOpenDocument(
-    params: schema.DidOpenDocumentNotification,
+    params: nes.DidOpenDocumentNotification,
   ): Promise<void> {
-    this.#assertNesDocumentEvent("didOpen", this.#agent?.unstable_didOpenDocument);
-    await this.#agent.unstable_didOpenDocument(params);
+    this.#assertNesDocumentEvent("didOpen", this.#agent?.extNotification);
+    await this.#agent.extNotification("document/didOpen", params);
   }
 
   async didChangeDocument(
-    params: schema.DidChangeDocumentNotification,
+    params: nes.DidChangeDocumentNotification,
   ): Promise<void> {
-    this.#assertNesDocumentEvent("didChange", this.#agent?.unstable_didChangeDocument);
-    await this.#agent.unstable_didChangeDocument(params);
+    this.#assertNesDocumentEvent("didChange", this.#agent?.extNotification);
+    await this.#agent.extNotification("document/didChange", params);
   }
 
   async didCloseDocument(
-    params: schema.DidCloseDocumentNotification,
+    params: nes.DidCloseDocumentNotification,
   ): Promise<void> {
-    this.#assertNesDocumentEvent("didClose", this.#agent?.unstable_didCloseDocument);
-    await this.#agent.unstable_didCloseDocument(params);
+    this.#assertNesDocumentEvent("didClose", this.#agent?.extNotification);
+    await this.#agent.extNotification("document/didClose", params);
   }
 
   async didSaveDocument(
-    params: schema.DidSaveDocumentNotification,
+    params: nes.DidSaveDocumentNotification,
   ): Promise<void> {
-    this.#assertNesDocumentEvent("didSave", this.#agent?.unstable_didSaveDocument);
-    await this.#agent.unstable_didSaveDocument(params);
+    this.#assertNesDocumentEvent("didSave", this.#agent?.extNotification);
+    await this.#agent.extNotification("document/didSave", params);
   }
 
   async didFocusDocument(
-    params: schema.DidFocusDocumentNotification,
+    params: nes.DidFocusDocumentNotification,
   ): Promise<void> {
-    this.#assertNesDocumentEvent("didFocus", this.#agent?.unstable_didFocusDocument);
-    await this.#agent.unstable_didFocusDocument(params);
+    this.#assertNesDocumentEvent("didFocus", this.#agent?.extNotification);
+    await this.#agent.extNotification("document/didFocus", params);
   }
 
-  async acceptNes(params: schema.AcceptNesNotification): Promise<void> {
-    this.#assertNesMethod(this.#agent?.unstable_acceptNes, "nes/accept");
-    await this.#agent.unstable_acceptNes(params);
+  async acceptNes(params: nes.AcceptNesNotification): Promise<void> {
+    this.#assertNesMethod(this.#agent?.extNotification, "nes/accept");
+    await this.#agent.extNotification("nes/accept", params);
   }
 
-  async rejectNes(params: schema.RejectNesNotification): Promise<void> {
-    this.#assertNesMethod(this.#agent?.unstable_rejectNes, "nes/reject");
-    await this.#agent.unstable_rejectNes(params);
+  async rejectNes(params: nes.RejectNesNotification): Promise<void> {
+    this.#assertNesMethod(this.#agent?.extNotification, "nes/reject");
+    await this.#agent.extNotification("nes/reject", params);
   }
 
   #assertNesMethod(
-    method: ((params: never) => unknown) | undefined,
+    method: unknown,
     name: string,
-  ): asserts method is (params: never) => unknown {
+  ): asserts method is Function {
     if (!this.#supportsNes || typeof method !== "function") {
       throw new Error(`ACP agent does not support ${name}`);
     }
   }
 
   #assertNesDocumentEvent(
-    event: keyof schema.NesDocumentEventCapabilities,
-    method: ((params: never) => unknown) | undefined,
-  ): asserts method is (params: never) => unknown {
+    event: keyof nes.NesDocumentEventCapabilities,
+    method: unknown,
+  ): asserts method is Function {
     const capability = this.#nesCapabilities?.events?.document?.[event];
     if (capability == null || typeof method !== "function") {
       throw new Error(`ACP agent does not support document/${event}`);

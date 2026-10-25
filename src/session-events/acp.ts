@@ -122,7 +122,16 @@ export interface PlanDocument {
   uri?: string;
 }
 
+export interface SessionCompaction {
+  id: string;
+  status: string;
+  summary?: unknown[];
+  error?: string;
+  meta?: Record<string, unknown>;
+}
+
 export type TimelineItem =
+  | { kind: "compaction"; compaction: SessionCompaction }
   | {
       /** Adjacent assistant chunks in the same phase and message append here. */
       kind: "assistant_text";
@@ -148,6 +157,9 @@ export type TimelineItem =
       kind: "user_input";
       text: string;
       clientId?: string;
+      attachments?: unknown[];
+      annotations?: unknown[];
+      startedAt?: string;
     };
 
 export interface TurnRender {
@@ -224,6 +236,9 @@ export type ParsedAcpEvent =
       kind: "user_input";
       text: string;
       clientId?: string;
+      attachments?: unknown[];
+      annotations?: unknown[];
+      startedAt?: string;
       event: unknown;
     }
   | { kind: "notice"; notice: string; event: unknown }
@@ -546,6 +561,9 @@ export function parseAcpEvent(event: unknown): ParsedAcpEvent {
       kind: "user_input",
       text,
       ...(clientId ? { clientId } : {}),
+      ...(Array.isArray(canonicalData.attachments) ? { attachments: canonicalData.attachments } : {}),
+      ...(Array.isArray(canonicalData.annotations) ? { annotations: canonicalData.annotations } : {}),
+      ...(stringValue(eventRecord.occurred_at) ? { startedAt: stringValue(eventRecord.occurred_at) } : {}),
       event,
     };
   }
@@ -948,6 +966,7 @@ export function createTurnProjector(): {
     notes: [],
     timeline: [],
   };
+  const compactionIndices = new Map<string, number>();
   const toolById = new Map<string, ToolEntry>();
   let toolsOrder: string[] = [];
   let openSegment: OpenSegment | undefined;
@@ -1127,6 +1146,39 @@ export function createTurnProjector(): {
   };
 
   const apply = ({ payload }: { payload: unknown }) => {
+    const root = objectField(payload);
+    const rawData = root.type === "raw.event" ? objectField(root.data) : undefined;
+    const wire = sessionUpdateInner(rawData?.payload ?? payload);
+    if (wire.sessionUpdate === "compaction_update" || wire.sessionUpdate === "compaction_summary_chunk") {
+      if (typeof wire.compactionId !== "string" || !wire.compactionId) return;
+      const chunk = wire.sessionUpdate === "compaction_summary_chunk";
+      if (!chunk && typeof wire.status !== "string") return;
+      if (chunk && (!wire.content || typeof wire.content !== "object")) return;
+      const index = compactionIndices.get(wire.compactionId);
+      const previous = index === undefined ? undefined : out.timeline[index];
+      const next: SessionCompaction = {
+        ...(previous?.kind === "compaction" ? previous.compaction : { id: wire.compactionId, status: "in_progress" }),
+      };
+      if (chunk) next.summary = [...(next.summary ?? []), wire.content];
+      else {
+        next.status = wire.status as string;
+        if (wire.summary === null) next.summary = undefined;
+        else if (Array.isArray(wire.summary)) next.summary = [...wire.summary];
+        if (wire.error === null) next.error = undefined;
+        else if (typeof wire.error === "string") next.error = wire.error;
+        if (wire._meta === null) next.meta = undefined;
+        else if (wire._meta && typeof wire._meta === "object") next.meta = wire._meta as Record<string, unknown>;
+      }
+      if (index === undefined) {
+        closeOpenSegment();
+        compactionIndices.set(next.id, out.timeline.length);
+        appendTimelineItem({ kind: "compaction", compaction: next });
+      } else {
+        out.timeline[index] = { kind: "compaction", compaction: next };
+        timelineVersion += 1;
+      }
+      return;
+    }
     const parsed = parseAcpEvent(payload);
     switch (parsed.kind) {
       case "user_input":
@@ -1135,6 +1187,9 @@ export function createTurnProjector(): {
           kind: "user_input",
           text: parsed.text,
           ...(parsed.clientId ? { clientId: parsed.clientId } : {}),
+          ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
+          ...(parsed.annotations ? { annotations: parsed.annotations } : {}),
+          ...(parsed.startedAt ? { startedAt: parsed.startedAt } : {}),
         });
         break;
       case "thought":

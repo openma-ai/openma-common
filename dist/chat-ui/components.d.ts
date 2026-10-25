@@ -1,11 +1,24 @@
 import * as CollapsiblePrimitive from "@radix-ui/react-collapsible";
 import type { ComponentProps, CSSProperties, ReactNode, Ref } from "react";
-import { StickToBottom } from "use-stick-to-bottom";
+import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
 import type { AgentUIMessageItem, AgentUIRawItem, AgentUIToolItem, AgentUIUserInputItem, AgentUITurnState } from "../agent-ui/index.js";
 import { type AgentUIThoughtPresentation } from "../agent-ui/presentation.js";
 import { type SessionTurnStatus } from "../session-ui/index.js";
 /** Shared marker for transcript disclosure controls (process + tool rows). */
 export declare const CHAT_TURN_DISCLOSURE_TRIGGER_ATTR = "data-chat-turn-disclosure-trigger";
+export type ChatScrollAnchorValue = Pick<ReturnType<typeof useStickToBottomContext>, "isAtBottom" | "scrollToBottom" | "stopScroll"> & {
+    contentRef: {
+        current: HTMLElement | null;
+    };
+    scrollRef: {
+        current: HTMLElement | null;
+    };
+    /** Locate by stable identity even when the virtual row is not mounted. */
+    scrollToTurn?: (turnId: string) => void;
+};
+/** Scroll ownership shared by ordinary and virtual transcripts. Host slots must
+ * use this bridge instead of the small-list-only StickToBottom context. */
+export declare function useChatScrollAnchor(): ChatScrollAnchorValue;
 export declare const ChatCollapsible: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleProps & import("react").RefAttributes<HTMLDivElement>>;
 export declare const ChatCollapsibleTrigger: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleTriggerProps & import("react").RefAttributes<HTMLButtonElement>>;
 export declare const ChatCollapsibleContent: import("react").ForwardRefExoticComponent<CollapsiblePrimitive.CollapsibleContentProps & import("react").RefAttributes<HTMLDivElement>>;
@@ -119,6 +132,9 @@ export interface AgentUITurnSlots {
         item: AgentUIMessageItem;
         section: "process" | "answer";
     }) => ReactNode;
+    renderCompaction?: (input: AgentUITurnRenderContext & {
+        item: AgentUIMessageItem;
+    }) => ReactNode;
     renderThought?: (input: AgentUITurnRenderContext & {
         item: AgentUIMessageItem;
     }) => ReactNode;
@@ -177,6 +193,8 @@ export interface AgentUITurnViewProps {
     now?: number;
     /** Initial expansion of a non-streaming turn's process strip. */
     defaultProcessOpen?: boolean;
+    /** Fold the process in place when a live turn finishes; never remount the prompt. */
+    collapseProcessOnComplete?: boolean;
 }
 export interface AgentChatViewSlots {
     empty?: ReactNode;
@@ -226,6 +244,6 @@ export type AgentChatViewProps = AgentChatViewBaseProps & (AgentChatViewHostTurn
  * but do not own the conversation geometry or turn lifecycle. */
 export declare function AgentChatView({ sessionId, phase, surface, turns, thoughts, labels, turnSlots, slots, renderTurn, transcriptRef, homeStyle, homeComposerStyle, className, collapsiblePrimitives, activityTools, density, }: AgentChatViewProps): import("react").JSX.Element;
 export declare function isTerminalTurnStatus(status: SessionTurnStatus): boolean;
-export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, defaultProcessOpen, }: AgentUITurnViewProps): import("react").JSX.Element;
+export declare function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, className, collapsiblePrimitives, frameStatus, activityTools, density, now, defaultProcessOpen, collapseProcessOnComplete, }: AgentUITurnViewProps): import("react").JSX.Element;
 export {};
 //# sourceMappingURL=components.d.ts.map

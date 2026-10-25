@@ -71,6 +71,15 @@ export function projectAcpChatTurn(
   }
 
   rendered.timeline.forEach((entry, index) => {
+    if (entry.kind === "compaction") {
+      items.push({
+        id: `${input.id}:compaction:${entry.compaction.id}`,
+        kind: "message", role: "system", phase: "commentary", text: "",
+        status: entry.compaction.status === "in_progress" ? "streaming" : "complete",
+        content: { compaction: entry.compaction },
+      });
+      return;
+    }
     if (entry.kind === "assistant_text") {
       items.push({
         id: `${input.id}:assistant:${entry.segmentId ?? index}`,
@@ -113,6 +122,9 @@ export function projectAcpChatTurn(
         kind: "user_input",
         text: entry.text,
         ...(entry.clientId ? { clientId: entry.clientId } : {}),
+        ...(entry.attachments ? { attachments: entry.attachments } : {}),
+        ...(entry.annotations ? { annotations: entry.annotations } : {}),
+        ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
       };
       items.push(userInput);
       return;

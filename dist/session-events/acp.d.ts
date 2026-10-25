@@ -100,7 +100,17 @@ export interface PlanDocument {
     markdown?: string;
     uri?: string;
 }
+export interface SessionCompaction {
+    id: string;
+    status: string;
+    summary?: unknown[];
+    error?: string;
+    meta?: Record<string, unknown>;
+}
 export type TimelineItem = {
+    kind: "compaction";
+    compaction: SessionCompaction;
+} | {
     /** Adjacent assistant chunks in the same phase and message append here. */
     kind: "assistant_text";
     segmentId?: number;
@@ -122,6 +132,9 @@ export type TimelineItem = {
     kind: "user_input";
     text: string;
     clientId?: string;
+    attachments?: unknown[];
+    annotations?: unknown[];
+    startedAt?: string;
 };
 export interface TurnRender {
     thoughtText: string;
@@ -167,6 +180,9 @@ export type ParsedAcpEvent = {
     kind: "user_input";
     text: string;
     clientId?: string;
+    attachments?: unknown[];
+    annotations?: unknown[];
+    startedAt?: string;
     event: unknown;
 } | {
     kind: "notice";

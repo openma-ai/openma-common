@@ -1,5 +1,22 @@
+import type * as nes from "@agentclientprotocol/sdk/experimental/nes";
 import type * as schema from "@agentclientprotocol/sdk";
 import type { AcpForkPoint, AcpForkSupport } from "../acp-fork/index.js";
+/** Legacy MCP-over-ACP extension shapes, retained independently of core SDK. */
+export interface ConnectMcpRequest extends Record<string, unknown> {
+    serverId: string;
+    _meta?: Record<string, unknown> | null;
+}
+export interface ConnectMcpResponse extends Record<string, unknown> {
+    connectionId: string;
+    _meta?: Record<string, unknown> | null;
+}
+export interface DisconnectMcpRequest extends Record<string, unknown> {
+    connectionId: string;
+    _meta?: Record<string, unknown> | null;
+}
+export interface DisconnectMcpResponse extends Record<string, unknown> {
+    _meta?: Record<string, unknown> | null;
+}
 export interface AgentSpec {
     command: string;
     args?: string[];
@@ -36,10 +53,10 @@ export interface ClientCallbacks {
     killTerminal?(params: schema.KillTerminalRequest): Promise<schema.KillTerminalResponse | void>;
     createElicitation?(params: schema.CreateElicitationRequest): Promise<schema.CreateElicitationResponse>;
     completeElicitation?(params: schema.CompleteElicitationNotification): Promise<void> | void;
-    connectMcp?(params: schema.ConnectMcpRequest): Promise<schema.ConnectMcpResponse>;
+    connectMcp?(params: ConnectMcpRequest): Promise<ConnectMcpResponse>;
     messageMcp?(params: schema.MessageMcpRequest): Promise<schema.MessageMcpResponse>;
     notifyMcp?(params: schema.MessageMcpNotification): Promise<void> | void;
-    disconnectMcp?(params: schema.DisconnectMcpRequest): Promise<schema.DisconnectMcpResponse | void>;
+    disconnectMcp?(params: DisconnectMcpRequest): Promise<DisconnectMcpResponse | void>;
     /** Handle an agent-to-client ACP extension request. When omitted, the SDK
      * correctly returns JSON-RPC Method not found instead of inventing a
      * response for an unknown harness contract. */
@@ -80,9 +97,9 @@ export interface SessionOptions {
     /** NES suggestion kinds the host can render/apply. Omit when the host has
      * no editor surface; the runtime must not advertise an empty capability by
      * assumption. */
-    clientNesCapabilities?: schema.ClientNesCapabilities;
+    clientNesCapabilities?: nes.ClientNesCapabilities;
     /** Position encodings understood by the host editor, in preference order. */
-    positionEncodings?: schema.PositionEncodingKind[];
+    positionEncodings?: nes.PositionEncodingKind[];
     /** Elicitation modes the host can faithfully render and answer. Keep this
      * explicit because receiving the optional `elicitation/complete`
      * notification is not what determines URL-mode support. */
@@ -136,8 +153,8 @@ export interface AcpSession {
     readonly supportsLogout: boolean;
     readonly supportsProviders: boolean;
     readonly supportsNes: boolean;
-    readonly nesCapabilities: schema.NesCapabilities | null;
-    readonly positionEncoding: schema.PositionEncodingKind | null;
+    readonly nesCapabilities: nes.NesCapabilities | null;
+    readonly positionEncoding: nes.PositionEncodingKind | null;
     /** Whether initialize negotiated the vendor `_session/steering` method. */
     readonly supportsSteering: boolean;
     prompt(input: string | readonly schema.ContentBlock[], opts?: {
@@ -161,16 +178,16 @@ export interface AcpSession {
     disableProvider(providerId: schema.ProviderId): Promise<void>;
     requestExtension(method: string, params?: Record<string, unknown>): Promise<Record<string, unknown>>;
     notifyExtension(method: string, params?: Record<string, unknown>): Promise<void>;
-    startNes(params: schema.StartNesRequest): Promise<schema.StartNesResponse>;
-    suggestNes(params: schema.SuggestNesRequest): Promise<schema.SuggestNesResponse>;
-    closeNes(params: schema.CloseNesRequest): Promise<schema.CloseNesResponse | void>;
-    didOpenDocument(params: schema.DidOpenDocumentNotification): Promise<void>;
-    didChangeDocument(params: schema.DidChangeDocumentNotification): Promise<void>;
-    didCloseDocument(params: schema.DidCloseDocumentNotification): Promise<void>;
-    didSaveDocument(params: schema.DidSaveDocumentNotification): Promise<void>;
-    didFocusDocument(params: schema.DidFocusDocumentNotification): Promise<void>;
-    acceptNes(params: schema.AcceptNesNotification): Promise<void>;
-    rejectNes(params: schema.RejectNesNotification): Promise<void>;
+    startNes(params: nes.StartNesRequest): Promise<nes.StartNesResponse>;
+    suggestNes(params: nes.SuggestNesRequest): Promise<nes.SuggestNesResponse>;
+    closeNes(params: nes.CloseNesRequest): Promise<nes.CloseNesResponse | void>;
+    didOpenDocument(params: nes.DidOpenDocumentNotification): Promise<void>;
+    didChangeDocument(params: nes.DidChangeDocumentNotification): Promise<void>;
+    didCloseDocument(params: nes.DidCloseDocumentNotification): Promise<void>;
+    didSaveDocument(params: nes.DidSaveDocumentNotification): Promise<void>;
+    didFocusDocument(params: nes.DidFocusDocumentNotification): Promise<void>;
+    acceptNes(params: nes.AcceptNesNotification): Promise<void>;
+    rejectNes(params: nes.RejectNesNotification): Promise<void>;
     isAlive(): boolean;
     dispose(): Promise<void>;
 }

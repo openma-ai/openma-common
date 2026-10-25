@@ -103,6 +103,7 @@ function recordedTimelineOrder(events: readonly RecordedEvent[]) {
 
 function timelineOrder(timeline: ReturnType<typeof reduceTurn>["timeline"]) {
   return timeline.map((item) => {
+    if (item.kind === "compaction") return { kind: item.kind, compactionId: item.compaction.id };
     if (item.kind === "tool") {
       return { kind: item.kind, toolCallId: item.toolCallId };
     }
