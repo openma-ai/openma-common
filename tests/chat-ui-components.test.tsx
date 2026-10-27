@@ -182,6 +182,14 @@ function assistant(
   };
 }
 
+function activityDisclosureTriggers(html: string): string[] {
+  return [
+    ...html.matchAll(
+      /<button\b[^>]*data-chat-activity-disclosure-trigger="true"[^>]*>[\s\S]*?<\/button>/g,
+    ),
+  ].map((match) => match[0]);
+}
+
 describe("Backchat main AgentUITurnView", () => {
   const slots = {
     renderAssistant: ({ item }: { item: AgentUIMessageItem }) => (
@@ -422,6 +430,192 @@ describe("Backchat main AgentUITurnView", () => {
     ]);
     expect(interrupted).not.toContain("Running Command one");
     expect(interrupted).toContain("Ran Command one");
+  });
+
+  it("keeps Thinking on a running turn's completed tool group when commentary follows", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-waiting-commentary"
+        turn={{
+          id: "turn-waiting-commentary",
+          status: "running",
+          startedAt: "2026-08-26T10:00:00.000Z",
+          items: [
+            activityTool("one"),
+            activityTool("two"),
+            assistant("commentary", "Now explaining", "commentary"),
+          ],
+        }}
+        thoughts="history"
+        now={Date.parse("2026-08-26T10:00:01.000Z")}
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={{
+          ...slots,
+          projectToolRun: () => ({ summary: "Project ran commands" }),
+        }}
+      />,
+    );
+
+    const [trigger] = activityDisclosureTriggers(html);
+    expect(trigger).toBeDefined();
+    expect(trigger).toContain("Thinking");
+    expect(trigger).toContain('data-thinking-fallback="true"');
+    expect(trigger).not.toContain("Ran commands");
+    expect(trigger).not.toContain("Project ran commands");
+    expect(html.match(/data-thinking-fallback="true"/g)).toHaveLength(1);
+  });
+
+  it("keeps Thinking on a running turn's completed tool group without commentary", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-waiting-tools"
+        turn={{
+          id: "turn-waiting-tools",
+          status: "running",
+          startedAt: "2026-08-26T10:00:00.000Z",
+          items: [activityTool("one"), activityTool("two")],
+        }}
+        thoughts="history"
+        now={Date.parse("2026-08-26T10:00:01.000Z")}
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    const [trigger] = activityDisclosureTriggers(html);
+    expect(trigger).toBeDefined();
+    expect(trigger).toContain("Thinking");
+    expect(trigger).toContain('data-thinking-fallback="true"');
+    expect(trigger).not.toContain("Ran commands");
+  });
+
+  it("projects the live tool instead of Thinking for the last group with an in-progress tool", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-live-tool"
+        turn={{
+          id: "turn-live-tool",
+          status: "running",
+          startedAt: "2026-08-26T10:00:00.000Z",
+          items: [activityTool("done"), activityTool("live", "in_progress")],
+        }}
+        thoughts="history"
+        now={Date.parse("2026-08-26T10:00:01.000Z")}
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={{
+          ...slots,
+          projectToolActivity: ({ tool, live }) => ({
+            summary: `${live ? "Running" : "Ran"} ${tool.title}`,
+          }),
+        }}
+      />,
+    );
+
+    const [trigger] = activityDisclosureTriggers(html);
+    expect(trigger).toBeDefined();
+    expect(trigger).toContain("Running Command live");
+    expect(trigger).not.toContain("Thinking");
+    expect(html).not.toContain('data-thinking-fallback="true"');
+  });
+
+  it("keeps toolRunSummary for historical groups while the last group waits", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-waiting-history"
+        turn={{
+          id: "turn-waiting-history",
+          status: "running",
+          startedAt: "2026-08-26T10:00:00.000Z",
+          items: [
+            activityTool("one"),
+            activityTool("two"),
+            assistant("middle", "Middle note", "commentary"),
+            activityTool("three"),
+            activityTool("four"),
+            assistant("trailing", "Trailing note", "commentary"),
+          ],
+        }}
+        thoughts="history"
+        now={Date.parse("2026-08-26T10:00:01.000Z")}
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={{
+          ...slots,
+          projectToolRun: () => ({ summary: "Project ran commands" }),
+        }}
+      />,
+    );
+
+    const triggers = activityDisclosureTriggers(html);
+    expect(triggers).toHaveLength(2);
+    expect(triggers[0]).toContain("Project ran commands");
+    expect(triggers[0]).not.toContain("Thinking");
+    expect(triggers[1]).toContain("Thinking");
+    expect(triggers[1]).toContain('data-thinking-fallback="true"');
+    expect(triggers[1]).not.toContain("Project ran commands");
+  });
+
+  it("keeps toolRunSummary for historical groups on a settled opened process", () => {
+    const html = renderToStaticMarkup(
+      <AgentUITurnView
+        sessionId="session-settled-history"
+        defaultProcessOpen
+        turn={{
+          id: "turn-settled-history",
+          status: "completed",
+          items: [
+            activityTool("one"),
+            activityTool("two"),
+            assistant("middle", "Middle note", "commentary"),
+            activityTool("three"),
+            activityTool("four"),
+            assistant("answer", "Finished."),
+          ],
+        }}
+        thoughts="history"
+        labels={{
+          workingFor: (seconds) => `Working ${seconds}s`,
+          workedFor: (seconds) => `Worked ${seconds}s`,
+          thinking: "Thinking",
+          toolRunSummary: () => "Ran commands",
+          toolActivity: (tool) => tool.title ?? "Tool",
+        }}
+        slots={slots}
+      />,
+    );
+
+    const triggers = activityDisclosureTriggers(html);
+    expect(triggers).toHaveLength(2);
+    for (const trigger of triggers) {
+      expect(trigger).toContain("Ran commands");
+      expect(trigger).not.toContain("Thinking");
+      expect(trigger).not.toContain('data-thinking-fallback="true"');
+    }
+    expect(html).toContain('data-tool-item="one"');
+    expect(html).not.toContain('data-thinking-fallback="true"');
   });
 
   it("keeps the final answer outside the process disclosure", () => {
