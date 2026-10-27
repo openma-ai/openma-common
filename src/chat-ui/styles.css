@@ -851,3 +851,67 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
 .streaming-md > :last-child {
   margin-bottom: 0;
 }
+
+/* ── Composer shell (shared chrome topology) ───────────────────────────
+ * Hosts own widgets (agent picker, mic, chips). Common owns flex topology
+ * and token hooks. See docs/chat-ui-composer-shell.md.
+ */
+
+.openma-composer-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: var(--composer-section-gap, 6px);
+}
+
+.openma-composer-body {
+  display: flex;
+  min-width: 0;
+  min-height: var(--composer-body-min-height, 3rem);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.openma-composer-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--composer-toolbar-gap, 8px);
+}
+
+.openma-composer-toolbar-start {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--composer-toolbar-start-gap, 2px);
+  overflow: hidden;
+}
+
+/* Backchat chip-row clip box: room for focus rings outside the control. */
+.openma-composer-toolbar-start--clip {
+  margin: calc(-1 * var(--composer-toolbar-clip-outset, 4px));
+  padding: var(--composer-toolbar-clip-outset, 4px);
+}
+
+.openma-composer-toolbar-end {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--composer-toolbar-end-gap, 2px);
+}
+
+/* Optional control size hooks for host icon buttons / chips inside the shell. */
+.openma-composer-shell {
+  --composer-control-height: var(
+    --control-height-compact,
+    var(--control-height-sm, 28px)
+  );
+  --composer-control-icon-size: var(--composer-attachment-icon-size, 14px);
+  --composer-chip-height: var(--composer-control-height);
+  --composer-chip-radius: var(--composer-control-radius, 6px);
+  --composer-chip-padding-inline: var(--composer-chip-padding-x, 6px);
+}

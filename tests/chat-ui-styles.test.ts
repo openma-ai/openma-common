@@ -24,6 +24,10 @@ describe("chat UI host style contract", () => {
       ".reasoning-collapse-inner",
       ".chat-markdown",
       ".streaming-md",
+      ".openma-composer-shell",
+      ".openma-composer-toolbar",
+      ".openma-composer-toolbar-start",
+      ".openma-composer-toolbar-end",
     ]) {
       expect(css).toContain(selector);
     }
