@@ -1213,19 +1213,6 @@ export function AgentUITurnView({
     hasSupplementalProcess ||
     (isStreaming && answerItems.length === 0);
   const finalItem = items.at(-1);
-  let finalActivityItem: AgentUITimelineItem | undefined;
-  for (let index = items.length - 1; index >= 0; index -= 1) {
-    const item = items[index];
-    if (
-      item &&
-      (item.kind === "message" ||
-        item.kind === "thinking" ||
-        item.kind === "tool")
-    ) {
-      finalActivityItem = item;
-      break;
-    }
-  }
 
   // Prompt completion, not the presence of historical output, owns liveness.
   // A real tool/thought supplies its own feedback; otherwise the turn has one
@@ -1236,11 +1223,21 @@ export function AgentUITurnView({
   const hasLiveThought = !inputIsTail && tailActivity?.kind === "thinking" && tailActivity.status === "streaming";
   const hasActiveCompaction = items.some(item => item.kind === "message" && item.role === "system" && item.status === "streaming" && item.content && typeof item.content === "object" && "compaction" in item.content);
   const showThinkingFallback = isStreaming && !hasRunningTool && !hasLiveThought && !hasActiveCompaction;
+  // Only the final activity group can still be live or waiting. Commentary
+  // after that group does not end the wait; it must not turn the group back
+  // into a settled historical tool run.
+  const lastActivityGroup = [...activityGroups.values()].at(-1);
+  const lastActivityGroupIsLive = lastActivityGroup?.some((child) =>
+    "tool" in child
+      ? isAgentUIToolRunning(child.tool.status)
+      : child.item.status === "streaming",
+  ) ?? false;
   // A waiting process owns the one live status in its disclosure header.
   // Historical output never ends the prompt, and historical groups never
   // become live merely because another group is waiting.
   const thinkingInProcessHeader = showThinkingFallback && !inputIsTail && answerItems.length === 0
-    && (tailActivity?.kind === "tool" || tailActivity?.kind === "thinking");
+    && lastActivityGroup !== undefined
+    && !lastActivityGroupIsLive;
 
   const processActivitySequences = useMemo(() => {
     const sequences: Array<{ kind: "input" | "activity"; node: ReactNode }> = [];
@@ -1290,16 +1287,10 @@ export function AgentUITurnView({
         "tool" in child ? [child.tool] : [],
       );
       const lastGroupChild = group.at(-1);
-      const active = isStreaming && lastGroupChild?.item === finalActivityItem
-        && (lastGroupChild?.item.kind === "thinking"
-          ? lastGroupChild.item.status === "streaming"
-          : lastGroupChild?.item.kind === "tool" && isAgentUIToolRunning(lastGroupChild.item.status));
-      const waiting = thinkingInProcessHeader && lastGroupChild?.item === finalActivityItem;
-      const forceGroup = waiting || (
-        active &&
-        lastGroupChild !== undefined &&
-        "tool" in lastGroupChild &&
-        !isAgentUIToolRunning(lastGroupChild.tool.status));
+      const isLastActivityGroup = group === lastActivityGroup;
+      const active = isStreaming && isLastActivityGroup && lastActivityGroupIsLive;
+      const waiting = thinkingInProcessHeader && isLastActivityGroup;
+      const forceGroup = waiting;
       const nodes: ChatCollapsibleEventNode[] = group.map((child) => {
         if (!("tool" in child)) {
           const live = active && child === lastGroupChild;
@@ -1377,7 +1368,8 @@ export function AgentUITurnView({
   }, [
     activityGroups,
     thinkingInProcessHeader,
-    finalActivityItem,
+    lastActivityGroup,
+    lastActivityGroupIsLive,
     isStreaming,
     labels,
     finalItem,
