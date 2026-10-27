@@ -8,7 +8,10 @@ type ScrollAnchorOptions = {
     stopScroll: () => void;
     scheduleFrame?: (callback: () => void) => void;
 };
-/** Backchat's scroll-anchor preservation for nested process disclosures. */
+export declare const SCROLL_ANCHOR_ESCAPE_BUFFER_PX: number;
+/** Keep a disclosure trigger at the same viewport Y while its content changes.
+ * Counters bottom-pinned chat scrollers reflowing when a block near the
+ * composer expands or collapses (Backchat issue #103 stick-to-bottom fight). */
 export declare function preserveChatScrollAnchor({ scrollElement, anchorElement, contentElement, update, stopScroll, scheduleFrame, }: ScrollAnchorOptions): void;
 export {};
 //# sourceMappingURL=utils.d.ts.map
