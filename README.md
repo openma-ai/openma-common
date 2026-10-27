@@ -45,6 +45,7 @@ or wire-event shapes into product state.
 - `@openma/common/acp-harnesses/custom-agents` — shared store for custom ACP agent definitions under `~/.oma`: `config.toml` `[[agents]]` override rows plus compatible reads of Martty `settings.json` `harnesses[]` rows (migrated on write). Versions in `args` are kept verbatim.
 - `@openma/common/telemetry` — ACP session tracing on the OpenTelemetry API only (`@opentelemetry/api` is an optional peer). `AcpTraceObserver` turns outgoing session events into GenAI-convention `create_agent` / `invoke_agent` / `execute_tool` spans; `linkTurn()` parents a turn on a W3C `traceparent`; `resolveTelemetryExport()` resolves OTLP export from a master switch plus the standard `OTEL_*` variables, with a settings table taking precedence. Spans carry ids, names, kinds, counts and closed error codes only: never prompt text, tool titles or error messages. The SDK pipeline (provider, processors, exporter) stays in the host.
 - `@openma/common/session-ui` — shared Session turn frame, OpenMA/harness icons, live ACP configuration controls, and status semantics with product-specific content slots.
+- `@openma/common/chat-ui` — shared Agent chat transcript view, density attributes, composer draft store, and `ComposerShell` / `ComposerToolbar` chrome topology with CSS token hooks (see [docs/chat-ui-composer-shell.md](./docs/chat-ui-composer-shell.md)).
 
 `projectCanonicalChatTurns()` adapts Managed events into the same `TurnRender`
 model used by Backchat. This is the migration seam for a shared Session GUI;
