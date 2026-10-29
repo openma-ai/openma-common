@@ -113,11 +113,16 @@ function GenericAgentGlyph({ className, title, }) {
  * Shared harness / provider brand mark for composer model chips and pickers.
  * Hosts theme via `currentColor` + className; do not hard-code product colors.
  */
+/** Accessible / display title for a known brand mark, else null. */
+export function agentBrandDisplayTitle(agentId) {
+    const icon = INLINE_ICONS[normalizeAgentBrandId(agentId)];
+    return icon?.title ?? null;
+}
 export function AgentBrandIcon({ agentId, className = "h-3.5 w-3.5", title, iconUrl, }) {
     const normalized = normalizeAgentBrandId(agentId);
     const icon = INLINE_ICONS[normalized];
     if (icon) {
-        return (_jsx("svg", { "data-openma-agent-brand-icon": "", "data-slot": "agent-provider-logo", "data-agent-icon-source": "brand", "data-agent-brand-id": normalized, role: "img", "aria-label": title ?? icon.title, viewBox: icon.viewBox ?? "0 0 24 24", shapeRendering: "geometricPrecision", focusable: "false", fill: "currentColor", fillRule: "evenodd", className: className, children: icon.paths.map((path) => (_jsx("path", { d: path.d, fillRule: path.fillRule, clipRule: path.clipRule }, path.d))) }));
+        return (_jsx("svg", { "data-openma-agent-brand-icon": "", "data-slot": "agent-provider-logo", "data-agent-icon-source": "brand", "data-agent-brand-id": normalized, role: "img", "aria-label": icon.title, viewBox: icon.viewBox ?? "0 0 24 24", shapeRendering: "geometricPrecision", focusable: "false", fill: "currentColor", fillRule: "evenodd", className: className, children: icon.paths.map((path) => (_jsx("path", { d: path.d, fillRule: path.fillRule, clipRule: path.clipRule }, path.d))) }));
     }
     if (iconUrl) {
         return (_jsx("span", { "data-openma-agent-brand-icon": "", "data-slot": "agent-provider-logo", "data-agent-icon-source": "registry", role: "img", "aria-label": title ?? agentId ?? "agent", className: chatClassNames("inline-block", className), style: {

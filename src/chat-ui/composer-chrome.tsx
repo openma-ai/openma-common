@@ -6,6 +6,8 @@ import { chatClassNames } from "./utils.js";
 
 /** Backchat `composer-footer-trigger` chrome — transparent at rest, wash on hover/open. */
 export const COMPOSER_CHIP_CLASS = "openma-composer-chip";
+/** Backchat alias — same chrome class as `COMPOSER_CHIP_CLASS`. */
+export const COMPOSER_TOOLBAR_CHIP_CLASS = COMPOSER_CHIP_CLASS;
 /** Square icon control (attach / mic / follow) inside the toolbar. */
 export const COMPOSER_ICON_BUTTON_CLASS = "openma-composer-icon-button";
 /** Enter / stop run affordance at toolbar end. */

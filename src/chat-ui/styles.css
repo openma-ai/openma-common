@@ -987,7 +987,7 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   background: transparent;
 }
 
-.openma-composer-chip:focus {
+.openma-composer-chip:focus:not(:focus-visible) {
   outline: none;
 }
 

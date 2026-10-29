@@ -1,6 +1,8 @@
 import type { ComponentProps, ReactNode } from "react";
 /** Backchat `composer-footer-trigger` chrome — transparent at rest, wash on hover/open. */
 export declare const COMPOSER_CHIP_CLASS = "openma-composer-chip";
+/** Backchat alias — same chrome class as `COMPOSER_CHIP_CLASS`. */
+export declare const COMPOSER_TOOLBAR_CHIP_CLASS = "openma-composer-chip";
 /** Square icon control (attach / mic / follow) inside the toolbar. */
 export declare const COMPOSER_ICON_BUTTON_CLASS = "openma-composer-icon-button";
 /** Enter / stop run affordance at toolbar end. */

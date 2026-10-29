@@ -5,10 +5,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   AgentBrandIcon,
+  agentBrandDisplayTitle,
   normalizeAgentBrandId,
 } from "../src/chat-ui/agent-brand-icon.js";
 import {
   COMPOSER_CHIP_CLASS,
+  COMPOSER_TOOLBAR_CHIP_CLASS,
   COMPOSER_ICON_BUTTON_CLASS,
   COMPOSER_RUN_ACTION_CLASS,
   ComposerChip,
@@ -40,6 +42,15 @@ describe("AgentBrandIcon", () => {
     expect(html).not.toContain('data-agent-icon-source="generic"');
   });
 
+
+  it("keeps DeepSeek aria-label even when hosts pass a harness display title", () => {
+    const html = renderToStaticMarkup(
+      <AgentBrandIcon agentId="dsh-acp" title="Dsh Acp" />,
+    );
+    expect(html).toContain('aria-label="DeepSeek"');
+    expect(agentBrandDisplayTitle("dsh-acp")).toBe("DeepSeek");
+  });
+
   it("keeps Cursor / Claude on brand paths", () => {
     expect(renderToStaticMarkup(<AgentBrandIcon agentId="cursor" />)).toContain(
       'data-agent-brand-id="cursor"',
@@ -53,6 +64,7 @@ describe("AgentBrandIcon", () => {
 describe("composer chrome widgets", () => {
   it("exports stable chip / icon / run class names", () => {
     expect(COMPOSER_CHIP_CLASS).toBe("openma-composer-chip");
+    expect(COMPOSER_TOOLBAR_CHIP_CLASS).toBe(COMPOSER_CHIP_CLASS);
     expect(COMPOSER_ICON_BUTTON_CLASS).toBe("openma-composer-icon-button");
     expect(COMPOSER_RUN_ACTION_CLASS).toBe("openma-composer-run-action");
     expect(composerChipClass("host")).toContain("openma-composer-chip");

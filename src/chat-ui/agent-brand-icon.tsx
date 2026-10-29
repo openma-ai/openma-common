@@ -150,6 +150,12 @@ function GenericAgentGlyph({
  * Shared harness / provider brand mark for composer model chips and pickers.
  * Hosts theme via `currentColor` + className; do not hard-code product colors.
  */
+/** Accessible / display title for a known brand mark, else null. */
+export function agentBrandDisplayTitle(agentId?: string | null): string | null {
+  const icon = INLINE_ICONS[normalizeAgentBrandId(agentId)];
+  return icon?.title ?? null;
+}
+
 export function AgentBrandIcon({
   agentId,
   className = "h-3.5 w-3.5",
@@ -166,7 +172,7 @@ export function AgentBrandIcon({
         data-agent-icon-source="brand"
         data-agent-brand-id={normalized}
         role="img"
-        aria-label={title ?? icon.title}
+        aria-label={icon.title}
         viewBox={icon.viewBox ?? "0 0 24 24"}
         shapeRendering="geometricPrecision"
         focusable="false"
