@@ -54,10 +54,10 @@ describe("chat UI host style contract", () => {
     expect(css).toContain("container-type: inline-size");
     expect(css).toContain("@container openma-composer (max-width: 32rem)");
     expect(css).toMatch(
-      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-chip-label/,
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-toolbar-start \.openma-composer-chip-label/,
     );
     expect(css).toMatch(
-      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-chip > span\.min-w-0\.flex-1\.truncate/,
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-toolbar-start \.openma-composer-chip > span\.min-w-0\.flex-1\.truncate/,
     );
   });
 

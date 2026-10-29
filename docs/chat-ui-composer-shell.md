@@ -166,16 +166,13 @@ density, icon slots, and Enter topology so Clash/Backchat stay aligned.
 ### Narrow → icon-only density
 
 `.openma-composer-shell` is a named container (`openma-composer`). When its
-inline size is **≤ 32rem**, shared chip labels collapse to icon-only (Backchat
-side-panel pattern):
+inline size is **≤ 32rem**, **toolbar-start** chip labels collapse to icon-only
+(Backchat side-panel pattern). Toolbar-end labels (e.g. harness "High") stay.
 
+Hidden under `.openma-composer-toolbar-start`:
 - `.openma-composer-chip-label` / `[data-openma-composer-chip-label]`
 - `.openma-composer-chip > span.min-w-0.flex-1.truncate` (SelectMenu-style wrappers)
 
-Hosts should put product labels in those slots (or add the class/attr) so
-narrow chrome does not mid-clip text inside the toolbar start overflow box.
-Wide / main composers keep labels. Override via
-`--composer-chip-gap-icon` / `--composer-chip-padding-inline-icon` if needed.
 
 ## Non-goals
 
