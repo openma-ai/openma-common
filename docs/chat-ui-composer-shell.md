@@ -173,6 +173,14 @@ Hidden under `.openma-composer-toolbar-start`:
 - `.openma-composer-chip-label` / `[data-openma-composer-chip-label]`
 - `.openma-composer-chip > span.min-w-0.flex-1.truncate` (SelectMenu-style wrappers)
 
+At **≤ 22rem** (panel squeezed below a host's natural side-panel width) the
+icon-only start lane alone no longer fits beside the end lane, and would clip
+its last chip under `overflow: hidden`. Common then also hides start-lane
+trailing carets (`.openma-composer-chip > svg:last-child`) and collapses the
+**toolbar-end** chip label to its leading icon (brand mark). End-lane children
+never shrink (`flex-shrink: 0`), so mic + run action always stay inside the
+shell.
+
 
 ## Non-goals
 

@@ -990,6 +990,36 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   }
 }
 
+/*
+ * Tight chrome (≤22rem, e.g. a panel squeezed below the host's natural
+ * side-panel width): start-lane icon-only chips alone no longer fit beside
+ * the end lane (effort chip + mic + send), so the start lane would clip its
+ * last chip under `overflow: hidden`. Drop start-lane carets and collapse
+ * the end-lane chip to its leading icon (brand mark). Run action + mic keep
+ * their fixed size; the end lane never shrinks below its icons.
+ */
+@container openma-composer (max-width: 22rem) {
+  .openma-composer-toolbar-start .openma-composer-chip > svg:last-child:not(:first-child) {
+    display: none;
+  }
+
+  .openma-composer-toolbar-end .openma-composer-chip-label,
+  .openma-composer-toolbar-end [data-openma-composer-chip-label],
+  .openma-composer-toolbar-end .openma-composer-chip > span.min-w-0.flex-1.truncate {
+    display: none;
+  }
+
+  .openma-composer-toolbar-end .openma-composer-chip {
+    gap: var(--composer-chip-gap-icon, 2px);
+    padding-inline-end: var(--composer-chip-padding-inline-icon, 2px);
+  }
+}
+
+/* End lane holds fixed-size icon controls; never let them shrink/clip. */
+.openma-composer-toolbar-end > * {
+  flex-shrink: 0;
+}
+
 .openma-composer-chip:hover {
   color: var(--composer-chip-fg-active, var(--control-fg-active, var(--fg, currentColor)));
   background: var(--composer-chip-bg-hover, var(--control-bg-hover, transparent));
