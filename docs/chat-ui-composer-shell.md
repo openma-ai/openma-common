@@ -163,6 +163,20 @@ Also from `@openma/common/chat-ui`:
 Hosts still own menu/popover content and product-specific labels; common owns
 density, icon slots, and Enter topology so Clash/Backchat stay aligned.
 
+### Narrow → icon-only density
+
+`.openma-composer-shell` is a named container (`openma-composer`). When its
+inline size is **≤ 32rem**, shared chip labels collapse to icon-only (Backchat
+side-panel pattern):
+
+- `.openma-composer-chip-label` / `[data-openma-composer-chip-label]`
+- `.openma-composer-chip > span.min-w-0.flex-1.truncate` (SelectMenu-style wrappers)
+
+Hosts should put product labels in those slots (or add the class/attr) so
+narrow chrome does not mid-clip text inside the toolbar start overflow box.
+Wide / main composers keep labels. Override via
+`--composer-chip-gap-icon` / `--composer-chip-padding-inline-icon` if needed.
+
 ## Non-goals
 
 - Does not replace host menus, slash pickers, or auth flows.

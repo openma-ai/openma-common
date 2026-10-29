@@ -84,6 +84,8 @@ describe("composer chrome widgets", () => {
     expect(html).toContain('data-control-icon=""');
     expect(html).toContain('data-dsh-preset-icon="standard"');
     expect(html).toContain("Standard");
+    expect(html).toContain("openma-composer-chip-label");
+    expect(html).toContain('data-openma-composer-chip-label=""');
     expect(html).toContain('data-chevron=""');
   });
 

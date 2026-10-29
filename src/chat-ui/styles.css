@@ -862,6 +862,10 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   flex-direction: column;
   min-width: 0;
   gap: var(--composer-section-gap, 6px);
+  /* Named container so chip density can respond to chrome width
+     (Backchat side-panel → icon-only), independent of host layout. */
+  container-type: inline-size;
+  container-name: openma-composer;
 }
 
 .openma-composer-body {
@@ -964,6 +968,25 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * Narrow chrome → icon-only chips (Backchat side-panel pattern).
+ * Hide shared labels and the common SelectMenu-style flex-1 truncate
+ * wrapper hosts put beside [data-control-icon]. Keep icons + chevrons.
+ * Breakpoint 32rem: side panels (~24rem) collapse; wide/main keep labels.
+ */
+@container openma-composer (max-width: 32rem) {
+  .openma-composer-chip-label,
+  [data-openma-composer-chip-label],
+  .openma-composer-chip > span.min-w-0.flex-1.truncate {
+    display: none;
+  }
+
+  .openma-composer-chip {
+    gap: var(--composer-chip-gap-icon, 2px);
+    padding-inline-end: var(--composer-chip-padding-inline-icon, 2px);
+  }
 }
 
 .openma-composer-chip:hover {

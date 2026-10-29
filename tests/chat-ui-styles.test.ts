@@ -43,6 +43,24 @@ describe("chat UI host style contract", () => {
     expect(emptyStack).not.toContain("margin-top: -8vh");
   });
 
+
+  it("collapses composer chip labels to icon-only under 32rem shell width", () => {
+    const css = readFileSync(
+      resolve(import.meta.dirname, "../src/chat-ui/styles.css"),
+      "utf8",
+    );
+
+    expect(css).toContain("container-name: openma-composer");
+    expect(css).toContain("container-type: inline-size");
+    expect(css).toContain("@container openma-composer (max-width: 32rem)");
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-chip-label/,
+    );
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-chip > span\.min-w-0\.flex-1\.truncate/,
+    );
+  });
+
   it("exports styles separately so the host chooses when to inject them", () => {
     const pkg = JSON.parse(
       readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"),
