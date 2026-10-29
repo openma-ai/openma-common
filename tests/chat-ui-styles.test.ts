@@ -43,6 +43,39 @@ describe("chat UI host style contract", () => {
     expect(emptyStack).not.toContain("margin-top: -8vh");
   });
 
+
+  it("collapses composer chip labels to icon-only under 32rem shell width", () => {
+    const css = readFileSync(
+      resolve(import.meta.dirname, "../src/chat-ui/styles.css"),
+      "utf8",
+    );
+
+    expect(css).toContain("container-name: openma-composer");
+    expect(css).toContain("container-type: inline-size");
+    expect(css).toContain("@container openma-composer (max-width: 32rem)");
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-toolbar-start \.openma-composer-chip-label/,
+    );
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*32rem\)[\s\S]*?\.openma-composer-toolbar-start \.openma-composer-chip > span\.min-w-0\.flex-1\.truncate/,
+    );
+  });
+
+  it("collapses start carets and end-lane chip label under 22rem so nothing clips", () => {
+    const css = readFileSync(
+      resolve(import.meta.dirname, "../src/chat-ui/styles.css"),
+      "utf8",
+    );
+
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*22rem\)[\s\S]*?\.openma-composer-toolbar-start \.openma-composer-chip > svg:last-child:not\(:first-child\)/,
+    );
+    expect(css).toMatch(
+      /@container openma-composer \(max-width:\s*22rem\)[\s\S]*?\.openma-composer-toolbar-end \.openma-composer-chip > span\.min-w-0\.flex-1\.truncate/,
+    );
+    expect(css).toMatch(/\.openma-composer-toolbar-end > \*\s*\{\s*flex-shrink: 0;/);
+  });
+
   it("exports styles separately so the host chooses when to inject them", () => {
     const pkg = JSON.parse(
       readFileSync(resolve(import.meta.dirname, "../package.json"), "utf8"),

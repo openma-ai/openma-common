@@ -15,6 +15,7 @@ From `@openma/common/chat-ui`:
 | `COMPOSER_*_CLASS` | Stable class-name constants |
 | `createComposerDraftStore` | Unchanged draft persistence helper |
 | `agentChatDensityAttributes` | Unchanged density `data-*` + compact CSS vars |
+| `AgentBrandIcon` / `ComposerChip` / `ComposerRunAction` | Brand marks + chip / Enter chrome (see below) |
 
 Import styles once:
 
@@ -144,4 +145,46 @@ not required for the Clash asymmetry fix.
 - No shared agent-picker, mic, or permission-chip widgets (product-specific).
 - Does not replace `AgentChatView`’s `slots.composer` — hosts still pass the
   whole composer node; the shell is what that node is built from.
+- Does not change `createComposerDraftStore` or transcript presentation.
+
+## Chrome widgets (chips / brand icons / run action)
+
+Also from `@openma/common/chat-ui`:
+
+| Export | Role |
+| --- | --- |
+| `AgentBrandIcon` | Harness brand mark (`dsh-acp` → DeepSeek whale, not generic robot) |
+| `ComposerChip` | Footer-trigger chip chrome (icon + label + trailing) |
+| `ComposerIconButton` | Attach / mic / follow square control |
+| `ComposerRunAction` | Enter / stop affordance (`data-composer-submit` / `stop`) |
+| `DshPresetStandardIcon` / `agentPresetIcon` | Collaboration preset glyphs |
+| `composerChipClass` / `COMPOSER_CHIP_CLASS` | Class helpers for host-owned triggers |
+
+Hosts still own menu/popover content and product-specific labels; common owns
+density, icon slots, and Enter topology so Clash/Backchat stay aligned.
+
+### Narrow → icon-only density
+
+`.openma-composer-shell` is a named container (`openma-composer`). When its
+inline size is **≤ 32rem**, **toolbar-start** chip labels collapse to icon-only
+(Backchat side-panel pattern). Toolbar-end labels (e.g. harness "High") stay.
+
+Hidden under `.openma-composer-toolbar-start`:
+- `.openma-composer-chip-label` / `[data-openma-composer-chip-label]`
+- `.openma-composer-chip > span.min-w-0.flex-1.truncate` (SelectMenu-style wrappers)
+
+At **≤ 22rem** (panel squeezed below a host's natural side-panel width) the
+icon-only start lane alone no longer fits beside the end lane, and would clip
+its last chip under `overflow: hidden`. Common then also hides start-lane
+trailing carets (`.openma-composer-chip > svg:last-child`) and collapses the
+**toolbar-end** chip label to its leading icon (brand mark). End-lane children
+never shrink (`flex-shrink: 0`), so mic + run action always stay inside the
+shell.
+
+
+## Non-goals
+
+- Does not replace host menus, slash pickers, or auth flows.
+- Does not replace `AgentChatView`'s `slots.composer` — hosts still pass the
+  whole composer node; the shell + chrome are what that node is built from.
 - Does not change `createComposerDraftStore` or transcript presentation.

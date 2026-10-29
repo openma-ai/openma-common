@@ -862,6 +862,10 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   flex-direction: column;
   min-width: 0;
   gap: var(--composer-section-gap, 6px);
+  /* Named container so chip density can respond to chrome width
+     (Backchat side-panel → icon-only), independent of host layout. */
+  container-type: inline-size;
+  container-name: openma-composer;
 }
 
 .openma-composer-body {
@@ -914,4 +918,219 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   --composer-chip-height: var(--composer-control-height);
   --composer-chip-radius: var(--composer-control-radius, 6px);
   --composer-chip-padding-inline: var(--composer-chip-padding-x, 6px);
+}
+
+/* ── Composer chrome widgets (chips / icon buttons / run action) ────────
+ * Backchat composer-footer-trigger + ComposerAction pattern.
+ * Hosts map --fg-muted / --control-bg-* / --control-height-compact tokens.
+ */
+
+.openma-composer-chip {
+  display: inline-flex;
+  height: var(--composer-chip-height, var(--control-height-compact, 28px));
+  min-width: 0;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--composer-chip-gap, var(--control-gap-compact, 6px));
+  padding-inline: 0 var(--composer-chip-padding-inline, var(--control-padding-inline, 6px));
+  border: 0;
+  border-radius: var(--composer-chip-radius, var(--control-radius, 6px));
+  outline: none;
+  color: var(--composer-chip-fg, var(--fg-muted, var(--chat-fg-muted, currentColor)));
+  background: transparent;
+  box-shadow: none;
+  user-select: none;
+  font-size: var(--composer-chip-font-size, var(--type-caption-size, 12px));
+  font-weight: var(--composer-chip-font-weight, var(--font-weight-regular, 400));
+  line-height: 1;
+  transition:
+    color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease),
+    background-color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease),
+    box-shadow var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease);
+}
+
+.openma-composer-chip > [data-control-icon] {
+  display: grid;
+  width: var(--composer-chip-height, var(--control-height-compact, 28px));
+  height: var(--composer-chip-height, var(--control-height-compact, 28px));
+  flex: 0 0 var(--composer-chip-height, var(--control-height-compact, 28px));
+  place-items: center;
+}
+
+.openma-composer-chip > [data-control-icon] > svg,
+.openma-composer-chip > [data-control-icon] > span {
+  width: var(--composer-control-icon-size, 14px);
+  height: var(--composer-control-icon-size, 14px);
+}
+
+.openma-composer-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Narrow chrome → icon-only chips (Backchat side-panel pattern).
+ * Hide shared labels and the common SelectMenu-style flex-1 truncate
+ * wrapper hosts put beside [data-control-icon]. Keep icons + chevrons.
+ * Breakpoint 32rem: side panels (~24rem) collapse; wide/main keep labels.
+ */
+@container openma-composer (max-width: 32rem) {
+  /* Start-lane chips only — Backchat keeps toolbar-end labels (e.g. High). */
+  .openma-composer-toolbar-start .openma-composer-chip-label,
+  .openma-composer-toolbar-start [data-openma-composer-chip-label],
+  .openma-composer-toolbar-start .openma-composer-chip > span.min-w-0.flex-1.truncate {
+    display: none;
+  }
+
+  .openma-composer-toolbar-start .openma-composer-chip {
+    gap: var(--composer-chip-gap-icon, 2px);
+    padding-inline-end: var(--composer-chip-padding-inline-icon, 2px);
+  }
+}
+
+/*
+ * Tight chrome (≤22rem, e.g. a panel squeezed below the host's natural
+ * side-panel width): start-lane icon-only chips alone no longer fit beside
+ * the end lane (effort chip + mic + send), so the start lane would clip its
+ * last chip under `overflow: hidden`. Drop start-lane carets and collapse
+ * the end-lane chip to its leading icon (brand mark). Run action + mic keep
+ * their fixed size; the end lane never shrinks below its icons.
+ */
+@container openma-composer (max-width: 22rem) {
+  .openma-composer-toolbar-start .openma-composer-chip > svg:last-child:not(:first-child) {
+    display: none;
+  }
+
+  .openma-composer-toolbar-end .openma-composer-chip-label,
+  .openma-composer-toolbar-end [data-openma-composer-chip-label],
+  .openma-composer-toolbar-end .openma-composer-chip > span.min-w-0.flex-1.truncate {
+    display: none;
+  }
+
+  .openma-composer-toolbar-end .openma-composer-chip {
+    gap: var(--composer-chip-gap-icon, 2px);
+    padding-inline-end: var(--composer-chip-padding-inline-icon, 2px);
+  }
+}
+
+/* End lane holds fixed-size icon controls; never let them shrink/clip. */
+.openma-composer-toolbar-end > * {
+  flex-shrink: 0;
+}
+
+.openma-composer-chip:hover {
+  color: var(--composer-chip-fg-active, var(--control-fg-active, var(--fg, currentColor)));
+  background: var(--composer-chip-bg-hover, var(--control-bg-hover, transparent));
+}
+
+.openma-composer-chip[data-state="open"],
+.openma-composer-chip[aria-expanded="true"] {
+  color: var(--composer-chip-fg, var(--fg-muted, currentColor));
+  background: var(--composer-chip-bg-open, var(--control-bg-open, var(--control-bg-hover, transparent)));
+  outline: none;
+  box-shadow: none;
+}
+
+.openma-composer-chip[data-open-surface="none"]:is(
+    :hover,
+    [data-state="open"],
+    [aria-expanded="true"]
+  ) {
+  background: transparent;
+}
+
+.openma-composer-chip:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.openma-composer-chip:focus-visible:not([data-state="open"]):not([aria-expanded="true"]) {
+  outline: 2px solid var(--composer-chip-focus-ring, var(--fg, currentColor));
+  outline-offset: 2px;
+  color: var(--composer-chip-fg, var(--fg-muted, currentColor));
+  background: var(--composer-chip-bg-open, var(--control-bg-open, transparent));
+  box-shadow: none;
+}
+
+.openma-composer-chip:focus-visible:is([data-state="open"], [aria-expanded="true"]) {
+  outline: none;
+  box-shadow: none;
+}
+
+.openma-composer-chip:disabled {
+  pointer-events: none;
+  color: var(--fg-disabled, color-mix(in srgb, currentColor 45%, transparent));
+  opacity: 1;
+}
+
+/* Adjacent open/hover chips in the start cluster: drop double wash seam. */
+.openma-composer-toolbar-start
+  > .openma-composer-chip:is(:hover, [data-state="open"], [aria-expanded="true"])
+  + .openma-composer-chip:is(:hover, [data-state="open"], [aria-expanded="true"]):not(:focus-visible) {
+  box-shadow: none;
+}
+
+.openma-composer-icon-button {
+  display: inline-flex;
+  width: var(--composer-control-height, var(--control-height-compact, 28px));
+  height: var(--composer-control-height, var(--control-height-compact, 28px));
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--composer-chip-radius, var(--control-radius, 6px));
+  outline: none;
+  color: var(--composer-chip-fg, var(--fg-muted, currentColor));
+  background: transparent;
+  transition:
+    color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease),
+    background-color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease);
+}
+
+.openma-composer-icon-button > svg {
+  width: var(--composer-control-icon-size, 14px);
+  height: var(--composer-control-icon-size, 14px);
+}
+
+.openma-composer-icon-button:hover {
+  color: var(--composer-chip-fg-active, var(--control-fg-active, var(--fg, currentColor)));
+  background: var(--composer-chip-bg-hover, var(--control-bg-hover, transparent));
+}
+
+.openma-composer-icon-button:disabled {
+  color: var(--fg-disabled, color-mix(in srgb, currentColor 45%, transparent));
+  background: transparent;
+}
+
+.openma-composer-run-action {
+  display: inline-flex;
+  height: var(--composer-control-height, var(--control-height-compact, 28px));
+  min-width: var(--composer-control-height, var(--control-height-compact, 28px));
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding-inline: 6px;
+  border: 0;
+  border-radius: var(--composer-chip-radius, var(--control-radius, 6px));
+  outline: none;
+  color: var(--composer-run-fg, var(--fg-subtle, var(--fg-muted, currentColor)));
+  background: transparent;
+  transition:
+    color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease),
+    background-color var(--composer-chip-duration, 120ms) var(--composer-chip-ease, ease);
+}
+
+.openma-composer-run-action:hover:not(:disabled) {
+  color: var(--composer-chip-fg-active, var(--fg, currentColor));
+  background: var(--composer-chip-bg-hover, var(--control-bg-hover, transparent));
+}
+
+.openma-composer-run-action:disabled {
+  color: var(--fg-disabled, color-mix(in srgb, currentColor 45%, transparent));
+  background: transparent;
+}
+
+.openma-composer-run-action[data-composer-submit="true"]:not(:disabled) {
+  color: var(--composer-run-fg-ready, var(--fg-muted, currentColor));
 }
