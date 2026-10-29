@@ -15,6 +15,7 @@ From `@openma/common/chat-ui`:
 | `COMPOSER_*_CLASS` | Stable class-name constants |
 | `createComposerDraftStore` | Unchanged draft persistence helper |
 | `agentChatDensityAttributes` | Unchanged density `data-*` + compact CSS vars |
+| `AgentBrandIcon` / `ComposerChip` / `ComposerRunAction` | Brand marks + chip / Enter chrome (see below) |
 
 Import styles once:
 
@@ -144,4 +145,27 @@ not required for the Clash asymmetry fix.
 - No shared agent-picker, mic, or permission-chip widgets (product-specific).
 - Does not replace `AgentChatView`’s `slots.composer` — hosts still pass the
   whole composer node; the shell is what that node is built from.
+- Does not change `createComposerDraftStore` or transcript presentation.
+
+## Chrome widgets (chips / brand icons / run action)
+
+Also from `@openma/common/chat-ui`:
+
+| Export | Role |
+| --- | --- |
+| `AgentBrandIcon` | Harness brand mark (`dsh-acp` → DeepSeek whale, not generic robot) |
+| `ComposerChip` | Footer-trigger chip chrome (icon + label + trailing) |
+| `ComposerIconButton` | Attach / mic / follow square control |
+| `ComposerRunAction` | Enter / stop affordance (`data-composer-submit` / `stop`) |
+| `DshPresetStandardIcon` / `agentPresetIcon` | Collaboration preset glyphs |
+| `composerChipClass` / `COMPOSER_CHIP_CLASS` | Class helpers for host-owned triggers |
+
+Hosts still own menu/popover content and product-specific labels; common owns
+density, icon slots, and Enter topology so Clash/Backchat stay aligned.
+
+## Non-goals
+
+- Does not replace host menus, slash pickers, or auth flows.
+- Does not replace `AgentChatView`'s `slots.composer` — hosts still pass the
+  whole composer node; the shell + chrome are what that node is built from.
 - Does not change `createComposerDraftStore` or transcript presentation.
