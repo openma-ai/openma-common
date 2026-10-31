@@ -344,6 +344,7 @@ function ChatComposerFrame({ slots, home = false, style, }) {
 const TERMINAL_TURN_STATUS = {
     queued: false,
     running: false,
+    awaiting: false,
     unknown: false,
     complete: true,
     completed: true,
@@ -581,7 +582,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                     : undefined, children: [slots.renderResponseBeforeProcess?.(renderContext), processSections.map((section, sectionIndex) => section.kind === "input" ? (_jsx("div", { "data-user-input-outside-process": "true", children: section.nodes }, `user-input-section-${sectionIndex}`)) : (_jsxs(ChatReasoning, { isStreaming: isStreaming, open: processOpen, onOpenChange: (open) => {
                             if (!isStreaming)
                                 setProcessOpen(open);
-                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [sectionIndex === processHeaderIndex ? _jsx(ChatReasoningTrigger, { "data-turn-process-header": "true", disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming
+                        }, "data-session-process-state": isStreaming ? "running" : "complete", primitives: collapsiblePrimitives, children: [sectionIndex === processHeaderIndex ? _jsx(ChatReasoningTrigger, { "data-turn-process-header": "true", disabled: isStreaming, "aria-disabled": isStreaming, showIcon: false, getThinkingMessage: () => (_jsxs(_Fragment, { children: [slots.renderProcessLeading?.(renderContext), _jsxs("span", { className: "chat-transcript-disclosure-summary min-w-0 flex-1 truncate text-left", children: [isCancelled && labels.cancelled !== undefined ? (_jsxs(_Fragment, { children: [_jsx("span", { "data-session-process-status": "cancelled", children: labels.cancelled }), _jsx("span", { "aria-hidden": "true", children: " \u00B7 " })] })) : null, isStreaming || turn.status === "awaiting"
                                                     ? labels.workingFor(elapsedSeconds)
                                                     : labels.workedFor(elapsedSeconds)] })] })) }) : null, _jsxs(ChatReasoningContent, { children: [processMounted ? (_jsx("div", { className: "space-y-1", "data-session-process-activity": "true", children: section.nodes })) : null, sectionIndex === processSections.length - 1 ? (_jsxs("div", { className: "space-y-1", children: [slots.renderProcessBefore?.(renderContext), slots.renderProcessAfter?.(renderContext)] })) : null] })] }, `process-section-${sectionIndex}`))), answerItems.map((item) => {
                         const live = isStreaming && item === finalItem;

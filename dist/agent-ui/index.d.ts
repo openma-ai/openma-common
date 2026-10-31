@@ -1,7 +1,10 @@
 import type { OpenMAEvent, CanonicalPlanEntry, CallbackCategory, PlanRepresentation, ToolOutputData, ToolStatus, WorkItemKind, WorkItemStatus } from "../session-events/openma.js";
 export declare const AGENT_UI_STATE_VERSION: "oma.agent-ui.v1";
 export type AgentUISessionStatus = "unknown" | "running" | "rescheduled" | "idle" | "terminated" | "error";
-export type AgentUITurnStatus = "unknown" | "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AgentUITurnStatus = "unknown"
+/** Parked on requires_action (official Managed Agents): the turn is not
+ * finished and continues once tool results arrive. Never animates. */
+ | "awaiting" | "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface AgentUIMessageItem {
     id: string;
     /** Present when a tool split one protocol message into multiple UI segments. */

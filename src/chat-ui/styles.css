@@ -939,6 +939,7 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   );
   --oma-queue-dock-radius: var(--composer-radius, 0.75rem);
   --oma-queue-dock-row-height: 2.25rem;
+  --oma-queue-dock-max-height: calc(var(--oma-queue-dock-row-height) * 5.5);
   --oma-queue-dock-padding-inline: 1rem;
   --oma-queue-dock-gap: 0.625rem;
   --oma-queue-dock-font-size: 12px;
@@ -989,6 +990,14 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
 .oma-queue-dock__list {
   display: flex;
   flex-direction: column;
+  /* A long queue must not swallow the conversation: cap it at about five
+   * rows and scroll the rest, so the active turn's prompt stays visible. */
+  max-height: var(
+    --oma-queue-dock-max-height,
+    calc(var(--oma-queue-dock-row-height) * 5.5)
+  );
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .oma-queue-dock__row {

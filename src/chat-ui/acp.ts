@@ -19,6 +19,8 @@ export type AcpChatTurnStatus =
   | "complete"
   | "error"
   | "cancelled"
+  /** Parked on requires_action: not finished, not working. */
+  | "awaiting"
   | "unknown";
 
 export interface AcpChatTurnInput {
@@ -194,13 +196,14 @@ function projectToolStatus(
   ) {
     if (
       turnStatus !== "running" &&
+      turnStatus !== "awaiting" &&
       (status === "pending" || status === "in_progress")
     ) {
       return "cancelled";
     }
     return status;
   }
-  return turnStatus === "running" ? "in_progress" : "cancelled";
+  return turnStatus === "running" || turnStatus === "awaiting" ? "in_progress" : "cancelled";
 }
 
 function projectTurnStatus(

@@ -1,6 +1,8 @@
 import type { AgentUITurnState } from "../agent-ui/index.js";
 import { type TurnRender } from "../session-events/acp.js";
-export type AcpChatTurnStatus = "queued" | "running" | "complete" | "error" | "cancelled" | "unknown";
+export type AcpChatTurnStatus = "queued" | "running" | "complete" | "error" | "cancelled"
+/** Parked on requires_action: not finished, not working. */
+ | "awaiting" | "unknown";
 export interface AcpChatTurnInput {
     id: string;
     promptText: string;

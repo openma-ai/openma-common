@@ -141,6 +141,10 @@ export interface CanonicalChatTurn {
     status: ConversationTurn["status"];
     awaitingToolCallIds?: string[];
     stopReason?: string;
+    /** Timestamp of the turn's first event (processed_at / occurred_at). */
+    startedAt?: string;
+    /** Timestamp of the turn's last event; absent while running. */
+    endedAt?: string;
     userText: string;
     render: TurnRender;
     rawEvents: WireSessionEvent[];

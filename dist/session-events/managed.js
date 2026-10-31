@@ -316,6 +316,26 @@ function dedupeUserMessages(events) {
         return keep === index;
     });
 }
+function turnTimes(turn) {
+    let first;
+    let last;
+    for (const event of turn.rawEvents) {
+        const iso = eventTimeKey(event);
+        if (!iso)
+            continue;
+        const ms = Date.parse(iso);
+        if (!Number.isFinite(ms))
+            continue;
+        if (!first || ms < first.ms)
+            first = { ms, iso };
+        if (!last || ms > last.ms)
+            last = { ms, iso };
+    }
+    return {
+        ...(first ? { startedAt: first.iso } : {}),
+        ...(last && turn.status !== "running" ? { endedAt: last.iso } : {}),
+    };
+}
 function turnInterrupted(turn) {
     return turn.rawEvents.some((event) => event.type === "user.interrupt");
 }
@@ -654,6 +674,7 @@ export function projectCanonicalChat(events, options = {}) {
                 status: turn.status,
                 ...(turn.awaitingToolCallIds ? { awaitingToolCallIds: turn.awaitingToolCallIds } : {}),
                 ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
+                ...turnTimes(turn),
                 userText: userParts.join("\n"),
                 render,
                 rawEvents: turn.rawEvents,

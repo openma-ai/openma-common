@@ -266,6 +266,9 @@ function renderStatus(status, errorMessage, labels) {
     if (status === "cancelled") {
         return (_jsx("p", { className: "text-xs italic text-fg-subtle", "data-session-turn-status-message": "cancelled", children: labels?.cancelled ?? "cancelled" }));
     }
+    if (status === "awaiting") {
+        return labels?.awaiting ? (_jsx("p", { className: "text-xs italic text-fg-subtle", "data-session-turn-status-message": "awaiting", children: labels.awaiting })) : null;
+    }
     if (status === "unknown") {
         return (_jsx("p", { className: "text-xs italic text-fg-subtle", "data-session-turn-status-message": "unknown", children: labels?.unknown ?? "terminal status unavailable" }));
     }

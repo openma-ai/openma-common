@@ -129,12 +129,13 @@ function projectToolStatus(status, turnStatus) {
         status === "failed" ||
         status === "cancelled") {
         if (turnStatus !== "running" &&
+            turnStatus !== "awaiting" &&
             (status === "pending" || status === "in_progress")) {
             return "cancelled";
         }
         return status;
     }
-    return turnStatus === "running" ? "in_progress" : "cancelled";
+    return turnStatus === "running" || turnStatus === "awaiting" ? "in_progress" : "cancelled";
 }
 function projectTurnStatus(status) {
     if (status === "complete")
