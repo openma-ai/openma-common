@@ -97,6 +97,26 @@ export interface MessageEventData {
     content?: unknown;
     message_id?: string;
     phase?: "commentary" | "final_answer";
+    /**
+     * Delivery state projected from a harness adapter (e.g. CMA `processed_at`).
+     * GUI code must rely on this field — never on vendor `processed_at`.
+     * - `queued`: accepted but not yet processed
+     * - `processed`: processing finished (same event id may upgrade queued→processed)
+     */
+    delivery?: "queued" | "processed";
+    adapter_meta?: Record<string, unknown>;
+}
+/** Payload for `turn.queued`. When CMA echoes a user.message with
+ * `processed_at: null`, decode maps it here (message fields populated) so the
+ * GUI never sees Managed `processed_at`. Same `event_id` later upgrades to
+ * `user.message` once stamped. */
+export interface TurnQueuedData {
+    message_id?: string;
+    text?: string;
+    content?: unknown;
+    reason?: string;
+    /** Original Managed event type when this queued fact came from CMA. */
+    managed_event_type?: string;
     adapter_meta?: Record<string, unknown>;
 }
 export interface OpenMAEventEnvelope<TType extends string, TData> {
@@ -316,5 +336,11 @@ export interface WorkItemProjector {
  * `reduceWorkItems(allEvents)`. */
 export declare function createWorkItemProjector(): WorkItemProjector;
 export declare function finalizeWorkItems(registry: WorkItemRegistry): WorkItemRegistry;
+/** True when an OpenMA event represents CMA-style queued delivery.
+ * Prefer this over reading any harness `processed_at` field. */
+export declare function isOpenMAQueuedEvent(event: {
+    type?: string;
+    data?: unknown;
+} | null | undefined): boolean;
 export {};
 //# sourceMappingURL=openma.d.ts.map

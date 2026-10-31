@@ -26,7 +26,7 @@ export function eventThreadId(event) {
     return stringField(event, "session_thread_id") ?? "sthr_primary";
 }
 export function eventStableId(event, fallback) {
-    return stringField(event, "id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
+    return stringField(event, "id", "event_id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
 }
 function toolFamily(type) {
     if (type.includes("mcp_"))
@@ -37,13 +37,20 @@ function toolFamily(type) {
 }
 export function normalizeSessionEvent(event) {
     switch (event.type) {
-        case "user.message":
+        case "turn.queued":
+        case "user.message": {
+            const data = (event.data && typeof event.data === "object")
+                ? event.data
+                : undefined;
+            const content = event.content ?? data?.content;
+            const text = eventText(content) || (typeof data?.text === "string" ? data.text : "") || stringField(event, "text") || "";
             return {
                 kind: "user_message",
                 id: eventStableId(event, "user-message"),
-                text: eventText(event.content),
+                text,
                 raw: event,
             };
+        }
         case "agent.message_chunk":
             return {
                 kind: "assistant_delta",
@@ -149,24 +156,41 @@ function modelError(event) {
     };
 }
 function isPendingUserMessage(event) {
+    // Prefer OpenMA delivery (GUI-facing). Fall back to CMA processed_at only
+    // inside this adapter module — callers outside protocol/managed should not
+    // set processed_at.
+    if (event.type === "turn.queued")
+        return true;
+    if (event.delivery === "queued")
+        return true;
+    if (event.type === "user.message" && event.delivery === "processed")
+        return false;
     return event.type === "user.message" && "processed_at" in event && event.processed_at === null;
 }
-/** Collapse repeated copies of the same `user.message` id: the timestamped
- * copy wins (at its own position) over a queued `processed_at: null` echo. */
+/** Collapse repeated copies of the same user message id: a stamped
+ * `user.message` wins over a prior `turn.queued` / delivery:queued echo. */
+function userMessageLikeId(event) {
+    if (event.type !== "user.message" && event.type !== "turn.queued")
+        return undefined;
+    const id = eventStableId(event, "");
+    return id || undefined;
+}
 function dedupeUserMessages(events) {
     const stamped = new Map();
     const last = new Map();
     events.forEach((event, index) => {
-        if (event.type !== "user.message" || typeof event.id !== "string")
+        const id = userMessageLikeId(event);
+        if (!id)
             return;
-        last.set(event.id, index);
+        last.set(id, index);
         if (!isPendingUserMessage(event))
-            stamped.set(event.id, index);
+            stamped.set(id, index);
     });
     return events.filter((event, index) => {
-        if (event.type !== "user.message" || typeof event.id !== "string")
+        const id = userMessageLikeId(event);
+        if (!id)
             return true;
-        const keep = stamped.get(event.id) ?? last.get(event.id);
+        const keep = stamped.get(id) ?? last.get(id);
         return keep === index;
     });
 }

@@ -132,6 +132,26 @@ function managedEventEnvelope(
   };
 }
 
+
+/** Official CMA queueable input types: processed_at is null while queued. */
+const MANAGED_QUEUEABLE_INPUT_TYPES = new Set([
+  "user.message",
+  "user.interrupt",
+  "user.tool_confirmation",
+  "system.message",
+]);
+
+function isManagedProcessedAtQueued(event: ManagedWireRecord): boolean {
+  if (!MANAGED_QUEUEABLE_INPUT_TYPES.has(event.type)) return false;
+  return !Object.prototype.hasOwnProperty.call(event, "processed_at")
+    || event.processed_at === null
+    || event.processed_at === undefined;
+}
+
+function isManagedProcessedAtStamped(event: ManagedWireRecord): boolean {
+  return typeof event.processed_at === "string" && event.processed_at.length > 0;
+}
+
 function managedContentText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -400,6 +420,7 @@ export function decodeManagedSessionEvent(
   if (event.type === "system.message") {
     const id = event.id as string;
     const content = event.content as unknown[];
+    const queued = isManagedProcessedAtQueued(event);
     return {
       fidelity: "exact",
       diagnostics: [],
@@ -411,12 +432,14 @@ export function decodeManagedSessionEvent(
           message_id: id,
           text: managedContentText(content),
           content,
+          delivery: queued ? "queued" : "processed",
         },
       }) as OpenMAEvent,
     };
   }
 
   if (event.type === "user.tool_confirmation") {
+    const queued = isManagedProcessedAtQueued(event);
     return {
       fidelity: "exact",
       diagnostics: [],
@@ -430,6 +453,7 @@ export function decodeManagedSessionEvent(
           ...(typeof event.deny_message === "string"
             ? { message: event.deny_message }
             : {}),
+          delivery: queued ? "queued" : "processed",
           adapter_meta: { managed_event_type: event.type },
         },
       }) as OpenMAEvent,
@@ -467,6 +491,7 @@ export function decodeManagedSessionEvent(
   }
 
   if (event.type === "user.interrupt") {
+    const queued = isManagedProcessedAtQueued(event);
     return {
       fidelity: "exact",
       diagnostics: [],
@@ -475,6 +500,7 @@ export function decodeManagedSessionEvent(
         type: "user.interrupt",
         source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
         data: {
+          delivery: queued ? "queued" : "processed",
           adapter_meta: { managed_event_type: event.type },
         },
       }) as OpenMAEvent,
@@ -570,22 +596,44 @@ export function decodeManagedSessionEvent(
 
   const id = event.id as string;
   const content = event.content as unknown[];
-  const timestampMissing = typeof event.processed_at !== "string";
+  const text = managedContentText(content);
+  // Official CMA: processed_at null means queued — map to OpenMA turn.queued
+  // so GUI never consults Managed processed_at. Same id later re-emits as
+  // user.message once stamped.
+  if (isManagedProcessedAtQueued(event)) {
+    return {
+      fidelity: "exact",
+      diagnostics: [],
+      event: createOpenMAEvent({
+        ...managedEventEnvelope(event, context),
+        type: "turn.queued",
+        source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
+        data: {
+          message_id: id,
+          text,
+          content,
+          managed_event_type: "user.message",
+          adapter_meta: {
+            managed_event_type: "user.message",
+            delivery: "queued",
+          },
+        },
+      }) as OpenMAEvent,
+    };
+  }
+
   return {
-    fidelity: timestampMissing ? "lossy" : "exact",
-    diagnostics: timestampMissing
-      ? [{
-          code: "managed_event_timestamp_missing",
-          message: `Managed Agents event ${id} has no processed_at; used ingestedAt`,
-        }]
-      : [],
+    fidelity: "exact",
+    diagnostics: [],
     event: createOpenMAEvent({
       ...managedEventEnvelope(event, context),
       type: "user.message",
+      source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
       data: {
         message_id: id,
-        text: managedContentText(content),
+        text,
         content,
+        delivery: "processed",
       },
     }) as OpenMAEvent,
   };
