@@ -46,6 +46,8 @@ export type ConversationItem =
       id: string;
       role: "user" | "assistant";
       text: string;
+      /** A queued user message steered into this running turn. */
+      steered?: true;
       raw: WireSessionEvent;
     }
   | { kind: "thinking"; id: string; text: string; raw: WireSessionEvent }
@@ -265,6 +267,17 @@ export interface CanonicalChatProjection {
   queued: QueuedUserMessage[];
 }
 
+/** message_id of an OpenMA queue-lifecycle fact (`turn.cancelled` /
+ * `turn.steered` about one queued user message), else undefined. */
+export function queueLifecycleMessageId(event: WireSessionEvent): string | undefined {
+  if (event.type !== "turn.cancelled" && event.type !== "turn.steered") return undefined;
+  const data = event.data && typeof event.data === "object"
+    ? (event.data as { message_id?: unknown })
+    : undefined;
+  const id = data?.message_id ?? (event as { message_id?: unknown }).message_id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 function isPendingUserMessage(event: WireSessionEvent): boolean {
   // Prefer OpenMA delivery (GUI-facing). Fall back to CMA processed_at only
   // inside this adapter module — callers outside protocol/managed should not
@@ -314,7 +327,23 @@ export function projectConversation(
 ): ConversationProjection {
   const threadId = options.threadId ?? "sthr_primary";
   const deferMidTurn = options.deferMidTurnUserMessages ?? true;
-  const filtered = dedupeUserMessages(events.filter((event) => eventThreadId(event) === threadId));
+  // OpenMA queue lifecycle: `turn.cancelled` with a message_id removed a
+  // queued message server-side; `turn.steered` absorbed it into the running
+  // turn. Both are decoded from the server's queue frames by the adapter.
+  const cancelledIds = new Set<string>();
+  const steeredIds = new Set<string>();
+  for (const event of events) {
+    const messageId = queueLifecycleMessageId(event);
+    if (!messageId) continue;
+    if (event.type === "turn.cancelled") cancelledIds.add(messageId);
+    else if (event.type === "turn.steered") steeredIds.add(messageId);
+  }
+  const filtered = dedupeUserMessages(events.filter((event) => {
+    if (eventThreadId(event) !== threadId) return false;
+    if (queueLifecycleMessageId(event)) return false;
+    const id = userMessageLikeId(event);
+    return !(id && cancelledIds.has(id));
+  }));
   const results = new Map<string, Extract<NormalizedSessionEvent, { kind: "tool_result" }>>();
   for (const event of filtered) {
     const normalized = normalizeSessionEvent(event);
@@ -375,6 +404,11 @@ export function projectConversation(
       const busy = active !== undefined
         && active.status === "running"
         && active.items.some((item) => item.kind === "message" && item.role === "user");
+      if (busy && steeredIds.has(normalized.id)) {
+        active!.items.push({ kind: "message", id: normalized.id, role: "user", text: normalized.text, steered: true, raw: event });
+        active!.rawEvents.push(event);
+        continue;
+      }
       if (deferMidTurn && (busy || deferred.length > 0)) {
         deferred.push({ order, event, normalized });
         continue;
@@ -502,7 +536,8 @@ export function projectCanonicalChat(
     for (const item of turn.items) {
       if (item.kind === "message") {
         if (item.role === "user") {
-          userParts.push(item.text);
+          if (item.steered) render.timeline.push({ kind: "user_input", text: item.text, clientId: item.id });
+          else userParts.push(item.text);
           continue;
         }
         render.assistantText += item.text;

@@ -133,6 +133,133 @@ function managedEventEnvelope(
 }
 
 
+/**
+ * OMA server-queue extension frames (not official CMA). The server owns the
+ * queue; these frames report what happened to one queued user.message:
+ * - `system.user_message_cancelled`: removed from the queue → `turn.cancelled`
+ * - `system.user_message_steered`: absorbed into the running turn → `turn.steered`
+ * Decoded here so GUIs only ever react to OpenMA queue-lifecycle events.
+ * `pending` / `promoted` are redundant with the CMA null → stamped re-emit
+ * and stay raw vendor records.
+ */
+function decodeOmaQueueLifecycleFrame(
+  event: ManagedWireRecord,
+  context: ManagedEventDecodeContext,
+): ManagedEventDecodeResult | null {
+  const kind = event.type === "system.user_message_cancelled"
+    ? "cancelled"
+    : event.type === "system.user_message_steered"
+      ? "steered"
+      : null;
+  if (kind === null) return null;
+  const messageId = typeof event.event_id === "string" ? event.event_id : "";
+  if (messageId.length === 0) return null;
+  const atMs = kind === "cancelled" ? event.cancelled_at : event.steered_at;
+  const occurredAt = typeof atMs === "number" && Number.isFinite(atMs)
+    ? new Date(atMs).toISOString()
+    : typeof atMs === "string" ? atMs : context.ingestedAt ?? new Date(0).toISOString();
+  const sessionThreadId = typeof event.session_thread_id === "string"
+    ? event.session_thread_id
+    : undefined;
+  return {
+    fidelity: "exact",
+    diagnostics: [],
+    event: createOpenMAEvent({
+      event_id: `oma:${kind}:${messageId}`,
+      session_id: context.sessionId,
+      ...(sessionThreadId ? { session_thread_id: sessionThreadId } : {}),
+      source: MANAGED_EVENT_SOURCE,
+      occurred_at: occurredAt,
+      ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+      ...(context.seq !== undefined ? { seq: context.seq } : {}),
+      type: kind === "cancelled" ? "turn.cancelled" : "turn.steered",
+      data: kind === "cancelled"
+        ? { message_id: messageId, reason: "removed_from_queue", adapter_meta: { managed_event_type: event.type } }
+        : { message_id: messageId, adapter_meta: { managed_event_type: event.type } },
+    }) as OpenMAEvent,
+  };
+}
+
+/**
+ * HTTP body for `DELETE /v1/oma/sessions/:id/pending/:event_id` (OMA queue
+ * cancel). The client (Console enter-edit, remove, edit-save) branches on
+ * this payload immediately; the live stream still emits
+ * `system.user_message_cancelled` → OpenMA `turn.cancelled` on success so
+ * observers stay in sync.
+ *
+ * Success (HTTP 200): `{ cancelled: true, id, cancelled_at }`
+ * Too late (HTTP 409): `{ cancelled: false, reason, id, processed_at? }`
+ *   reason ∈ already_processing | already_cancelled | already_completed | not_found
+ */
+export type OmaQueueCancelReason =
+  | "already_processing"
+  | "already_cancelled"
+  | "already_completed"
+  | "not_found";
+
+export type OmaQueueCancelResponse =
+  | { cancelled: true; id: string; cancelled_at: string }
+  | {
+      cancelled: false;
+      reason: OmaQueueCancelReason;
+      id: string;
+      processed_at?: string;
+    };
+
+const OMA_QUEUE_CANCEL_REASONS = new Set<OmaQueueCancelReason>([
+  "already_processing",
+  "already_cancelled",
+  "already_completed",
+  "not_found",
+]);
+
+/** Encode a cancel outcome for the DELETE pending response body. */
+export function encodeOmaQueueCancelResponse(
+  input:
+    | { cancelled: true; id: string; cancelledAt: string }
+    | {
+        cancelled: false;
+        id: string;
+        reason: OmaQueueCancelReason;
+        processedAt?: string;
+      },
+): OmaQueueCancelResponse {
+  if (input.cancelled) {
+    return { cancelled: true, id: input.id, cancelled_at: input.cancelledAt };
+  }
+  return {
+    cancelled: false,
+    reason: input.reason,
+    id: input.id,
+    ...(input.processedAt ? { processed_at: input.processedAt } : {}),
+  };
+}
+
+/** Decode / validate a cancel HTTP JSON body. Returns null if malformed. */
+export function decodeOmaQueueCancelResponse(
+  value: unknown,
+): OmaQueueCancelResponse | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.id !== "string" || raw.id.length === 0) return null;
+  if (raw.cancelled === true) {
+    if (typeof raw.cancelled_at !== "string") return null;
+    return { cancelled: true, id: raw.id, cancelled_at: raw.cancelled_at };
+  }
+  if (raw.cancelled === false) {
+    if (typeof raw.reason !== "string" || !OMA_QUEUE_CANCEL_REASONS.has(raw.reason as OmaQueueCancelReason)) {
+      return null;
+    }
+    return {
+      cancelled: false,
+      reason: raw.reason as OmaQueueCancelReason,
+      id: raw.id,
+      ...(typeof raw.processed_at === "string" ? { processed_at: raw.processed_at } : {}),
+    };
+  }
+  return null;
+}
+
 /** Official CMA queueable input types: processed_at is null while queued. */
 const MANAGED_QUEUEABLE_INPUT_TYPES = new Set([
   "user.message",
@@ -174,6 +301,8 @@ export function decodeManagedSessionEvent(
   context: ManagedEventDecodeContext,
 ): ManagedEventDecodeResult {
   const event = input as ManagedWireRecord;
+  const queueLifecycle = decodeOmaQueueLifecycleFrame(event, context);
+  if (queueLifecycle) return queueLifecycle;
   if (typeof event.id !== "string" || event.id.length === 0) {
     const eventId = `managed:${event.type}:${context.seq ?? "unsequenced"}`;
     const message = `Managed Agents event ${event.type} is missing required id`;

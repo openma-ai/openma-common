@@ -153,6 +153,7 @@ export const OPENMA_CANONICAL_EVENT_TYPES = [
   "turn.failed",
   "turn.cancelled",
   "turn.interrupted",
+  "turn.steered",
   "tool.started",
   "tool.progress",
   "tool.completed",
@@ -279,6 +280,13 @@ export interface TurnQueuedData {
   adapter_meta?: Record<string, unknown>;
 }
 
+/** Payload for `turn.steered`: the queued user.message `message_id` joined
+ * the running turn instead of starting its own. */
+export interface TurnSteeredData {
+  message_id: string;
+  adapter_meta?: Record<string, unknown>;
+}
+
 export interface OpenMAEventEnvelope<TType extends string, TData> {
   /** Backchat main emits both markers on every canonical event. */
   schema?: typeof OPENMA_EVENT_SCHEMA_VERSION;
@@ -354,6 +362,8 @@ export type CallbackEvent =
   | OpenMAEventEnvelope<"callback.notification", CallbackLifecycleData>;
 
 export interface TurnTerminalData {
+  /** Set when a queued turn (one user.message) is cancelled before it ran. */
+  message_id?: string;
   stop_reason?: string;
   reason?: string;
   error?: string;
@@ -366,6 +376,8 @@ export type TurnTerminalEvent =
   | OpenMAEventEnvelope<"turn.failed", TurnTerminalData>
   | OpenMAEventEnvelope<"turn.cancelled", TurnTerminalData>
   | OpenMAEventEnvelope<"turn.interrupted", TurnTerminalData>;
+
+export type TurnSteeredEvent = OpenMAEventEnvelope<"turn.steered", TurnSteeredData>;
 
 /** One event delivered by a long-lived external subscription. Monitor
  * notifications do not necessarily carry a stable subscription id, so
