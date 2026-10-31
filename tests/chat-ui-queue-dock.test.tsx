@@ -62,6 +62,7 @@ describe("QueueDock", () => {
 
     // The arrow at an end exists but cannot move past it.
     expect(html).toMatch(/data-queue-move="up"[^>]*disabled/);
+    expect(html).toMatch(/data-queue-move="down"[^>]*disabled/);
   });
 
   it("renders a blocked header and interrupt action only when offered", () => {
@@ -127,6 +128,7 @@ describe("QueueDock", () => {
     expect(html).toContain('aria-label="1 messages waiting"');
     expect(html).toContain('aria-label="Change message 1"');
     expect(html).toContain("Send it");
+    expect(html).toContain('aria-label="Send it 1"');
     expect(html).toContain("1 pending while Bash runs");
     expect(defaultQueueDockLabels.title(3)).toBe("3 queued");
   });
