@@ -1,6 +1,6 @@
 {
   "name": "@openma/common",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Shared OpenMA Agent Contract, runtime adapters, session events, and brand assets.",
   "repository": {
     "type": "git",
@@ -61,6 +61,10 @@
     "./session-events/openma": {
       "types": "./dist/session-events/openma.d.ts",
       "import": "./dist/session-events/openma.js"
+    },
+    "./gui": {
+      "types": "./dist/gui/index.d.ts",
+      "import": "./dist/gui/index.js"
     },
     "./session-events/acp": {
       "types": "./dist/session-events/acp.d.ts",

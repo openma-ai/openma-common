@@ -46,6 +46,8 @@ export type ConversationItem =
       id: string;
       role: "user" | "assistant";
       text: string;
+      /** A queued user message steered into this running turn. */
+      steered?: true;
       raw: WireSessionEvent;
     }
   | { kind: "thinking"; id: string; text: string; raw: WireSessionEvent }
@@ -101,7 +103,17 @@ export function eventThreadId(event: WireSessionEvent): string {
 }
 
 export function eventStableId(event: WireSessionEvent, fallback: string): string {
-  return stringField(event, "id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
+  return stringField(event, "id", "event_id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
+}
+
+function openmaData(event: WireSessionEvent): Record<string, unknown> {
+  const data = event.data;
+  return data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+}
+
+function dataString(data: Record<string, unknown>, name: string): string | undefined {
+  const value = data[name];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function toolFamily(type: string): ToolFamily {
@@ -112,13 +124,20 @@ function toolFamily(type: string): ToolFamily {
 
 export function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessionEvent {
   switch (event.type) {
-    case "user.message":
+    case "turn.queued":
+    case "user.message": {
+      const data = (event.data && typeof event.data === "object")
+        ? (event.data as { content?: unknown; text?: string })
+        : undefined;
+      const content = event.content ?? data?.content;
+      const text = eventText(content) || (typeof data?.text === "string" ? data.text : "") || stringField(event, "text") || "";
       return {
         kind: "user_message",
         id: eventStableId(event, "user-message"),
-        text: eventText(event.content),
+        text,
         raw: event,
       };
+    }
     case "agent.message_chunk":
       return {
         kind: "assistant_delta",
@@ -201,11 +220,45 @@ export function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessio
         raw: event,
       };
     case "session.status_running":
+    case "session.running":
       return { kind: "turn_running", raw: event };
     case "session.status_idle":
+    case "session.idle":
       return { kind: "turn_complete", raw: event };
     case "session.status_terminated":
+    case "session.terminated":
       return { kind: "turn_terminated", raw: event };
+    // OpenMA canonical tool lifecycle (decodeManagedSessionEvent output for
+    // agent.*tool_use / agent.*tool_result). Hosts that ingest OpenMA events
+    // (Console) project through here, so accept both vocabularies.
+    case "tool.started": {
+      const data = openmaData(event);
+      const id = dataString(data, "tool_call_id") ?? stringField(event, "tool_use_id", "id") ?? "tool";
+      const kind = dataString(data, "kind");
+      return {
+        kind: "tool_use",
+        tool: {
+          id,
+          family: kind === "mcp" || kind === "custom" ? kind : "builtin",
+          name: dataString(data, "tool_name") ?? stringField(event, "name", "tool_name") ?? "tool",
+          input: data.raw_input ?? event.input,
+          status: "running",
+          rawUse: event,
+        },
+        raw: event,
+      };
+    }
+    case "tool.completed":
+    case "tool.failed": {
+      const data = openmaData(event);
+      return {
+        kind: "tool_result",
+        toolId: dataString(data, "tool_call_id") ?? stringField(event, "tool_use_id", "id") ?? "tool",
+        output: data.content ?? data.raw_output ?? event.content ?? "",
+        isError: event.type === "tool.failed",
+        raw: event,
+      };
+    }
     default:
       return { kind: "ignore", raw: event };
   }
@@ -223,18 +276,127 @@ function modelError(event: WireSessionEvent): { error: string; model?: string } 
   };
 }
 
+/** A `user.message` the server has accepted but not processed yet.
+ *
+ * Official Managed Agents semantics: `processed_at` is `null` while a
+ * `user.message` waits behind the running turn; the same event id is
+ * re-emitted with a timestamp once processing finishes. Queued messages are
+ * kept out of `turns` so they never split the running turn. */
+export interface QueuedUserMessage {
+  id: string;
+  text: string;
+  /** `pending`: server reported `processed_at: null`. `deferred`: the
+   * server stamped it (legacy accept-time stamping) but it arrived while the
+   * current turn was still running, so it waits for that turn to end. */
+  reason: "pending" | "deferred";
+  raw: WireSessionEvent;
+}
+
+export interface ConversationProjectionOptions {
+  threadId?: string;
+  /** Treat a timestamped `user.message` that arrives while the current turn
+   * has not reached idle/terminated as queued until that turn ends. This is
+   * the fallback for servers that stamp `processed_at` at accept time.
+   * Default: true. */
+  deferMidTurnUserMessages?: boolean;
+}
+
+export interface ConversationProjection {
+  turns: ConversationTurn[];
+  queued: QueuedUserMessage[];
+}
+
+export interface CanonicalChatProjection {
+  turns: CanonicalChatTurn[];
+  queued: QueuedUserMessage[];
+}
+
+/** message_id of an OpenMA queue-lifecycle fact (`turn.cancelled` /
+ * `turn.steered` about one queued user message), else undefined. */
+export function queueLifecycleMessageId(event: WireSessionEvent): string | undefined {
+  if (event.type !== "turn.cancelled" && event.type !== "turn.steered") return undefined;
+  const data = event.data && typeof event.data === "object"
+    ? (event.data as { message_id?: unknown })
+    : undefined;
+  const id = data?.message_id ?? (event as { message_id?: unknown }).message_id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+function isPendingUserMessage(event: WireSessionEvent): boolean {
+  // Prefer OpenMA delivery (GUI-facing). Fall back to CMA processed_at only
+  // inside this adapter module — callers outside protocol/managed should not
+  // set processed_at.
+  if (event.type === "turn.queued") return true;
+  if (event.delivery === "queued") return true;
+  if (event.type === "user.message" && event.delivery === "processed") return false;
+  return event.type === "user.message" && "processed_at" in event && event.processed_at === null;
+}
+
+/** Collapse repeated copies of the same user message id: a stamped
+ * `user.message` wins over a prior `turn.queued` / delivery:queued echo. */
+function userMessageLikeId(event: WireSessionEvent): string | undefined {
+  if (event.type !== "user.message" && event.type !== "turn.queued") return undefined;
+  const id = eventStableId(event, "");
+  return id || undefined;
+}
+
+function dedupeUserMessages(events: readonly WireSessionEvent[]): WireSessionEvent[] {
+  const stamped = new Map<string, number>();
+  const last = new Map<string, number>();
+  events.forEach((event, index) => {
+    const id = userMessageLikeId(event);
+    if (!id) return;
+    last.set(id, index);
+    if (!isPendingUserMessage(event)) stamped.set(id, index);
+  });
+  return events.filter((event, index) => {
+    const id = userMessageLikeId(event);
+    if (!id) return true;
+    const keep = stamped.get(id) ?? last.get(id);
+    return keep === index;
+  });
+}
+
 export function projectConversationTurns(
   events: readonly WireSessionEvent[],
-  options: { threadId?: string } = {},
+  options: ConversationProjectionOptions = {},
 ): ConversationTurn[] {
+  return projectConversation(events, options).turns;
+}
+
+/** Project turns plus the queue of accepted-but-unprocessed user messages. */
+export function projectConversation(
+  events: readonly WireSessionEvent[],
+  options: ConversationProjectionOptions = {},
+): ConversationProjection {
   const threadId = options.threadId ?? "sthr_primary";
-  const filtered = events.filter((event) => eventThreadId(event) === threadId);
+  const deferMidTurn = options.deferMidTurnUserMessages ?? true;
+  // OpenMA queue lifecycle: `turn.cancelled` with a message_id removed a
+  // queued message server-side; `turn.steered` absorbed it into the running
+  // turn. Both are decoded from the server's queue frames by the adapter.
+  const cancelledIds = new Set<string>();
+  const steeredIds = new Set<string>();
+  for (const event of events) {
+    const messageId = queueLifecycleMessageId(event);
+    if (!messageId) continue;
+    if (event.type === "turn.cancelled") cancelledIds.add(messageId);
+    else if (event.type === "turn.steered") steeredIds.add(messageId);
+  }
+  const filtered = dedupeUserMessages(events.filter((event) => {
+    if (eventThreadId(event) !== threadId) return false;
+    if (queueLifecycleMessageId(event)) return false;
+    const id = userMessageLikeId(event);
+    return !(id && cancelledIds.has(id));
+  }));
   const results = new Map<string, Extract<NormalizedSessionEvent, { kind: "tool_result" }>>();
   for (const event of filtered) {
     const normalized = normalizeSessionEvent(event);
     if (normalized.kind === "tool_result") results.set(normalized.toolId, normalized);
   }
 
+  const pending: Array<{ order: number; message: QueuedUserMessage }> = [];
+  const deferred: Array<{ order: number; event: WireSessionEvent; normalized: Extract<NormalizedSessionEvent, { kind: "user_message" }> }> = [];
+  let flushedTurn: { turn: ConversationTurn; order: number; event: WireSessionEvent; normalized: Extract<NormalizedSessionEvent, { kind: "user_message" }> } | undefined;
   const turns: ConversationTurn[] = [];
   let current: ConversationTurn | undefined;
   let pendingModelError: { error: string; model?: string } | null = null;
@@ -252,26 +414,58 @@ export function projectConversationTurns(
     return current;
   };
 
-  for (const event of filtered) {
+  const openUserTurn = (
+    event: WireSessionEvent,
+    normalized: Extract<NormalizedSessionEvent, { kind: "user_message" }>,
+  ): ConversationTurn => {
+    const turn: ConversationTurn = {
+      id: normalized.id,
+      status: "running",
+      items: [{ kind: "message", id: normalized.id, role: "user", text: normalized.text, raw: event }],
+      rawEvents: [event],
+    };
+    turns.push(turn);
+    current = turn;
+    return turn;
+  };
+  const endTurn = () => {
+    current = undefined;
+    flushedTurn = undefined;
+    const next = deferred.shift();
+    if (next) flushedTurn = { turn: openUserTurn(next.event, next.normalized), ...next };
+  };
+
+  for (const [order, event] of filtered.entries()) {
     const cause = modelError(event);
     if (cause) pendingModelError = cause;
     const normalized = normalizeSessionEvent(event);
     if (normalized.kind === "user_message") {
-      current = {
-        id: normalized.id,
-        status: "running",
-        items: [],
-        rawEvents: [],
-      };
-      turns.push(current);
+      if (isPendingUserMessage(event)) {
+        pending.push({ order, message: { id: normalized.id, text: normalized.text, reason: "pending", raw: event } });
+        continue;
+      }
+      const active = current as ConversationTurn | undefined;
+      const busy = active !== undefined
+        && active.status === "running"
+        && active.items.some((item) => item.kind === "message" && item.role === "user");
+      if (busy && steeredIds.has(normalized.id)) {
+        active!.items.push({ kind: "message", id: normalized.id, role: "user", text: normalized.text, steered: true, raw: event });
+        active!.rawEvents.push(event);
+        continue;
+      }
+      if (deferMidTurn && (busy || deferred.length > 0)) {
+        deferred.push({ order, event, normalized });
+        continue;
+      }
+      flushedTurn = undefined;
+      openUserTurn(event, normalized);
+      continue;
     }
     const turn = ensureTurn(event);
+    if (flushedTurn?.turn === turn) flushedTurn = undefined;
     turn.rawEvents.push(event);
 
     switch (normalized.kind) {
-      case "user_message":
-        turn.items.push({ kind: "message", id: normalized.id, role: "user", text: normalized.text, raw: event });
-        break;
       case "assistant_message":
         turn.items.push({ kind: "message", id: normalized.id, role: "assistant", text: normalized.text, raw: event });
         break;
@@ -327,18 +521,33 @@ export function projectConversationTurns(
         break;
       case "turn_complete":
         if (turn.status === "running") turn.status = "completed";
-        current = undefined;
+        endTurn();
         break;
       case "turn_terminated":
         turn.status = "terminated";
-        current = undefined;
+        endTurn();
         break;
       default:
         break;
     }
   }
 
-  return turns.filter((turn) => turn.items.length > 0);
+  // A deferred message promoted at the last idle with nothing after it has
+  // not actually started processing yet: keep it queued instead of showing
+  // an empty "running" turn.
+  const queuedDeferred = [...deferred];
+  if (flushedTurn && flushedTurn.turn.rawEvents.length === 1) {
+    turns.splice(turns.indexOf(flushedTurn.turn), 1);
+    queuedDeferred.unshift({ order: flushedTurn.order, event: flushedTurn.event, normalized: flushedTurn.normalized });
+  }
+  const queued = [
+    ...pending,
+    ...queuedDeferred.map(({ order, event, normalized }) => ({
+      order,
+      message: { id: normalized.id, text: normalized.text, reason: "deferred" as const, raw: event },
+    })),
+  ].sort((left, right) => left.order - right.order).map(({ message }) => message);
+  return { turns: turns.filter((turn) => turn.items.length > 0), queued };
 }
 
 /** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
@@ -346,9 +555,18 @@ export function projectConversationTurns(
  * from a local ACP child or OpenManaged's cloud/local runtime. */
 export function projectCanonicalChatTurns(
   events: readonly WireSessionEvent[],
-  options: { threadId?: string } = {},
+  options: ConversationProjectionOptions = {},
 ): CanonicalChatTurn[] {
-  return projectConversationTurns(events, options).map((turn) => {
+  return projectCanonicalChat(events, options).turns;
+}
+
+/** Canonical chat turns plus queued user messages (see `QueuedUserMessage`). */
+export function projectCanonicalChat(
+  events: readonly WireSessionEvent[],
+  options: ConversationProjectionOptions = {},
+): CanonicalChatProjection {
+  const projection = projectConversation(events, options);
+  return { queued: projection.queued, turns: projection.turns.map((turn) => {
     const render: TurnRender = {
       thoughtText: "",
       currentThoughtText: "",
@@ -362,7 +580,8 @@ export function projectCanonicalChatTurns(
     for (const item of turn.items) {
       if (item.kind === "message") {
         if (item.role === "user") {
-          userParts.push(item.text);
+          if (item.steered) render.timeline.push({ kind: "user_input", text: item.text, clientId: item.id });
+          else userParts.push(item.text);
           continue;
         }
         render.assistantText += item.text;
@@ -402,7 +621,7 @@ export function projectCanonicalChatTurns(
       render,
       rawEvents: turn.rawEvents,
     };
-  });
+  }) };
 }
 
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */

@@ -75,7 +75,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
         type: "user.message",
         session_id: "session-1",
         source: {
-          kind: "harness",
+          kind: "user",
           harness: "managed-agents",
           adapter: "managed-events",
         },
@@ -92,6 +92,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
               source: { type: "file", file_id: "file_123" },
             },
           ],
+          delivery: "processed",
         },
       },
     });
@@ -530,6 +531,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
           tool_call_id: "tool-use-1",
           decision: "deny",
           message: "Do not modify production",
+          delivery: "processed",
           adapter_meta: {
             managed_event_type: "user.tool_confirmation",
           },
@@ -939,6 +941,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
         occurred_at: "2026-08-26T10:19:00.000Z",
         seq: 19,
         data: {
+          delivery: "processed",
           adapter_meta: {
             managed_event_type: "user.interrupt",
           },
@@ -1154,7 +1157,7 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
     });
   });
 
-  it("uses ingestion time when an official input echo has no processed_at", () => {
+  it("maps processed_at null user.message to OpenMA turn.queued (CMA queue semantics)", () => {
     const result = decodeManagedSessionEvent(
       {
         id: "user-message-null-time",
@@ -1170,19 +1173,47 @@ describe("Managed Agents ↔ OpenMA event codec", () => {
     );
 
     expect(result).toMatchObject({
-      fidelity: "lossy",
-      diagnostics: [
-        {
-          code: "managed_event_timestamp_missing",
-          message: "Managed Agents event user-message-null-time has no processed_at; used ingestedAt",
-        },
-      ],
+      fidelity: "exact",
+      diagnostics: [],
       event: {
         event_id: "user-message-null-time",
-        type: "user.message",
+        type: "turn.queued",
         occurred_at: "2026-08-26T10:26:00.000Z",
         ingested_at: "2026-08-26T10:26:00.000Z",
+        data: {
+          message_id: "user-message-null-time",
+          text: "Hello",
+          managed_event_type: "user.message",
+        },
       },
+    });
+  });
+
+  it("upgrades the same id from turn.queued to user.message when processed_at is stamped", () => {
+    const queued = decodeManagedSessionEvent(
+      {
+        id: "user-message-upgrade",
+        type: "user.message",
+        content: [{ type: "text", text: "Queued then stamped" }],
+        processed_at: null,
+      },
+      { sessionId: "session-1", ingestedAt: "2026-08-26T10:26:00.000Z", seq: 1 },
+    );
+    const stamped = decodeManagedSessionEvent(
+      {
+        id: "user-message-upgrade",
+        type: "user.message",
+        content: [{ type: "text", text: "Queued then stamped" }],
+        processed_at: "2026-08-26T10:26:05.000Z",
+      },
+      { sessionId: "session-1", ingestedAt: "2026-08-26T10:26:05.000Z", seq: 2 },
+    );
+    expect(queued.event.type).toBe("turn.queued");
+    expect(stamped.event).toMatchObject({
+      event_id: "user-message-upgrade",
+      type: "user.message",
+      occurred_at: "2026-08-26T10:26:05.000Z",
+      data: { delivery: "processed", text: "Queued then stamped" },
     });
   });
 

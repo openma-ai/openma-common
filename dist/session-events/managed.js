@@ -26,7 +26,7 @@ export function eventThreadId(event) {
     return stringField(event, "session_thread_id") ?? "sthr_primary";
 }
 export function eventStableId(event, fallback) {
-    return stringField(event, "id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
+    return stringField(event, "id", "event_id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
 }
 function toolFamily(type) {
     if (type.includes("mcp_"))
@@ -37,13 +37,20 @@ function toolFamily(type) {
 }
 export function normalizeSessionEvent(event) {
     switch (event.type) {
-        case "user.message":
+        case "turn.queued":
+        case "user.message": {
+            const data = (event.data && typeof event.data === "object")
+                ? event.data
+                : undefined;
+            const content = event.content ?? data?.content;
+            const text = eventText(content) || (typeof data?.text === "string" ? data.text : "") || stringField(event, "text") || "";
             return {
                 kind: "user_message",
                 id: eventStableId(event, "user-message"),
-                text: eventText(event.content),
+                text,
                 raw: event,
             };
+        }
         case "agent.message_chunk":
             return {
                 kind: "assistant_delta",
@@ -148,15 +155,62 @@ function modelError(event) {
         ...(typeof data.model === "string" ? { model: data.model } : {}),
     };
 }
+function isPendingUserMessage(event) {
+    // Prefer OpenMA delivery (GUI-facing). Fall back to CMA processed_at only
+    // inside this adapter module — callers outside protocol/managed should not
+    // set processed_at.
+    if (event.type === "turn.queued")
+        return true;
+    if (event.delivery === "queued")
+        return true;
+    if (event.type === "user.message" && event.delivery === "processed")
+        return false;
+    return event.type === "user.message" && "processed_at" in event && event.processed_at === null;
+}
+/** Collapse repeated copies of the same user message id: a stamped
+ * `user.message` wins over a prior `turn.queued` / delivery:queued echo. */
+function userMessageLikeId(event) {
+    if (event.type !== "user.message" && event.type !== "turn.queued")
+        return undefined;
+    const id = eventStableId(event, "");
+    return id || undefined;
+}
+function dedupeUserMessages(events) {
+    const stamped = new Map();
+    const last = new Map();
+    events.forEach((event, index) => {
+        const id = userMessageLikeId(event);
+        if (!id)
+            return;
+        last.set(id, index);
+        if (!isPendingUserMessage(event))
+            stamped.set(id, index);
+    });
+    return events.filter((event, index) => {
+        const id = userMessageLikeId(event);
+        if (!id)
+            return true;
+        const keep = stamped.get(id) ?? last.get(id);
+        return keep === index;
+    });
+}
 export function projectConversationTurns(events, options = {}) {
+    return projectConversation(events, options).turns;
+}
+/** Project turns plus the queue of accepted-but-unprocessed user messages. */
+export function projectConversation(events, options = {}) {
     const threadId = options.threadId ?? "sthr_primary";
-    const filtered = events.filter((event) => eventThreadId(event) === threadId);
+    const deferMidTurn = options.deferMidTurnUserMessages ?? true;
+    const filtered = dedupeUserMessages(events.filter((event) => eventThreadId(event) === threadId));
     const results = new Map();
     for (const event of filtered) {
         const normalized = normalizeSessionEvent(event);
         if (normalized.kind === "tool_result")
             results.set(normalized.toolId, normalized);
     }
+    const pending = [];
+    const deferred = [];
+    let flushedTurn;
     const turns = [];
     let current;
     let pendingModelError = null;
@@ -172,26 +226,51 @@ export function projectConversationTurns(events, options = {}) {
         }
         return current;
     };
-    for (const event of filtered) {
+    const openUserTurn = (event, normalized) => {
+        const turn = {
+            id: normalized.id,
+            status: "running",
+            items: [{ kind: "message", id: normalized.id, role: "user", text: normalized.text, raw: event }],
+            rawEvents: [event],
+        };
+        turns.push(turn);
+        current = turn;
+        return turn;
+    };
+    const endTurn = () => {
+        current = undefined;
+        flushedTurn = undefined;
+        const next = deferred.shift();
+        if (next)
+            flushedTurn = { turn: openUserTurn(next.event, next.normalized), ...next };
+    };
+    for (const [order, event] of filtered.entries()) {
         const cause = modelError(event);
         if (cause)
             pendingModelError = cause;
         const normalized = normalizeSessionEvent(event);
         if (normalized.kind === "user_message") {
-            current = {
-                id: normalized.id,
-                status: "running",
-                items: [],
-                rawEvents: [],
-            };
-            turns.push(current);
+            if (isPendingUserMessage(event)) {
+                pending.push({ order, message: { id: normalized.id, text: normalized.text, reason: "pending", raw: event } });
+                continue;
+            }
+            const active = current;
+            const busy = active !== undefined
+                && active.status === "running"
+                && active.items.some((item) => item.kind === "message" && item.role === "user");
+            if (deferMidTurn && (busy || deferred.length > 0)) {
+                deferred.push({ order, event, normalized });
+                continue;
+            }
+            flushedTurn = undefined;
+            openUserTurn(event, normalized);
+            continue;
         }
         const turn = ensureTurn(event);
+        if (flushedTurn?.turn === turn)
+            flushedTurn = undefined;
         turn.rawEvents.push(event);
         switch (normalized.kind) {
-            case "user_message":
-                turn.items.push({ kind: "message", id: normalized.id, role: "user", text: normalized.text, raw: event });
-                break;
             case "assistant_message":
                 turn.items.push({ kind: "message", id: normalized.id, role: "assistant", text: normalized.text, raw: event });
                 break;
@@ -248,76 +327,96 @@ export function projectConversationTurns(events, options = {}) {
             case "turn_complete":
                 if (turn.status === "running")
                     turn.status = "completed";
-                current = undefined;
+                endTurn();
                 break;
             case "turn_terminated":
                 turn.status = "terminated";
-                current = undefined;
+                endTurn();
                 break;
             default:
                 break;
         }
     }
-    return turns.filter((turn) => turn.items.length > 0);
+    // A deferred message promoted at the last idle with nothing after it has
+    // not actually started processing yet: keep it queued instead of showing
+    // an empty "running" turn.
+    const queuedDeferred = [...deferred];
+    if (flushedTurn && flushedTurn.turn.rawEvents.length === 1) {
+        turns.splice(turns.indexOf(flushedTurn.turn), 1);
+        queuedDeferred.unshift({ order: flushedTurn.order, event: flushedTurn.event, normalized: flushedTurn.normalized });
+    }
+    const queued = [
+        ...pending,
+        ...queuedDeferred.map(({ order, event, normalized }) => ({
+            order,
+            message: { id: normalized.id, text: normalized.text, reason: "deferred", raw: event },
+        })),
+    ].sort((left, right) => left.order - right.order).map(({ message }) => message);
+    return { turns: turns.filter((turn) => turn.items.length > 0), queued };
 }
 /** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
  * The renderer can therefore consume one `TurnRender` whether events came
  * from a local ACP child or OpenManaged's cloud/local runtime. */
 export function projectCanonicalChatTurns(events, options = {}) {
-    return projectConversationTurns(events, options).map((turn) => {
-        const render = {
-            thoughtText: "",
-            currentThoughtText: "",
-            assistantText: "",
-            tools: [],
-            plan: [],
-            notes: [],
-            timeline: [],
-        };
-        const userParts = [];
-        for (const item of turn.items) {
-            if (item.kind === "message") {
-                if (item.role === "user") {
-                    userParts.push(item.text);
+    return projectCanonicalChat(events, options).turns;
+}
+/** Canonical chat turns plus queued user messages (see `QueuedUserMessage`). */
+export function projectCanonicalChat(events, options = {}) {
+    const projection = projectConversation(events, options);
+    return { queued: projection.queued, turns: projection.turns.map((turn) => {
+            const render = {
+                thoughtText: "",
+                currentThoughtText: "",
+                assistantText: "",
+                tools: [],
+                plan: [],
+                notes: [],
+                timeline: [],
+            };
+            const userParts = [];
+            for (const item of turn.items) {
+                if (item.kind === "message") {
+                    if (item.role === "user") {
+                        userParts.push(item.text);
+                        continue;
+                    }
+                    render.assistantText += item.text;
+                    render.timeline.push({ kind: "assistant_text", text: item.text });
                     continue;
                 }
-                render.assistantText += item.text;
-                render.timeline.push({ kind: "assistant_text", text: item.text });
-                continue;
+                if (item.kind === "thinking") {
+                    render.thoughtText += item.text;
+                    render.timeline.push({ kind: "thought", messageId: item.id, text: item.text });
+                    render.currentThoughtText = latestThoughtSegment(render.thoughtText);
+                    continue;
+                }
+                if (item.kind === "notice") {
+                    render.notes.push(item.message);
+                    continue;
+                }
+                const tool = item.tool;
+                const status = tool.status === "running" ? "in_progress" : tool.status;
+                const entry = {
+                    toolCallId: tool.id,
+                    title: tool.name,
+                    toolName: tool.name,
+                    status,
+                    rawInput: tool.input,
+                    rawOutput: tool.output,
+                };
+                render.tools.push(entry);
+                render.timeline.push({ kind: "tool", toolCallId: tool.id });
             }
-            if (item.kind === "thinking") {
-                render.thoughtText += item.text;
-                render.timeline.push({ kind: "thought", messageId: item.id, text: item.text });
-                render.currentThoughtText = latestThoughtSegment(render.thoughtText);
-                continue;
-            }
-            if (item.kind === "notice") {
-                render.notes.push(item.message);
-                continue;
-            }
-            const tool = item.tool;
-            const status = tool.status === "running" ? "in_progress" : tool.status;
-            const entry = {
-                toolCallId: tool.id,
-                title: tool.name,
-                toolName: tool.name,
-                status,
-                rawInput: tool.input,
-                rawOutput: tool.output,
+            if (turn.status !== "running")
+                render.currentThoughtText = "";
+            return {
+                id: turn.id,
+                status: turn.status,
+                userText: userParts.join("\n"),
+                render,
+                rawEvents: turn.rawEvents,
             };
-            render.tools.push(entry);
-            render.timeline.push({ kind: "tool", toolCallId: tool.id });
-        }
-        if (turn.status !== "running")
-            render.currentThoughtText = "";
-        return {
-            id: turn.id,
-            status: turn.status,
-            userText: userParts.join("\n"),
-            render,
-            rawEvents: turn.rawEvents,
-        };
-    });
+        }) };
 }
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
 export * from "../protocol/managed/index.js";
