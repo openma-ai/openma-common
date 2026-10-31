@@ -106,6 +106,16 @@ export function eventStableId(event: WireSessionEvent, fallback: string): string
   return stringField(event, "id", "event_id", "message_id", "thinking_id", "tool_use_id", "mcp_tool_use_id") ?? fallback;
 }
 
+function openmaData(event: WireSessionEvent): Record<string, unknown> {
+  const data = event.data;
+  return data && typeof data === "object" && !Array.isArray(data) ? data as Record<string, unknown> : {};
+}
+
+function dataString(data: Record<string, unknown>, name: string): string | undefined {
+  const value = data[name];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 function toolFamily(type: string): ToolFamily {
   if (type.includes("mcp_")) return "mcp";
   if (type.includes("custom_")) return "custom";
@@ -210,11 +220,45 @@ export function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessio
         raw: event,
       };
     case "session.status_running":
+    case "session.running":
       return { kind: "turn_running", raw: event };
     case "session.status_idle":
+    case "session.idle":
       return { kind: "turn_complete", raw: event };
     case "session.status_terminated":
+    case "session.terminated":
       return { kind: "turn_terminated", raw: event };
+    // OpenMA canonical tool lifecycle (decodeManagedSessionEvent output for
+    // agent.*tool_use / agent.*tool_result). Hosts that ingest OpenMA events
+    // (Console) project through here, so accept both vocabularies.
+    case "tool.started": {
+      const data = openmaData(event);
+      const id = dataString(data, "tool_call_id") ?? stringField(event, "tool_use_id", "id") ?? "tool";
+      const kind = dataString(data, "kind");
+      return {
+        kind: "tool_use",
+        tool: {
+          id,
+          family: kind === "mcp" || kind === "custom" ? kind : "builtin",
+          name: dataString(data, "tool_name") ?? stringField(event, "name", "tool_name") ?? "tool",
+          input: data.raw_input ?? event.input,
+          status: "running",
+          rawUse: event,
+        },
+        raw: event,
+      };
+    }
+    case "tool.completed":
+    case "tool.failed": {
+      const data = openmaData(event);
+      return {
+        kind: "tool_result",
+        toolId: dataString(data, "tool_call_id") ?? stringField(event, "tool_use_id", "id") ?? "tool",
+        output: data.content ?? data.raw_output ?? event.content ?? "",
+        isError: event.type === "tool.failed",
+        raw: event,
+      };
+    }
     default:
       return { kind: "ignore", raw: event };
   }
