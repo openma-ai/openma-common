@@ -98,6 +98,7 @@ export const OPENMA_CANONICAL_EVENT_TYPES = [
     "turn.failed",
     "turn.cancelled",
     "turn.interrupted",
+    "turn.steered",
     "tool.started",
     "tool.progress",
     "tool.completed",

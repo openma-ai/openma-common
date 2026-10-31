@@ -915,3 +915,252 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   --composer-chip-radius: var(--composer-control-radius, 6px);
   --composer-chip-padding-inline: var(--composer-chip-padding-x, 6px);
 }
+
+/* ── Queued prompt dock ────────────────────────────────────────────────
+ * Backchat's floating queue banner, ported to stable class names without
+ * Tailwind. Hosts theme it through --oma-queue-dock-* hooks; every hook
+ * falls back to the shared --chat-* / --composer-* semantic tokens.
+ */
+
+.oma-queue-dock {
+  --oma-queue-dock-bg: var(--chat-bg-surface, var(--bg-surface, Canvas));
+  --oma-queue-dock-fg: var(
+    --chat-fg-muted,
+    var(--fg-muted, currentColor)
+  );
+  --oma-queue-dock-fg-subtle: var(
+    --chat-fg-subtle,
+    var(--fg-subtle, currentColor)
+  );
+  --oma-queue-dock-border: color-mix(
+    in srgb,
+    var(--chat-border, var(--border, currentColor)) 60%,
+    transparent
+  );
+  --oma-queue-dock-radius: var(--composer-radius, 0.75rem);
+  --oma-queue-dock-row-height: 2.25rem;
+  --oma-queue-dock-padding-inline: 1rem;
+  --oma-queue-dock-gap: 0.625rem;
+  --oma-queue-dock-font-size: 12px;
+  --oma-queue-dock-control-size: 1.5rem;
+  --oma-queue-dock-icon-size: 0.875rem;
+  --oma-queue-dock-focus-ring: var(
+    --chat-focus-ring,
+    var(--focus-ring, currentColor)
+  );
+  --oma-queue-dock-danger: var(--chat-danger, var(--danger, #dc2626));
+  --oma-queue-dock-warning: var(--chat-warning, var(--warning, #d97706));
+
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--oma-queue-dock-border);
+  border-radius: var(--oma-queue-dock-radius);
+  background: var(--oma-queue-dock-bg);
+  box-shadow: var(
+    --oma-queue-dock-shadow,
+    var(--chat-shadow-sm, var(--shadow-sm, 0 1px 2px rgb(0 0 0 / 0.05)))
+  );
+  color: var(--oma-queue-dock-fg);
+  font-size: var(--oma-queue-dock-font-size);
+  line-height: 1.25rem;
+}
+
+.oma-queue-dock--disabled {
+  opacity: 0.65;
+}
+
+.oma-queue-dock__viewport {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--oma-queue-dock-radius)
+    var(--oma-queue-dock-radius) 0 0;
+}
+
+.oma-queue-dock__banner,
+.oma-queue-dock__list {
+  width: 100%;
+  min-width: 0;
+}
+
+.oma-queue-dock__list {
+  display: flex;
+  flex-direction: column;
+}
+
+.oma-queue-dock__row {
+  display: flex;
+  min-width: 0;
+  min-height: var(--oma-queue-dock-row-height);
+  align-items: center;
+  gap: var(--oma-queue-dock-gap);
+  padding-block: 0;
+  padding-inline: var(--oma-queue-dock-padding-inline);
+  color: var(--oma-queue-dock-fg);
+}
+
+.oma-queue-dock__row[draggable="true"] {
+  cursor: grab;
+}
+
+.oma-queue-dock__row[data-queue-dragging="true"] {
+  opacity: 0.6;
+}
+
+.oma-queue-dock__row:focus-visible {
+  outline: 2px solid var(--oma-queue-dock-focus-ring);
+  outline-offset: -2px;
+}
+
+.oma-queue-dock__drag {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--oma-queue-dock-fg-subtle);
+  cursor: grab;
+}
+
+.oma-queue-dock__text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--oma-queue-dock-fg);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oma-queue-dock__edit {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.oma-queue-dock__textarea {
+  height: 1.75rem;
+  min-width: 0;
+  flex: 1 1 auto;
+  resize: none;
+  border: 1px solid var(--oma-queue-dock-border);
+  border-radius: calc(var(--oma-queue-dock-radius) * 0.4);
+  background: transparent;
+  padding: 0 0.5rem;
+  color: var(--chat-fg, var(--fg, currentColor));
+  font: inherit;
+  outline: none;
+}
+
+.oma-queue-dock__textarea:focus-visible {
+  border-color: var(--oma-queue-dock-focus-ring);
+}
+
+.oma-queue-dock__textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.oma-queue-dock__button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  margin: 0;
+  border: 0;
+  border-radius: calc(var(--oma-queue-dock-radius) * 0.35);
+  background: transparent;
+  padding: 0;
+  color: var(--oma-queue-dock-fg);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  appearance: none;
+}
+
+.oma-queue-dock__button--icon {
+  width: var(--oma-queue-dock-control-size);
+  height: var(--oma-queue-dock-control-size);
+}
+
+.oma-queue-dock__button--text,
+.oma-queue-dock__button--steer {
+  height: var(--oma-queue-dock-control-size);
+  padding-inline: 0.375rem;
+  font-size: var(--oma-queue-dock-font-size);
+  white-space: nowrap;
+}
+
+.oma-queue-dock__button--steer {
+  padding-inline: 0.5rem;
+}
+
+.oma-queue-dock__button:hover:not(:disabled) {
+  background: var(
+    --chat-control-bg-hover,
+    var(--interaction-bg-hover, var(--chat-interactive-hover-bg, transparent))
+  );
+  color: var(--chat-fg, var(--fg, currentColor));
+}
+
+.oma-queue-dock__button--danger:hover:not(:disabled) {
+  color: var(--oma-queue-dock-danger);
+}
+
+.oma-queue-dock__button:focus-visible {
+  outline: 2px solid var(--oma-queue-dock-focus-ring);
+  outline-offset: 1px;
+}
+
+.oma-queue-dock__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.oma-queue-dock__icon {
+  width: var(--oma-queue-dock-icon-size);
+  height: var(--oma-queue-dock-icon-size);
+  flex: 0 0 auto;
+}
+
+.oma-queue-dock__blocked {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--oma-queue-dock-border);
+  padding: 0.375rem var(--oma-queue-dock-padding-inline);
+  color: var(--oma-queue-dock-fg);
+}
+
+.oma-queue-dock__blocked-icon {
+  color: var(--oma-queue-dock-warning);
+}
+
+.oma-queue-dock__blocked-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oma-queue-dock__button--interrupt {
+  height: var(--oma-queue-dock-control-size);
+  padding-inline: 0.5rem;
+  border: 1px solid var(--oma-queue-dock-border);
+  background: color-mix(
+    in srgb,
+    var(--oma-queue-dock-bg) 88%,
+    var(--oma-queue-dock-fg) 12%
+  );
+}
+
+.oma-queue-dock__button--interrupt:hover:not(:disabled) {
+  color: var(--oma-queue-dock-danger);
+}
