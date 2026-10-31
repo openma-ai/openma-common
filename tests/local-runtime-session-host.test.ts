@@ -26,12 +26,16 @@ describe("ManagedAgentsSessionHost", () => {
     await Promise.resolve();
     await host.steer({ sessionId: "session-without-steer", eventId: "steer-1", text: "change" });
     expect(steerCalls).toBe(0);
-    expect(events).toContainEqual(expect.objectContaining({ type: "session.error", turnId: "steer-1", message: "ACP agent does not support session steering" }));
+    // Unsupported steer falls back to queue — no session.error, message not dropped.
+    expect(events.some((e: any) => e.type === "session.error" && e.turnId === "steer-1")).toBe(false);
     finish();
     await turn;
+    // Allow the fallback prompt (steer-1) to finish after the in-flight turn unblocks.
+    await new Promise((r) => setTimeout(r, 0));
     await host.prompt({ sessionId: "session-without-steer", turnId: "turn-2", text: "continue" });
-    expect(prompts).toBe(2);
+    expect(prompts).toBeGreaterThanOrEqual(2);
     expect(events).toContainEqual(expect.objectContaining({ type: "session.complete", turnId: "turn-2" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "session.complete", turnId: "steer-1" }));
     expect(disposeCount).toBe(0);
     await host.dispose("session-without-steer");
   });

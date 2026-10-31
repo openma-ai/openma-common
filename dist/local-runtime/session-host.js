@@ -280,33 +280,30 @@ export class ManagedAgentsSessionHost {
             });
             return;
         }
-        if (!session.acp.supportsSteering) {
-            this.#emit({
-                type: "session.error",
+        // Unsupported steering / promptRequired / failed / throw → queue as a
+        // normal prompt (no session.error, message is not dropped). When another
+        // turn is already in flight, do not await: steer must return promptly and
+        // the fallback prompt runs concurrently (ACP backends serialize).
+        const queueAsPrompt = () => {
+            void this.prompt({
                 sessionId: input.sessionId,
                 turnId: input.eventId,
-                message: "ACP agent does not support session steering",
+                text: input.text,
             });
+        };
+        if (!session.acp.supportsSteering) {
+            queueAsPrompt();
             return;
         }
         try {
             const outcome = await session.acp.steer(input.text);
-            if (outcome === "failed") {
-                this.#emit({
-                    type: "session.error",
-                    sessionId: input.sessionId,
-                    turnId: input.eventId,
-                    message: "ACP agent rejected session steering",
-                });
+            if (outcome === "promptRequired" || outcome === "failed") {
+                queueAsPrompt();
             }
         }
         catch (error) {
-            this.#emit({
-                type: "session.error",
-                sessionId: input.sessionId,
-                turnId: input.eventId,
-                message: error instanceof Error ? error.message : String(error),
-            });
+            void error;
+            queueAsPrompt();
         }
     }
     async dispose(sessionId) {
