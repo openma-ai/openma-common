@@ -88,7 +88,7 @@ describe("queued user messages (official processed_at semantics)", () => {
     expect(queued.map((item) => item.id)).toEqual(["u3"]);
   });
 
-  it("interrupt ends the turn and the next message starts a new one", () => {
+  it("interrupt ends the turn as interrupted and the next message starts a new one", () => {
     const turns = projectCanonicalChatTurns([
       msg("u1", "long task"),
       ev("session.status_running"),
@@ -99,7 +99,7 @@ describe("queued user messages (official processed_at semantics)", () => {
       ev("agent.message", { id: "a2", content: "ok" }),
       ev("session.status_idle", { stop_reason: { type: "end_turn" } }),
     ]);
-    expect(texts(turns)).toEqual([["long task", "", "completed"], ["next", "ok", "completed"]]);
+    expect(texts(turns)).toEqual([["long task", "", "interrupted"], ["next", "ok", "completed"]]);
   });
 
   it("can opt out of the legacy fallback", () => {

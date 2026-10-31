@@ -36,7 +36,16 @@ export type NormalizedSessionEvent =
   | { kind: "tool_result"; toolId: string; output: unknown; isError: boolean; raw: WireSessionEvent }
   | { kind: "notice"; tone: "warning" | "error"; message: string; source?: string; raw: WireSessionEvent }
   | { kind: "turn_running"; raw: WireSessionEvent }
-  | { kind: "turn_complete"; raw: WireSessionEvent }
+  | {
+      kind: "turn_complete";
+      /** Official `stop_reason.type` of `session.status_idle` (`end_turn`,
+       * `requires_action`, `retries_exhausted`, ...). Undefined when absent. */
+      stopReason?: string;
+      /** `stop_reason.event_ids` for `requires_action`: the tool calls the
+       * session is parked on. */
+      awaitingEventIds?: string[];
+      raw: WireSessionEvent;
+    }
   | { kind: "turn_terminated"; raw: WireSessionEvent }
   | { kind: "ignore"; raw: WireSessionEvent };
 
@@ -62,9 +71,28 @@ export type ConversationItem =
       raw: WireSessionEvent;
     };
 
+/** Turn lifecycle derived client-side from official Managed Agents events.
+ * - `running`: the agent is working on it.
+ * - `awaiting`: parked on `session.status_idle{stop_reason:requires_action}`;
+ *   the same turn continues once the tool results / confirmations arrive.
+ * - `completed`: ended with `end_turn`.
+ * - `interrupted`: contained `user.interrupt` and then went idle.
+ * - `errored` / `terminated`: error notice / terminal status. */
+export type ConversationTurnStatus =
+  | "running"
+  | "awaiting"
+  | "completed"
+  | "interrupted"
+  | "errored"
+  | "terminated";
+
 export interface ConversationTurn {
   id: string;
-  status: "running" | "completed" | "errored" | "terminated";
+  status: ConversationTurnStatus;
+  /** Tool-call ids the turn is parked on while `status === "awaiting"`. */
+  awaitingToolCallIds?: string[];
+  /** Last `stop_reason.type` seen for this turn. */
+  stopReason?: string;
   items: ConversationItem[];
   rawEvents: WireSessionEvent[];
 }
@@ -72,6 +100,8 @@ export interface ConversationTurn {
 export interface CanonicalChatTurn {
   id: string;
   status: ConversationTurn["status"];
+  awaitingToolCallIds?: string[];
+  stopReason?: string;
   userText: string;
   render: TurnRender;
   rawEvents: WireSessionEvent[];
@@ -114,6 +144,75 @@ function openmaData(event: WireSessionEvent): Record<string, unknown> {
 function dataString(data: Record<string, unknown>, name: string): string | undefined {
   const value = data[name];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function idleStopReason(event: WireSessionEvent): { stopReason?: string; awaitingEventIds?: string[] } {
+  const data = openmaData(event);
+  const raw = event.stop_reason ?? data.stop_reason;
+  if (typeof raw === "string") return { stopReason: raw };
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as { type?: unknown; event_ids?: unknown };
+  const stopReason = typeof record.type === "string" ? record.type : undefined;
+  const ids = Array.isArray(record.event_ids)
+    ? record.event_ids.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : undefined;
+  return {
+    ...(stopReason ? { stopReason } : {}),
+    ...(ids && ids.length > 0 ? { awaitingEventIds: ids } : {}),
+  };
+}
+
+function isIdleEvent(event: WireSessionEvent): boolean {
+  return event.type === "session.status_idle" || event.type === "session.idle";
+}
+
+function isTerminalStatusEvent(event: WireSessionEvent): boolean {
+  return isIdleEvent(event) || event.type === "session.status_terminated" || event.type === "session.terminated";
+}
+
+function eventSeq(event: WireSessionEvent): number | undefined {
+  const value = event.seq ?? openmaData(event).seq;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function eventTimeKey(event: WireSessionEvent): string | undefined {
+  const value = event.processed_at ?? event.occurred_at ?? event.ts ?? event.created_at;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Causal order for projection.
+ *
+ * When every event carries a numeric `seq` (OpenMA event log order), sort by
+ * it. Otherwise keep list order but, within a run of adjacent events sharing
+ * the same millisecond timestamp, move idle/terminated status events after
+ * the other events of that millisecond: the server writes the closing tool
+ * result / message / interrupt and the idle in the same ms, and a
+ * `(processed_at, id)` list order can put the idle first. */
+export function orderSessionEventsCausally(events: readonly WireSessionEvent[]): WireSessionEvent[] {
+  if (events.length > 0 && events.every((event) => eventSeq(event) !== undefined)) {
+    return events
+      .map((event, index) => ({ event, index }))
+      .sort((a, b) => (eventSeq(a.event)! - eventSeq(b.event)!) || (a.index - b.index))
+      .map(({ event }) => event);
+  }
+  const out: WireSessionEvent[] = [];
+  let index = 0;
+  while (index < events.length) {
+    const key = eventTimeKey(events[index]!);
+    let end = index + 1;
+    if (key !== undefined) {
+      while (end < events.length && eventTimeKey(events[end]!) === key) end += 1;
+    }
+    const run = events.slice(index, end);
+    if (run.length > 1) {
+      out.push(...run.filter((event) => !isTerminalStatusEvent(event)));
+      out.push(...run.filter((event) => isTerminalStatusEvent(event)));
+    } else {
+      out.push(...run);
+    }
+    index = end;
+  }
+  return out;
 }
 
 function toolFamily(type: string): ToolFamily {
@@ -223,8 +322,10 @@ export function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessio
     case "session.running":
       return { kind: "turn_running", raw: event };
     case "session.status_idle":
-    case "session.idle":
-      return { kind: "turn_complete", raw: event };
+    case "session.idle": {
+      const stop = idleStopReason(event);
+      return { kind: "turn_complete", ...stop, raw: event };
+    }
     case "session.status_terminated":
     case "session.terminated":
       return { kind: "turn_terminated", raw: event };
@@ -299,16 +400,30 @@ export interface ConversationProjectionOptions {
    * the fallback for servers that stamp `processed_at` at accept time.
    * Default: true. */
   deferMidTurnUserMessages?: boolean;
+  /** Authoritative session status from the host (e.g. the session row).
+   * When `idle`/`terminated`, no turn is left `running`. */
+  sessionStatus?: "running" | "idle" | "terminated" | "rescheduling" | string;
 }
+
+/** Session-level state derived from the last status event. */
+export type ProjectedSessionState = "running" | "requires_action" | "idle" | "terminated" | "unknown";
 
 export interface ConversationProjection {
   turns: ConversationTurn[];
   queued: QueuedUserMessage[];
+  /** Id of the turn that is still `running` or `awaiting`, if any. */
+  activeTurnId?: string;
+  /** Tool-call ids the session is parked on (`requires_action`). */
+  awaitingToolCallIds: string[];
+  sessionState: ProjectedSessionState;
 }
 
 export interface CanonicalChatProjection {
   turns: CanonicalChatTurn[];
   queued: QueuedUserMessage[];
+  activeTurnId?: string;
+  awaitingToolCallIds: string[];
+  sessionState: ProjectedSessionState;
 }
 
 /** message_id of an OpenMA queue-lifecycle fact (`turn.cancelled` /
@@ -357,6 +472,10 @@ function dedupeUserMessages(events: readonly WireSessionEvent[]): WireSessionEve
   });
 }
 
+function turnInterrupted(turn: ConversationTurn): boolean {
+  return turn.rawEvents.some((event) => event.type === "user.interrupt");
+}
+
 export function projectConversationTurns(
   events: readonly WireSessionEvent[],
   options: ConversationProjectionOptions = {},
@@ -382,7 +501,7 @@ export function projectConversation(
     if (event.type === "turn.cancelled") cancelledIds.add(messageId);
     else if (event.type === "turn.steered") steeredIds.add(messageId);
   }
-  const filtered = dedupeUserMessages(events.filter((event) => {
+  const filtered = dedupeUserMessages(orderSessionEventsCausally(events).filter((event) => {
     if (eventThreadId(event) !== threadId) return false;
     if (queueLifecycleMessageId(event)) return false;
     const id = userMessageLikeId(event);
@@ -401,7 +520,13 @@ export function projectConversation(
   let current: ConversationTurn | undefined;
   let pendingModelError: { error: string; model?: string } | null = null;
 
+  let lastEnded: ConversationTurn | undefined;
+  let sessionState: ProjectedSessionState = "unknown";
   const ensureTurn = (event: WireSessionEvent) => {
+    // An event that arrives after its turn ended (late tool result,
+    // synthetic interrupted result, trailing message) belongs to that turn;
+    // never open a user-less running turn for it.
+    if (!current && lastEnded) return lastEnded;
     if (!current) {
       current = {
         id: eventStableId(event, `turn-${turns.length}`),
@@ -429,6 +554,7 @@ export function projectConversation(
     return turn;
   };
   const endTurn = () => {
+    if (current) lastEnded = current;
     current = undefined;
     flushedTurn = undefined;
     const next = deferred.shift();
@@ -446,7 +572,7 @@ export function projectConversation(
       }
       const active = current as ConversationTurn | undefined;
       const busy = active !== undefined
-        && active.status === "running"
+        && (active.status === "running" || active.status === "awaiting")
         && active.items.some((item) => item.kind === "message" && item.role === "user");
       if (busy && steeredIds.has(normalized.id)) {
         active!.items.push({ kind: "message", id: normalized.id, role: "user", text: normalized.text, steered: true, raw: event });
@@ -519,13 +645,42 @@ export function projectConversation(
           pendingModelError = null;
         }
         break;
-      case "turn_complete":
-        if (turn.status === "running") turn.status = "completed";
-        endTurn();
+      case "turn_running":
+        sessionState = "running";
+        if (turn === current && turn.status === "awaiting") {
+          turn.status = "running";
+          delete turn.awaitingToolCallIds;
+        }
         break;
+      case "turn_complete": {
+        if (normalized.stopReason) turn.stopReason = normalized.stopReason;
+        if (normalized.stopReason === "requires_action") {
+          sessionState = "requires_action";
+          // Official semantics: the turn is parked, not finished. It
+          // continues across the tool round-trip.
+          if (turn === current && (turn.status === "running" || turn.status === "awaiting")) {
+            turn.status = "awaiting";
+            turn.awaitingToolCallIds = normalized.awaitingEventIds ?? [];
+          }
+          break;
+        }
+        sessionState = "idle";
+        if (turn.status === "running" || turn.status === "awaiting") {
+          turn.status = turnInterrupted(turn)
+            ? "interrupted"
+            : normalized.stopReason && normalized.stopReason !== "end_turn"
+              ? "errored"
+              : "completed";
+        }
+        delete turn.awaitingToolCallIds;
+        if (turn === current) endTurn();
+        break;
+      }
       case "turn_terminated":
+        sessionState = "terminated";
         turn.status = "terminated";
-        endTurn();
+        delete turn.awaitingToolCallIds;
+        if (turn === current) endTurn();
         break;
       default:
         break;
@@ -547,7 +702,43 @@ export function projectConversation(
       message: { id: normalized.id, text: normalized.text, reason: "deferred" as const, raw: event },
     })),
   ].sort((left, right) => left.order - right.order).map(({ message }) => message);
-  return { turns: turns.filter((turn) => turn.items.length > 0), queued };
+
+  // Session-level settle: once the session is idle/terminated nothing may
+  // stay running. A host-provided status wins over the log.
+  const hostStatus = options.sessionStatus;
+  const settled = hostStatus === "idle" || hostStatus === "terminated"
+    ? hostStatus
+    : sessionState === "idle" || sessionState === "terminated"
+      ? sessionState
+      : undefined;
+  if (hostStatus === "idle" && sessionState === "requires_action") {
+    // Host idle without stop_reason is compatible with requires_action.
+  } else if (settled) {
+    for (const turn of turns) {
+      if (turn.status !== "running" && turn.status !== "awaiting") continue;
+      turn.status = settled === "terminated" ? "terminated" : turnInterrupted(turn) ? "interrupted" : "completed";
+      delete turn.awaitingToolCallIds;
+    }
+    if (hostStatus === "terminated") sessionState = "terminated";
+    else if (hostStatus === "idle" && sessionState !== "terminated") sessionState = "idle";
+  }
+  // Only the last open turn can be active; earlier open ones were superseded.
+  const visible = turns.filter((turn) => turn.items.length > 0);
+  let active: ConversationTurn | undefined;
+  for (let i = visible.length - 1; i >= 0; i -= 1) {
+    const turn = visible[i]!;
+    if (turn.status === "running" || turn.status === "awaiting") {
+      if (!active) active = turn;
+      else turn.status = turnInterrupted(turn) ? "interrupted" : "completed";
+    }
+  }
+  return {
+    turns: visible,
+    queued,
+    ...(active ? { activeTurnId: active.id } : {}),
+    awaitingToolCallIds: active?.status === "awaiting" ? [...(active.awaitingToolCallIds ?? [])] : [],
+    sessionState,
+  };
 }
 
 /** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
@@ -566,7 +757,12 @@ export function projectCanonicalChat(
   options: ConversationProjectionOptions = {},
 ): CanonicalChatProjection {
   const projection = projectConversation(events, options);
-  return { queued: projection.queued, turns: projection.turns.map((turn) => {
+  return {
+    queued: projection.queued,
+    ...(projection.activeTurnId ? { activeTurnId: projection.activeTurnId } : {}),
+    awaitingToolCallIds: projection.awaitingToolCallIds,
+    sessionState: projection.sessionState,
+    turns: projection.turns.map((turn) => {
     const render: TurnRender = {
       thoughtText: "",
       currentThoughtText: "",
@@ -617,11 +813,14 @@ export function projectCanonicalChat(
     return {
       id: turn.id,
       status: turn.status,
+      ...(turn.awaitingToolCallIds ? { awaitingToolCallIds: turn.awaitingToolCallIds } : {}),
+      ...(turn.stopReason ? { stopReason: turn.stopReason } : {}),
       userText: userParts.join("\n"),
       render,
       rawEvents: turn.rawEvents,
     };
-  }) };
+    }),
+  };
 }
 
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
