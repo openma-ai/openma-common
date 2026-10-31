@@ -127,15 +127,46 @@ export declare function eventText(content: unknown): string;
 export declare function eventThreadId(event: WireSessionEvent): string;
 export declare function eventStableId(event: WireSessionEvent, fallback: string): string;
 export declare function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessionEvent;
-export declare function projectConversationTurns(events: readonly WireSessionEvent[], options?: {
+/** A `user.message` the server has accepted but not processed yet.
+ *
+ * Official Managed Agents semantics: `processed_at` is `null` while a
+ * `user.message` waits behind the running turn; the same event id is
+ * re-emitted with a timestamp once processing finishes. Queued messages are
+ * kept out of `turns` so they never split the running turn. */
+export interface QueuedUserMessage {
+    id: string;
+    text: string;
+    /** `pending`: server reported `processed_at: null`. `deferred`: the
+     * server stamped it (legacy accept-time stamping) but it arrived while the
+     * current turn was still running, so it waits for that turn to end. */
+    reason: "pending" | "deferred";
+    raw: WireSessionEvent;
+}
+export interface ConversationProjectionOptions {
     threadId?: string;
-}): ConversationTurn[];
+    /** Treat a timestamped `user.message` that arrives while the current turn
+     * has not reached idle/terminated as queued until that turn ends. This is
+     * the fallback for servers that stamp `processed_at` at accept time.
+     * Default: true. */
+    deferMidTurnUserMessages?: boolean;
+}
+export interface ConversationProjection {
+    turns: ConversationTurn[];
+    queued: QueuedUserMessage[];
+}
+export interface CanonicalChatProjection {
+    turns: CanonicalChatTurn[];
+    queued: QueuedUserMessage[];
+}
+export declare function projectConversationTurns(events: readonly WireSessionEvent[], options?: ConversationProjectionOptions): ConversationTurn[];
+/** Project turns plus the queue of accepted-but-unprocessed user messages. */
+export declare function projectConversation(events: readonly WireSessionEvent[], options?: ConversationProjectionOptions): ConversationProjection;
 /** Adapt Managed's event vocabulary to the richer ACP/Backchat render model.
  * The renderer can therefore consume one `TurnRender` whether events came
  * from a local ACP child or OpenManaged's cloud/local runtime. */
-export declare function projectCanonicalChatTurns(events: readonly WireSessionEvent[], options?: {
-    threadId?: string;
-}): CanonicalChatTurn[];
+export declare function projectCanonicalChatTurns(events: readonly WireSessionEvent[], options?: ConversationProjectionOptions): CanonicalChatTurn[];
+/** Canonical chat turns plus queued user messages (see `QueuedUserMessage`). */
+export declare function projectCanonicalChat(events: readonly WireSessionEvent[], options?: ConversationProjectionOptions): CanonicalChatProjection;
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
 export * from "../protocol/managed/index.js";
 //# sourceMappingURL=managed.d.ts.map
