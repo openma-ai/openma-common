@@ -157,6 +157,15 @@ export interface AcpSession {
     readonly positionEncoding: nes.PositionEncodingKind | null;
     /** Whether initialize negotiated the vendor `_session/steering` method. */
     readonly supportsSteering: boolean;
+    /**
+     * Open `session/request_permission` callbacks. While one is open, host
+     * input must wait for it to settle (claude-agent-acp "later" steering):
+     * never cancel the request or hide its card; only an explicit
+     * `session/cancel` ends it.
+     */
+    readonly openPermissionRequests?: number;
+    /** Resolves once no permission request is open. */
+    whenPermissionsSettled?(): Promise<void>;
     prompt(input: string | readonly schema.ContentBlock[], opts?: {
         abortSignal?: AbortSignal;
     }): AsyncIterable<unknown>;

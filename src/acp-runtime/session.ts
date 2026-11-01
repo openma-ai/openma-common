@@ -78,6 +78,8 @@ export class AcpSessionImpl implements AcpSession {
   #nesCapabilities: nes.NesCapabilities | null = null;
   #positionEncoding: nes.PositionEncodingKind | null = null;
   #supportsSteering = false;
+  #openPermissionRequests = 0;
+  #permissionWaiters: Array<() => void> = [];
   #nextClientRequestId = 1;
   #outstandingUrlElicitations = new Set<string>();
 
@@ -188,6 +190,15 @@ export class AcpSessionImpl implements AcpSession {
   get supportsSteering(): boolean {
     return this.#supportsSteering;
   }
+  get openPermissionRequests(): number {
+    return this.#openPermissionRequests;
+  }
+
+  whenPermissionsSettled(): Promise<void> {
+    if (this.#openPermissionRequests === 0) return Promise.resolve();
+    return new Promise((resolve) => this.#permissionWaiters.push(resolve));
+  }
+
 
   async init(): Promise<void> {
     const initStartedAt = Date.now();
@@ -424,7 +435,9 @@ export class AcpSessionImpl implements AcpSession {
         this.#receiveInboundEvent(update, isIdleSessionUpdate(update));
       },
       requestPermission: async (params) => {
-        return this.#runClientRequest("session/request_permission", params, async () => {
+        this.#openPermissionRequests += 1;
+        try {
+          return await this.#runClientRequest("session/request_permission", params, async () => {
           if (!callbacks.requestPermission) {
             return { outcome: { outcome: "cancelled" as const } };
           }
@@ -434,7 +447,13 @@ export class AcpSessionImpl implements AcpSession {
             this.#pushEvent({ type: "requestPermissionError", error: String(error) });
             return { outcome: { outcome: "cancelled" as const } };
           }
-        });
+          });
+        } finally {
+          this.#openPermissionRequests -= 1;
+          if (this.#openPermissionRequests === 0) {
+            for (const resolve of this.#permissionWaiters.splice(0)) resolve();
+          }
+        }
       },
       readTextFile: callbacks.readTextFile
         ? async (params) => this.#runClientRequest(

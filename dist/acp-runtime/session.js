@@ -40,6 +40,8 @@ export class AcpSessionImpl {
     #nesCapabilities = null;
     #positionEncoding = null;
     #supportsSteering = false;
+    #openPermissionRequests = 0;
+    #permissionWaiters = [];
     #nextClientRequestId = 1;
     #outstandingUrlElicitations = new Set();
     constructor(deps) {
@@ -125,6 +127,14 @@ export class AcpSessionImpl {
     }
     get supportsSteering() {
         return this.#supportsSteering;
+    }
+    get openPermissionRequests() {
+        return this.#openPermissionRequests;
+    }
+    whenPermissionsSettled() {
+        if (this.#openPermissionRequests === 0)
+            return Promise.resolve();
+        return new Promise((resolve) => this.#permissionWaiters.push(resolve));
     }
     async init() {
         const initStartedAt = Date.now();
@@ -329,18 +339,28 @@ export class AcpSessionImpl {
                 this.#receiveInboundEvent(update, isIdleSessionUpdate(update));
             },
             requestPermission: async (params) => {
-                return this.#runClientRequest("session/request_permission", params, async () => {
-                    if (!callbacks.requestPermission) {
-                        return { outcome: { outcome: "cancelled" } };
+                this.#openPermissionRequests += 1;
+                try {
+                    return await this.#runClientRequest("session/request_permission", params, async () => {
+                        if (!callbacks.requestPermission) {
+                            return { outcome: { outcome: "cancelled" } };
+                        }
+                        try {
+                            return await callbacks.requestPermission(params);
+                        }
+                        catch (error) {
+                            this.#pushEvent({ type: "requestPermissionError", error: String(error) });
+                            return { outcome: { outcome: "cancelled" } };
+                        }
+                    });
+                }
+                finally {
+                    this.#openPermissionRequests -= 1;
+                    if (this.#openPermissionRequests === 0) {
+                        for (const resolve of this.#permissionWaiters.splice(0))
+                            resolve();
                     }
-                    try {
-                        return await callbacks.requestPermission(params);
-                    }
-                    catch (error) {
-                        this.#pushEvent({ type: "requestPermissionError", error: String(error) });
-                        return { outcome: { outcome: "cancelled" } };
-                    }
-                });
+                }
             },
             readTextFile: callbacks.readTextFile
                 ? async (params) => this.#runClientRequest("fs/read_text_file", params, () => callbacks.readTextFile(params))

@@ -45,6 +45,8 @@ export declare class AcpSessionImpl implements AcpSession {
     get nesCapabilities(): nes.NesCapabilities | null;
     get positionEncoding(): nes.PositionEncodingKind | null;
     get supportsSteering(): boolean;
+    get openPermissionRequests(): number;
+    whenPermissionsSettled(): Promise<void>;
     init(): Promise<void>;
     authenticate(methodId: string): Promise<void>;
     setMode(modeId: string): Promise<void>;

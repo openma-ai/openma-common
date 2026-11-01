@@ -284,12 +284,24 @@ export class ManagedAgentsSessionHost {
         // normal prompt (no session.error, message is not dropped). When another
         // turn is already in flight, do not await: steer must return promptly and
         // the fallback prompt runs concurrently (ACP backends serialize).
+        // While session/request_permission is open, a fallback prompt would race
+        // the blocked turn (and some agents cancel the running prompt, which
+        // cancels the permission request and hides its card). Match
+        // claude-agent-acp's "later" steering: wait for the permission to settle,
+        // never cancel it; only an explicit session/cancel ends it.
         const queueAsPrompt = () => {
-            void this.prompt({
-                sessionId: input.sessionId,
-                turnId: input.eventId,
-                text: input.text,
-            });
+            const send = () => {
+                void this.prompt({
+                    sessionId: input.sessionId,
+                    turnId: input.eventId,
+                    text: input.text,
+                });
+            };
+            if ((session.acp.openPermissionRequests ?? 0) > 0 && session.acp.whenPermissionsSettled) {
+                void session.acp.whenPermissionsSettled().then(send, send);
+                return;
+            }
+            send();
         };
         if (!session.acp.supportsSteering) {
             queueAsPrompt();
