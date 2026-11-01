@@ -335,6 +335,7 @@ export function parseAcpEvent(event) {
         return {
             kind: "user_input",
             text,
+            steered: true,
             ...(clientId ? { clientId } : {}),
             ...(Array.isArray(canonicalData.attachments) ? { attachments: canonicalData.attachments } : {}),
             ...(Array.isArray(canonicalData.annotations) ? { annotations: canonicalData.annotations } : {}),
@@ -945,6 +946,7 @@ export function createTurnProjector() {
                     ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
                     ...(parsed.annotations ? { annotations: parsed.annotations } : {}),
                     ...(parsed.startedAt ? { startedAt: parsed.startedAt } : {}),
+                    ...(parsed.steered ? { steered: true } : {}),
                 });
                 break;
             case "thought":

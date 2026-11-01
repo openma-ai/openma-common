@@ -127,6 +127,7 @@ export function projectAcpChatTurn(
         ...(entry.attachments ? { attachments: entry.attachments } : {}),
         ...(entry.annotations ? { annotations: entry.annotations } : {}),
         ...(entry.startedAt ? { startedAt: entry.startedAt } : {}),
+        ...(entry.steered ? { steered: true } : {}),
       };
       items.push(userInput);
       return;

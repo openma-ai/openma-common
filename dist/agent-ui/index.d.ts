@@ -51,6 +51,8 @@ export interface AgentUIUserInputItem {
     attachments?: unknown[];
     annotations?: unknown[];
     startedAt?: string;
+    /** Mid-turn steer absorbed into the active turn (OpenMA turn.steered). */
+    steered?: true;
 }
 export type AgentUITimelineItem = AgentUIMessageItem | AgentUIToolItem | AgentUIRawItem | AgentUIUserInputItem;
 export interface AgentUIWorkItemState {

@@ -20,6 +20,10 @@ export const defaultQueueDockLabels = {
         ? `${count} queued · waiting on tool ${toolNames.join(", ")}`
         : `${count} queued · waiting on tool`,
     interrupt: "Interrupt",
+    pendingSteersSection: (count) => count === 1
+        ? "1 message joins this turn at the next model step"
+        : `${count} messages join this turn at the next model step`,
+    followUpsSection: (count) => count === 1 ? "1 queued follow-up" : `${count} queued follow-ups`,
 };
 function resolveLabel(override, fallback, ...args) {
     const label = override ?? fallback;
@@ -40,11 +44,27 @@ function asPromise(action) {
  * Host-agnostic queued-prompt dock. It owns presentation and interaction
  * state only; every side effect is supplied by the host through callbacks.
  */
+function groupQueuePrompts(prompts) {
+    const usesBands = prompts.some((prompt) => prompt.band != null);
+    if (!usesBands)
+        return [{ band: null, prompts }];
+    const pending = prompts.filter((prompt) => prompt.band === "pending_steer");
+    const followUps = prompts.filter((prompt) => prompt.band !== "pending_steer");
+    const groups = [];
+    if (pending.length > 0) {
+        groups.push({ band: "pending_steer", prompts: pending });
+    }
+    if (followUps.length > 0) {
+        groups.push({ band: "follow_up", prompts: followUps });
+    }
+    return groups;
+}
 export function QueueDock({ prompts, callbacks, labels, blocked, className, disabled = false, }) {
     const [draggingId, setDraggingId] = useState(null);
     if (prompts.length === 0 && !blocked)
         return null;
     const title = resolveLabel(labels?.title, defaultQueueDockLabels.title, prompts.length);
+    const groups = groupQueuePrompts(prompts);
     const rootClassName = [
         "oma-queue-dock",
         disabled ? "oma-queue-dock--disabled" : undefined,
@@ -52,7 +72,22 @@ export function QueueDock({ prompts, callbacks, labels, blocked, className, disa
     ]
         .filter(Boolean)
         .join(" ");
-    return (_jsxs("div", { className: rootClassName, "data-queue-dock": "true", "data-composer-progress": "true", "data-queue-dock-disabled": disabled ? "true" : undefined, children: [blocked ? (_jsx(QueueDockBlockedLine, { blocked: blocked, count: prompts.length, labels: labels, disabled: disabled })) : null, prompts.length > 0 ? (_jsx("div", { className: "oma-queue-dock__viewport", "data-progress-cap-viewport": "true", children: _jsx("div", { className: "oma-queue-dock__banner", "data-progress-banner": "true", children: _jsx("div", { className: "oma-queue-dock__list", "data-composer-queue": "true", role: "list", "aria-label": title, children: prompts.map((prompt, index) => (_jsx(QueueDockRow, { prompt: prompt, index: index, prompts: prompts, callbacks: callbacks, labels: labels, disabled: disabled, draggingId: draggingId, onDragStart: setDraggingId, onDragEnd: () => setDraggingId(null) }, prompt.id))) }) }) })) : null] }));
+    return (_jsxs("div", { className: rootClassName, "data-queue-dock": "true", "data-composer-progress": "true", "data-queue-dock-disabled": disabled ? "true" : undefined, children: [blocked ? (_jsx(QueueDockBlockedLine, { blocked: blocked, count: prompts.length, labels: labels, disabled: disabled })) : null, prompts.length > 0 ? (_jsx("div", { className: "oma-queue-dock__viewport", "data-progress-cap-viewport": "true", children: _jsx("div", { className: "oma-queue-dock__banner", "data-progress-banner": "true", children: groups.map((group) => {
+                        const sectionLabel = group.band === "pending_steer"
+                            ? resolveLabel(labels?.pendingSteersSection, defaultQueueDockLabels.pendingSteersSection, group.prompts.length)
+                            : group.band === "follow_up"
+                                ? resolveLabel(labels?.followUpsSection, defaultQueueDockLabels.followUpsSection, group.prompts.length)
+                                : null;
+                        const listLabel = sectionLabel ?? title;
+                        return (_jsxs("div", { className: [
+                                "oma-queue-dock__section",
+                                group.band
+                                    ? `oma-queue-dock__section--${group.band.replace("_", "-")}`
+                                    : undefined,
+                            ]
+                                .filter(Boolean)
+                                .join(" "), "data-queue-band": group.band ?? undefined, children: [sectionLabel ? (_jsx("div", { className: "oma-queue-dock__section-header", "data-queue-band-header": group.band ?? undefined, role: "presentation", children: sectionLabel })) : null, _jsx("div", { className: "oma-queue-dock__list", "data-composer-queue": "true", role: "list", "aria-label": listLabel, children: group.prompts.map((prompt, index) => (_jsx(QueueDockRow, { prompt: prompt, index: index, prompts: group.prompts, callbacks: callbacks, labels: labels, disabled: disabled, draggingId: draggingId, onDragStart: setDraggingId, onDragEnd: () => setDraggingId(null) }, prompt.id))) })] }, group.band ?? "flat"));
+                    }) }) })) : null] }));
 }
 function QueueDockBlockedLine({ blocked, count, labels, disabled, }) {
     const [pending, setPending] = useState(false);
@@ -209,9 +244,14 @@ function QueueDockRow({ prompt, index, prompts, callbacks, labels, disabled, dra
             "oma-queue-dock__row",
             editing ? "oma-queue-dock__row--editing" : undefined,
             pending ? "oma-queue-dock__row--pending" : undefined,
+            prompt.band === "pending_steer"
+                ? "oma-queue-dock__row--pending-steer"
+                : prompt.band === "follow_up"
+                    ? "oma-queue-dock__row--follow-up"
+                    : undefined,
         ]
             .filter(Boolean)
-            .join(" "), "data-queued-prompt-id": prompt.id, "data-queued-turn-id": prompt.id, "data-queue-dragging": draggingId === prompt.id ? "true" : undefined, "data-queue-row-disabled": disabled ? "true" : undefined, role: "listitem", "aria-busy": pending || prompt.busy || undefined, draggable: canReorder, onDragStart: handleDragStart, onDragOver: handleDragOver, onDrop: handleDrop, onDragEnd: onDragEnd, children: [reorder ? (_jsx("span", { className: "oma-queue-dock__drag", "data-queue-leading-icon": "drag", role: "img", "aria-label": resolveLabel(labels?.dragHandle, defaultQueueDockLabels.dragHandle, index), title: resolveLabel(labels?.dragHandle, defaultQueueDockLabels.dragHandle, index), children: _jsx(GripVerticalIcon, { className: "oma-queue-dock__icon lucide-grip-vertical" }) })) : null, editing ? (_jsxs("form", { className: "oma-queue-dock__edit", onSubmit: (event) => {
+            .join(" "), "data-queued-prompt-id": prompt.id, "data-queued-turn-id": prompt.id, "data-queue-band": prompt.band, "data-queue-dragging": draggingId === prompt.id ? "true" : undefined, "data-queue-row-disabled": disabled ? "true" : undefined, role: "listitem", "aria-busy": pending || prompt.busy || undefined, draggable: canReorder, onDragStart: handleDragStart, onDragOver: handleDragOver, onDrop: handleDrop, onDragEnd: onDragEnd, children: [reorder ? (_jsx("span", { className: "oma-queue-dock__drag", "data-queue-leading-icon": "drag", role: "img", "aria-label": resolveLabel(labels?.dragHandle, defaultQueueDockLabels.dragHandle, index), title: resolveLabel(labels?.dragHandle, defaultQueueDockLabels.dragHandle, index), children: _jsx(GripVerticalIcon, { className: "oma-queue-dock__icon lucide-grip-vertical" }) })) : null, editing ? (_jsxs("form", { className: "oma-queue-dock__edit", onSubmit: (event) => {
                     void save(event);
                 }, children: [_jsx("textarea", { autoFocus: true, rows: 1, value: draft, disabled: disabled || pending, "aria-label": resolveLabel(labels?.prompt, defaultQueueDockLabels.prompt, index), className: "oma-queue-dock__textarea", onChange: (event) => setDraft(event.target.value), onKeyDown: (event) => {
                             if (event.key === "Enter" && !event.shiftKey) {

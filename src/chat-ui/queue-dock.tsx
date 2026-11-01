@@ -13,6 +13,10 @@ import {
  * The field names intentionally match Backchat's queue model where possible;
  * `createdAt` is optional because a host may not expose a timestamp.
  */
+/** Codex-like dock band. Pending steers join the running turn; follow-ups
+ * wait for the next idle turn. Hosts that omit `band` keep a flat list. */
+export type QueueDockBand = "pending_steer" | "follow_up";
+
 export interface QueuedPrompt {
   id: string;
   text: string;
@@ -20,6 +24,8 @@ export interface QueuedPrompt {
   /** Host-side work in flight for this row (sending, removing, steering):
    * its controls are disabled and it is marked aria-busy. */
   busy?: boolean;
+  /** When set on any row, the dock groups into Codex-like section bands. */
+  band?: QueueDockBand;
 }
 
 /** Optional host actions. A control is rendered only when its callback exists. */
@@ -60,6 +66,10 @@ export interface QueueDockLabels {
   blockedOn?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
   /** Visible label and accessible name for the interrupt button. */
   interrupt?: QueueDockLabelResolver<[blocked: QueueDockBlocked]>;
+  /** Section header for pending mid-turn steers (Codex pending-steer band). */
+  pendingSteersSection?: QueueDockLabelResolver<[count: number]>;
+  /** Section header for next-turn follow-ups. */
+  followUpsSection?: QueueDockLabelResolver<[count: number]>;
 }
 
 /**
@@ -94,6 +104,12 @@ export const defaultQueueDockLabels = {
       ? `${count} queued · waiting on tool ${toolNames.join(", ")}`
       : `${count} queued · waiting on tool`,
   interrupt: "Interrupt",
+  pendingSteersSection: (count) =>
+    count === 1
+      ? "1 message joins this turn at the next model step"
+      : `${count} messages join this turn at the next model step`,
+  followUpsSection: (count) =>
+    count === 1 ? "1 queued follow-up" : `${count} queued follow-ups`,
 } satisfies Required<QueueDockLabels>;
 
 function resolveLabel<TArgs extends readonly unknown[]>(
@@ -130,6 +146,25 @@ function asPromise(action: () => void | Promise<void>): Promise<void> {
  * Host-agnostic queued-prompt dock. It owns presentation and interaction
  * state only; every side effect is supplied by the host through callbacks.
  */
+function groupQueuePrompts(prompts: QueuedPrompt[]): Array<{
+  band: QueueDockBand | null;
+  prompts: QueuedPrompt[];
+}> {
+  const usesBands = prompts.some((prompt) => prompt.band != null);
+  if (!usesBands) return [{ band: null, prompts }];
+
+  const pending = prompts.filter((prompt) => prompt.band === "pending_steer");
+  const followUps = prompts.filter((prompt) => prompt.band !== "pending_steer");
+  const groups: Array<{ band: QueueDockBand | null; prompts: QueuedPrompt[] }> = [];
+  if (pending.length > 0) {
+    groups.push({ band: "pending_steer", prompts: pending });
+  }
+  if (followUps.length > 0) {
+    groups.push({ band: "follow_up", prompts: followUps });
+  }
+  return groups;
+}
+
 export function QueueDock({
   prompts,
   callbacks,
@@ -147,6 +182,7 @@ export function QueueDock({
     defaultQueueDockLabels.title,
     prompts.length,
   );
+  const groups = groupQueuePrompts(prompts);
   const rootClassName = [
     "oma-queue-dock",
     disabled ? "oma-queue-dock--disabled" : undefined,
@@ -179,27 +215,68 @@ export function QueueDock({
             className="oma-queue-dock__banner"
             data-progress-banner="true"
           >
-            <div
-              className="oma-queue-dock__list"
-              data-composer-queue="true"
-              role="list"
-              aria-label={title}
-            >
-              {prompts.map((prompt, index) => (
-                <QueueDockRow
-                  key={prompt.id}
-                  prompt={prompt}
-                  index={index}
-                  prompts={prompts}
-                  callbacks={callbacks}
-                  labels={labels}
-                  disabled={disabled}
-                  draggingId={draggingId}
-                  onDragStart={setDraggingId}
-                  onDragEnd={() => setDraggingId(null)}
-                />
-              ))}
-            </div>
+            {groups.map((group) => {
+              const sectionLabel =
+                group.band === "pending_steer"
+                  ? resolveLabel(
+                      labels?.pendingSteersSection,
+                      defaultQueueDockLabels.pendingSteersSection,
+                      group.prompts.length,
+                    )
+                  : group.band === "follow_up"
+                    ? resolveLabel(
+                        labels?.followUpsSection,
+                        defaultQueueDockLabels.followUpsSection,
+                        group.prompts.length,
+                      )
+                    : null;
+              const listLabel = sectionLabel ?? title;
+              return (
+                <div
+                  key={group.band ?? "flat"}
+                  className={[
+                    "oma-queue-dock__section",
+                    group.band
+                      ? `oma-queue-dock__section--${group.band.replace("_", "-")}`
+                      : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-queue-band={group.band ?? undefined}
+                >
+                  {sectionLabel ? (
+                    <div
+                      className="oma-queue-dock__section-header"
+                      data-queue-band-header={group.band ?? undefined}
+                      role="presentation"
+                    >
+                      {sectionLabel}
+                    </div>
+                  ) : null}
+                  <div
+                    className="oma-queue-dock__list"
+                    data-composer-queue="true"
+                    role="list"
+                    aria-label={listLabel}
+                  >
+                    {group.prompts.map((prompt, index) => (
+                      <QueueDockRow
+                        key={prompt.id}
+                        prompt={prompt}
+                        index={index}
+                        prompts={group.prompts}
+                        callbacks={callbacks}
+                        labels={labels}
+                        disabled={disabled}
+                        draggingId={draggingId}
+                        onDragStart={setDraggingId}
+                        onDragEnd={() => setDraggingId(null)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -432,11 +509,17 @@ function QueueDockRow({
         "oma-queue-dock__row",
         editing ? "oma-queue-dock__row--editing" : undefined,
         pending ? "oma-queue-dock__row--pending" : undefined,
+        prompt.band === "pending_steer"
+          ? "oma-queue-dock__row--pending-steer"
+          : prompt.band === "follow_up"
+            ? "oma-queue-dock__row--follow-up"
+            : undefined,
       ]
         .filter(Boolean)
         .join(" ")}
       data-queued-prompt-id={prompt.id}
       data-queued-turn-id={prompt.id}
+      data-queue-band={prompt.band}
       data-queue-dragging={draggingId === prompt.id ? "true" : undefined}
       data-queue-row-disabled={disabled ? "true" : undefined}
       role="listitem"

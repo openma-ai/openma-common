@@ -3,6 +3,9 @@
  * The field names intentionally match Backchat's queue model where possible;
  * `createdAt` is optional because a host may not expose a timestamp.
  */
+/** Codex-like dock band. Pending steers join the running turn; follow-ups
+ * wait for the next idle turn. Hosts that omit `band` keep a flat list. */
+export type QueueDockBand = "pending_steer" | "follow_up";
 export interface QueuedPrompt {
     id: string;
     text: string;
@@ -10,6 +13,8 @@ export interface QueuedPrompt {
     /** Host-side work in flight for this row (sending, removing, steering):
      * its controls are disabled and it is marked aria-busy. */
     busy?: boolean;
+    /** When set on any row, the dock groups into Codex-like section bands. */
+    band?: QueueDockBand;
 }
 /** Optional host actions. A control is rendered only when its callback exists. */
 export interface QueueDockCallbacks {
@@ -45,6 +50,10 @@ export interface QueueDockLabels {
     blockedOn?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
     /** Visible label and accessible name for the interrupt button. */
     interrupt?: QueueDockLabelResolver<[blocked: QueueDockBlocked]>;
+    /** Section header for pending mid-turn steers (Codex pending-steer band). */
+    pendingSteersSection?: QueueDockLabelResolver<[count: number]>;
+    /** Section header for next-turn follow-ups. */
+    followUpsSection?: QueueDockLabelResolver<[count: number]>;
 }
 /**
  * The host is paused on a tool call. The queue can still be rendered, but the
@@ -71,6 +80,8 @@ export declare const defaultQueueDockLabels: {
     blocked: (count: number, toolNames: string[]) => string;
     blockedOn: (count: number, toolNames: string[]) => string;
     interrupt: string;
+    pendingSteersSection: (count: number) => string;
+    followUpsSection: (count: number) => string;
 };
 export interface QueueDockProps {
     prompts: QueuedPrompt[];
@@ -80,9 +91,5 @@ export interface QueueDockProps {
     className?: string;
     disabled?: boolean;
 }
-/**
- * Host-agnostic queued-prompt dock. It owns presentation and interaction
- * state only; every side effect is supplied by the host through callbacks.
- */
 export declare function QueueDock({ prompts, callbacks, labels, blocked, className, disabled, }: QueueDockProps): import("react").JSX.Element | null;
 //# sourceMappingURL=queue-dock.d.ts.map

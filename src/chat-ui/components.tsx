@@ -693,6 +693,8 @@ export interface AgentUITurnLabels {
   thoughtFor?: (seconds: number) => ReactNode;
   toolActivity: (tool: AgentUIToolItem) => ReactNode;
   toolRunSummary: (tools: readonly AgentUIToolItem[]) => ReactNode;
+  /** Caption on mid-turn steered user_input rows. */
+  steeredIntoTurn?: ReactNode;
 }
 
 export interface AgentUITurnRenderContext {
@@ -1275,9 +1277,22 @@ export function AgentUITurnView({
               live: isStreaming && item === finalItem,
             }) ?? (
               <div
-                className="ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted"
+                className={[
+                  "oma-chat-user-input",
+                  "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted",
+                  item.steered ? "oma-chat-user-input--steered" : undefined,
+                ].filter(Boolean).join(" ")}
+                data-steered={item.steered ? "true" : undefined}
                 style={{ maxWidth: "var(--chat-user-message-max-width, 88%)" }}
               >
+                {item.steered ? (
+                  <div
+                    className="oma-chat-user-input__steered-caption"
+                    data-steered-caption="true"
+                  >
+                    {labels.steeredIntoTurn ?? "Steered into this turn"}
+                  </div>
+                ) : null}
                 {item.text}
               </div>
             )}
