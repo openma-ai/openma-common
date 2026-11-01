@@ -135,8 +135,6 @@ export type TimelineItem = {
     attachments?: unknown[];
     annotations?: unknown[];
     startedAt?: string;
-    /** Mid-turn steer folded into this turn; display order unchanged. */
-    steered?: true;
 };
 export interface TurnRender {
     thoughtText: string;
@@ -185,7 +183,6 @@ export type ParsedAcpEvent = {
     attachments?: unknown[];
     annotations?: unknown[];
     startedAt?: string;
-    steered?: true;
     event: unknown;
 } | {
     kind: "notice";

@@ -112,8 +112,6 @@ export interface AgentUITurnLabels {
     thoughtFor?: (seconds: number) => ReactNode;
     toolActivity: (tool: AgentUIToolItem) => ReactNode;
     toolRunSummary: (tools: readonly AgentUIToolItem[]) => ReactNode;
-    /** Caption on mid-turn steered user_input rows. */
-    steeredIntoTurn?: ReactNode;
 }
 export interface AgentUITurnRenderContext {
     turn: AgentUITurnState;

@@ -78,11 +78,7 @@ describe("projectCanonicalChat applies queue lifecycle", () => {
     expect(projection.turns).toHaveLength(1);
     expect(projection.turns[0]!.userText).toBe("write a long answer");
     expect(projection.turns[0]!.render.timeline).toContainEqual(
-      expect.objectContaining({
-        kind: "user_input",
-        text: "make it shorter",
-        steered: true,
-      }),
+      expect.objectContaining({ kind: "user_input", text: "make it shorter" }),
     );
   });
 });

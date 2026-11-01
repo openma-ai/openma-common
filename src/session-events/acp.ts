@@ -160,8 +160,6 @@ export type TimelineItem =
       attachments?: unknown[];
       annotations?: unknown[];
       startedAt?: string;
-      /** Mid-turn steer folded into this turn; display order unchanged. */
-      steered?: true;
     };
 
 export interface TurnRender {
@@ -241,7 +239,6 @@ export type ParsedAcpEvent =
       attachments?: unknown[];
       annotations?: unknown[];
       startedAt?: string;
-      steered?: true;
       event: unknown;
     }
   | { kind: "notice"; notice: string; event: unknown }
@@ -563,7 +560,6 @@ export function parseAcpEvent(event: unknown): ParsedAcpEvent {
     return {
       kind: "user_input",
       text,
-      steered: true,
       ...(clientId ? { clientId } : {}),
       ...(Array.isArray(canonicalData.attachments) ? { attachments: canonicalData.attachments } : {}),
       ...(Array.isArray(canonicalData.annotations) ? { annotations: canonicalData.annotations } : {}),
@@ -1194,7 +1190,6 @@ export function createTurnProjector(): {
           ...(parsed.attachments ? { attachments: parsed.attachments } : {}),
           ...(parsed.annotations ? { annotations: parsed.annotations } : {}),
           ...(parsed.startedAt ? { startedAt: parsed.startedAt } : {}),
-          ...(parsed.steered ? { steered: true } : {}),
         });
         break;
       case "thought":

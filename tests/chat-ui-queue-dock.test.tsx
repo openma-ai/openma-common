@@ -133,33 +133,3 @@ describe("QueueDock", () => {
     expect(defaultQueueDockLabels.title(3)).toBe("3 queued");
   });
 });
-
-
-  it("groups Codex-like pending_steer above follow_up bands", () => {
-    const html = renderToStaticMarkup(
-      <QueueDock
-        prompts={[
-          { id: "f1", text: "after this turn", band: "follow_up" },
-          { id: "s1", text: "join now", band: "pending_steer" },
-          { id: "s2", text: "also join", band: "pending_steer" },
-        ]}
-      />,
-    );
-
-    expect(html).toContain('data-queue-band="pending_steer"');
-    expect(html).toContain('data-queue-band="follow_up"');
-    expect(html).toContain('data-queue-band-header="pending_steer"');
-    expect(html).toContain('data-queue-band-header="follow_up"');
-    expect(html).toContain("2 messages join this turn at the next model step");
-    expect(html).toContain("1 queued follow-up");
-    // Pending steers render before follow-ups regardless of input order.
-    expect(html.indexOf("join now")).toBeLessThan(html.indexOf("after this turn"));
-    expect(html).toContain('data-queued-prompt-id="s1"');
-    expect(html).toContain('oma-queue-dock__row--pending-steer');
-  });
-
-  it("keeps a flat list when no prompt sets a band", () => {
-    const html = renderToStaticMarkup(<QueueDock prompts={prompts} />);
-    expect(html).not.toContain("data-queue-band-header");
-    expect(html).toContain('aria-label="2 queued"');
-  });

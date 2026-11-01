@@ -797,7 +797,7 @@ export function projectCanonicalChat(
     for (const item of turn.items) {
       if (item.kind === "message") {
         if (item.role === "user") {
-          if (item.steered) render.timeline.push({ kind: "user_input", text: item.text, clientId: item.id, steered: true });
+          if (item.steered) render.timeline.push({ kind: "user_input", text: item.text, clientId: item.id });
           else userParts.push(item.text);
           continue;
         }

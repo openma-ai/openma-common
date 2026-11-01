@@ -470,11 +470,7 @@ export function AgentUITurnView({ sessionId, turn, thoughts, labels, slots, clas
                             ...renderContext,
                             item,
                             live: isStreaming && item === finalItem,
-                        }) ?? (_jsxs("div", { className: [
-                                "oma-chat-user-input",
-                                "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted",
-                                item.steered ? "oma-chat-user-input--steered" : undefined,
-                            ].filter(Boolean).join(" "), "data-steered": item.steered ? "true" : undefined, style: { maxWidth: "var(--chat-user-message-max-width, 88%)" }, children: [item.steered ? (_jsx("div", { className: "oma-chat-user-input__steered-caption", "data-steered-caption": "true", children: labels.steeredIntoTurn ?? "Steered into this turn" })) : null, item.text] })) }, item.id)) });
+                        }) ?? (_jsx("div", { className: "ml-auto w-fit max-w-full whitespace-pre-wrap break-words rounded-lg bg-bg-surface/60 px-3 py-2 text-sm text-fg-muted", style: { maxWidth: "var(--chat-user-message-max-width, 88%)" }, children: item.text })) }, item.id)) });
                 continue;
             }
             const group = activityGroups.get(index);
