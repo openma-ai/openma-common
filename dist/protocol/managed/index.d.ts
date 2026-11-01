@@ -34,9 +34,13 @@ export interface ManagedEventEncodeResult {
  *
  * Success (HTTP 200): `{ cancelled: true, id, cancelled_at }`
  * Too late (HTTP 409): `{ cancelled: false, reason, id, processed_at? }`
- *   reason ∈ already_processing | already_cancelled | already_completed | not_found
+ *   reason ∈ already_processing | already_cancelled | already_completed |
+ *            held_after_exhausted | not_found
+ *   `held_after_exhausted`: the row is retained after
+ *   `stop_reason: retries_exhausted` and cannot be withdrawn (it advances with
+ *   the next round of events).
  */
-export type OmaQueueCancelReason = "already_processing" | "already_cancelled" | "already_completed" | "not_found";
+export type OmaQueueCancelReason = "already_processing" | "already_cancelled" | "already_completed" | "held_after_exhausted" | "not_found";
 export type OmaQueueCancelResponse = {
     cancelled: true;
     id: string;
@@ -47,6 +51,31 @@ export type OmaQueueCancelResponse = {
     id: string;
     processed_at?: string;
 };
+/**
+ * Classify a rejected `POST /v1/sessions/:id/events` response. Official CMA:
+ * while idle with `stop_reason: requires_action` (or `budget_reached`) only
+ * settle events are accepted and a `user.message` is a **400**
+ * `invalid_request_error`. Hosts must surface this as an error — never
+ * silently keep the message as queued.
+ */
+export interface ManagedSendRejection {
+    status: number;
+    type: string;
+    message: string;
+    /** True for the settle-only gate (requires_action / budget_reached). */
+    settleOnly: boolean;
+}
+/**
+ * Thrown by a host transport when the CMA-style API rejects a send. When
+ * `rejection.settleOnly` (user.message during requires_action), chat-ui does
+ * not leave the prompt queued and marks the error `retainComposer` so the host
+ * keeps the user's text in the composer for a resend after the action settles.
+ */
+export declare class ManagedSendRejectionError extends Error {
+    readonly rejection: ManagedSendRejection;
+    constructor(rejection: ManagedSendRejection);
+}
+export declare function managedSendRejection(status: number, body: unknown): ManagedSendRejection | null;
 /** Encode a cancel outcome for the DELETE pending response body. */
 export declare function encodeOmaQueueCancelResponse(input: {
     cancelled: true;

@@ -112,8 +112,37 @@ const OMA_QUEUE_CANCEL_REASONS = new Set([
     "already_processing",
     "already_cancelled",
     "already_completed",
+    "held_after_exhausted",
     "not_found",
 ]);
+/**
+ * Thrown by a host transport when the CMA-style API rejects a send. When
+ * `rejection.settleOnly` (user.message during requires_action), chat-ui does
+ * not leave the prompt queued and marks the error `retainComposer` so the host
+ * keeps the user's text in the composer for a resend after the action settles.
+ */
+export class ManagedSendRejectionError extends Error {
+    rejection;
+    constructor(rejection) {
+        super(rejection.message);
+        this.name = "ManagedSendRejectionError";
+        this.rejection = rejection;
+    }
+}
+export function managedSendRejection(status, body) {
+    if (status < 400)
+        return null;
+    const error = body && typeof body === "object"
+        ? body.error
+        : undefined;
+    const type = typeof error?.type === "string" ? error.type : "api_error";
+    const message = typeof error?.message === "string" && error.message.length > 0
+        ? error.message
+        : `Request failed (${status})`;
+    const settleOnly = status === 400 && type === "invalid_request_error"
+        && /settle|requires_action|budget_reached/i.test(message);
+    return { status, type, message, settleOnly };
+}
 /** Encode a cancel outcome for the DELETE pending response body. */
 export function encodeOmaQueueCancelResponse(input) {
     if (input.cancelled) {

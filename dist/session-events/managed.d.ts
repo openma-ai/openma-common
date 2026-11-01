@@ -68,6 +68,11 @@ export type NormalizedSessionEvent = {
     tone: "warning" | "error";
     message: string;
     source?: string;
+    /** Official CMA `session.error.error.retry_status`. `retrying` is a
+     * transient warning (the turn continues); `exhausted` ends the turn
+     * (idle `retries_exhausted` follows); `terminal` precedes
+     * `session.status_terminated`. */
+    retryStatus?: "retrying" | "exhausted" | "terminal";
     raw: WireSessionEvent;
 } | {
     kind: "turn_running";
@@ -112,6 +117,7 @@ export type ConversationItem = {
     tone: "warning" | "error";
     message: string;
     source?: string;
+    retryStatus?: "retrying" | "exhausted" | "terminal";
     cause?: {
         error: string;
         model?: string;
@@ -175,6 +181,11 @@ export interface QueuedUserMessage {
      * server stamped it (legacy accept-time stamping) but it arrived while the
      * current turn was still running, so it waits for that turn to end. */
     reason: "pending" | "deferred";
+    /** Still queued after the session went idle with
+     * `stop_reason: retries_exhausted`: retained server-side (not flushed) and
+     * advances with the next round of events. Not withdrawable — hosts must not
+     * offer edit/remove for it. */
+    retained?: true;
     raw: WireSessionEvent;
 }
 export interface ConversationProjectionOptions {

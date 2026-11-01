@@ -199,14 +199,29 @@ export function normalizeSessionEvent(event) {
                 source: stringField(event, "source"),
                 raw: event,
             };
-        case "session.error":
+        case "session.error": {
+            // Official CMA: `error` is structured `{ type, message, retry_status }`.
+            // Legacy/OpenMA shapes carry a string `error` / `message` / `data`.
+            const data = openmaData(event);
+            const structured = (event.error && typeof event.error === "object" ? event.error
+                : data.error && typeof data.error === "object" ? data.error : undefined);
+            const rawRetry = structured?.retry_status ?? data.retry_status ?? event.retry_status;
+            const retryStatus = rawRetry === "retrying" || rawRetry === "exhausted" || rawRetry === "terminal"
+                ? rawRetry : undefined;
+            const message = (typeof structured?.message === "string" && structured.message.length > 0
+                ? structured.message : undefined)
+                ?? stringField(event, "error", "message")
+                ?? (typeof data.message === "string" && data.message.length > 0 ? data.message : undefined)
+                ?? "Session error";
             return {
                 kind: "notice",
-                tone: "error",
-                message: stringField(event, "error", "message") ?? "Session error",
+                tone: retryStatus === "retrying" ? "warning" : "error",
+                message,
                 source: stringField(event, "source"),
+                ...(retryStatus ? { retryStatus } : {}),
                 raw: event,
             };
+        }
         case "session.status_running":
         case "session.running":
             return { kind: "turn_running", raw: event };
@@ -382,6 +397,7 @@ export function projectConversation(events, options = {}) {
     let pendingModelError = null;
     let lastEnded;
     let sessionState = "unknown";
+    let lastIdleStopReason;
     const ensureTurn = (event) => {
         // An event that arrives after its turn ended (late tool result,
         // synthetic interrupted result, trailing message) belongs to that turn;
@@ -497,6 +513,7 @@ export function projectConversation(events, options = {}) {
                     message: normalized.message,
                     source: normalized.source,
                     ...(normalized.tone === "error" && pendingModelError ? { cause: pendingModelError } : {}),
+                    ...(normalized.retryStatus ? { retryStatus: normalized.retryStatus } : {}),
                     raw: event,
                 });
                 if (normalized.tone === "error") {
@@ -506,6 +523,7 @@ export function projectConversation(events, options = {}) {
                 break;
             case "turn_running":
                 sessionState = "running";
+                lastIdleStopReason = undefined;
                 if (turn === current && turn.status === "awaiting") {
                     turn.status = "running";
                     delete turn.awaitingToolCallIds;
@@ -514,6 +532,7 @@ export function projectConversation(events, options = {}) {
             case "turn_complete": {
                 if (normalized.stopReason)
                     turn.stopReason = normalized.stopReason;
+                lastIdleStopReason = normalized.stopReason;
                 if (normalized.stopReason === "requires_action") {
                     sessionState = "requires_action";
                     // Official semantics: the turn is parked, not finished. It
@@ -556,8 +575,11 @@ export function projectConversation(events, options = {}) {
         turns.splice(turns.indexOf(flushedTurn.turn), 1);
         queuedDeferred.unshift({ order: flushedTurn.order, event: flushedTurn.event, normalized: flushedTurn.normalized });
     }
+    const retainedAfterExhausted = lastIdleStopReason === "retries_exhausted" && sessionState === "idle";
     const queued = [
-        ...pending,
+        ...pending.map((entry) => retainedAfterExhausted
+            ? { ...entry, message: { ...entry.message, retained: true } }
+            : entry),
         ...queuedDeferred.map(({ order, event, normalized }) => ({
             order,
             message: { id: normalized.id, text: normalized.text, reason: "deferred", raw: event },

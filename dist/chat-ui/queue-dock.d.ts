@@ -7,16 +7,19 @@ export interface QueuedPrompt {
     id: string;
     text: string;
     createdAt?: number;
-    /** Host-side work in flight for this row (sending, removing, steering):
+    /** Host-side work in flight for this row (sending, removing):
      * its controls are disabled and it is marked aria-busy. */
     busy?: boolean;
+    /** Retained after `stop_reason: retries_exhausted` (OMA owner lock): the
+     * row advances with the next round of events and cannot be withdrawn, so
+     * edit / remove / reorder controls are not rendered for it. */
+    retained?: boolean;
 }
 /** Optional host actions. A control is rendered only when its callback exists. */
 export interface QueueDockCallbacks {
     update?(id: string, text: string): void | Promise<void>;
     remove?(id: string): void | Promise<void>;
     reorder?(ids: string[]): void | Promise<void>;
-    steer?(id: string): void | Promise<void>;
 }
 export type QueueDockLabelResolver<TArgs extends readonly unknown[] = []> = string | ((...args: TArgs) => string);
 /**
@@ -36,10 +39,6 @@ export interface QueueDockLabels {
     moveUp?: QueueDockLabelResolver<[index: number]>;
     moveDown?: QueueDockLabelResolver<[index: number]>;
     dragHandle?: QueueDockLabelResolver<[index: number]>;
-    /** Visible steer action, shown on the row. */
-    steer?: QueueDockLabelResolver<[index: number]>;
-    /** Accessible name for the steer action. */
-    steerQueued?: QueueDockLabelResolver<[index: number]>;
     /** Text for the blocked header. `blockedOn` is accepted as an alias. */
     blocked?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
     blockedOn?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
@@ -66,8 +65,6 @@ export declare const defaultQueueDockLabels: {
     moveUp: (index: number) => string;
     moveDown: (index: number) => string;
     dragHandle: (index: number) => string;
-    steer: string;
-    steerQueued: (index: number) => string;
     blocked: (count: number, toolNames: string[]) => string;
     blockedOn: (count: number, toolNames: string[]) => string;
     interrupt: string;
