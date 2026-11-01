@@ -176,6 +176,24 @@ export function createAgentChatController<
         return;
       }
       const nextError = reason instanceof Error ? reason : new Error(String(reason));
+      const settleOnly = (nextError as { rejection?: { settleOnly?: unknown } }).rejection?.settleOnly === true;
+      if (settleOnly) {
+        // Official CMA: user.message during requires_action is a 400. The
+        // prompt was not accepted: never leave it queued. Fail the optimistic
+        // turn and flag the error so the host keeps the text in the composer.
+        Object.assign(nextError, { retainComposer: true, prompt });
+        store.dispatch(
+          createOpenMAEvent({
+            event_id: `${turnId}:rejected`,
+            type: "turn.failed",
+            session_id: id,
+            turn_id: turnId,
+            source: { kind: "openma" },
+            occurred_at: now().toISOString(),
+            data: { error: nextError.message, reason: "settle_only" },
+          }),
+        );
+      }
       setError(nextError);
       store.dispatch(
         createOpenMAEvent({

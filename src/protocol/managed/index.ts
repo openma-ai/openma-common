@@ -234,6 +234,21 @@ export interface ManagedSendRejection {
   settleOnly: boolean;
 }
 
+/**
+ * Thrown by a host transport when the CMA-style API rejects a send. When
+ * `rejection.settleOnly` (user.message during requires_action), chat-ui does
+ * not leave the prompt queued and marks the error `retainComposer` so the host
+ * keeps the user's text in the composer for a resend after the action settles.
+ */
+export class ManagedSendRejectionError extends Error {
+  readonly rejection: ManagedSendRejection;
+  constructor(rejection: ManagedSendRejection) {
+    super(rejection.message);
+    this.name = "ManagedSendRejectionError";
+    this.rejection = rejection;
+  }
+}
+
 export function managedSendRejection(status: number, body: unknown): ManagedSendRejection | null {
   if (status < 400) return null;
   const error = body && typeof body === "object"

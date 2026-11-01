@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createAgentChatController } from "../src/chat-ui/controller.js";
 import { createOpenMAEvent } from "../src/session-events/openma.js";
+import { ManagedSendRejectionError, managedSendRejection } from "../src/protocol/managed/index.js";
 
 describe("AgentChatController", () => {
   it("follows the AI SDK shape: optimistic typed parts plus a transport stream", async () => {
@@ -90,5 +91,29 @@ describe("AgentChatController", () => {
     expect("loadHistory" in controller).toBe(false);
     expect("persist" in controller).toBe(false);
     expect(controller.store.getState().turnOrder).toEqual([]);
+  });
+
+  it("settle-only 400 (user.message during requires_action): error surfaced, not queued, composer text retained", async () => {
+    const controller = createAgentChatController({
+      id: "session-1",
+      createTurnId: () => "turn-r",
+      transport: {
+        async sendMessages() {
+          throw new ManagedSendRejectionError(managedSendRejection(400, {
+            type: "error",
+            error: { type: "invalid_request_error", message: "Session is waiting on requires_action; only settle events are accepted" },
+          })!);
+        },
+        async reconnectToStream() { return null; },
+      },
+    });
+    const error = await controller.sendMessage({ text: "hello again" } as never).catch((e: unknown) => e) as Record<string, unknown>;
+    expect(error).toBeInstanceOf(ManagedSendRejectionError);
+    expect(error.retainComposer).toBe(true);
+    expect(error.prompt).toEqual({ text: "hello again" });
+    expect(controller.status).toBe("error");
+    const turn = controller.store.getState().turns["turn-r"] as { status: string } | undefined;
+    expect(turn?.status).toBe("failed");
+    expect(turn?.status).not.toBe("queued");
   });
 });
