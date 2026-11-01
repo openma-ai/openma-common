@@ -189,12 +189,17 @@ function decodeOmaQueueLifecycleFrame(
  *
  * Success (HTTP 200): `{ cancelled: true, id, cancelled_at }`
  * Too late (HTTP 409): `{ cancelled: false, reason, id, processed_at? }`
- *   reason ∈ already_processing | already_cancelled | already_completed | not_found
+ *   reason ∈ already_processing | already_cancelled | already_completed |
+ *            held_after_exhausted | not_found
+ *   `held_after_exhausted`: the row is retained after
+ *   `stop_reason: retries_exhausted` and cannot be withdrawn (it advances with
+ *   the next round of events).
  */
 export type OmaQueueCancelReason =
   | "already_processing"
   | "already_cancelled"
   | "already_completed"
+  | "held_after_exhausted"
   | "not_found";
 
 export type OmaQueueCancelResponse =
@@ -210,8 +215,38 @@ const OMA_QUEUE_CANCEL_REASONS = new Set<OmaQueueCancelReason>([
   "already_processing",
   "already_cancelled",
   "already_completed",
+  "held_after_exhausted",
   "not_found",
 ]);
+
+/**
+ * Classify a rejected `POST /v1/sessions/:id/events` response. Official CMA:
+ * while idle with `stop_reason: requires_action` (or `budget_reached`) only
+ * settle events are accepted and a `user.message` is a **400**
+ * `invalid_request_error`. Hosts must surface this as an error — never
+ * silently keep the message as queued.
+ */
+export interface ManagedSendRejection {
+  status: number;
+  type: string;
+  message: string;
+  /** True for the settle-only gate (requires_action / budget_reached). */
+  settleOnly: boolean;
+}
+
+export function managedSendRejection(status: number, body: unknown): ManagedSendRejection | null {
+  if (status < 400) return null;
+  const error = body && typeof body === "object"
+    ? (body as { error?: { type?: unknown; message?: unknown } }).error
+    : undefined;
+  const type = typeof error?.type === "string" ? error.type : "api_error";
+  const message = typeof error?.message === "string" && error.message.length > 0
+    ? error.message
+    : `Request failed (${status})`;
+  const settleOnly = status === 400 && type === "invalid_request_error"
+    && /settle|requires_action|budget_reached/i.test(message);
+  return { status, type, message, settleOnly };
+}
 
 /** Encode a cancel outcome for the DELETE pending response body. */
 export function encodeOmaQueueCancelResponse(

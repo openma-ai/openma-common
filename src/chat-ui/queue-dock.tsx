@@ -17,9 +17,13 @@ export interface QueuedPrompt {
   id: string;
   text: string;
   createdAt?: number;
-  /** Host-side work in flight for this row (sending, removing, steering):
+  /** Host-side work in flight for this row (sending, removing):
    * its controls are disabled and it is marked aria-busy. */
   busy?: boolean;
+  /** Retained after `stop_reason: retries_exhausted` (OMA owner lock): the
+   * row advances with the next round of events and cannot be withdrawn, so
+   * edit / remove / reorder controls are not rendered for it. */
+  retained?: boolean;
 }
 
 /** Optional host actions. A control is rendered only when its callback exists. */
@@ -27,7 +31,6 @@ export interface QueueDockCallbacks {
   update?(id: string, text: string): void | Promise<void>;
   remove?(id: string): void | Promise<void>;
   reorder?(ids: string[]): void | Promise<void>;
-  steer?(id: string): void | Promise<void>;
 }
 
 export type QueueDockLabelResolver<TArgs extends readonly unknown[] = []> =
@@ -51,10 +54,6 @@ export interface QueueDockLabels {
   moveUp?: QueueDockLabelResolver<[index: number]>;
   moveDown?: QueueDockLabelResolver<[index: number]>;
   dragHandle?: QueueDockLabelResolver<[index: number]>;
-  /** Visible steer action, shown on the row. */
-  steer?: QueueDockLabelResolver<[index: number]>;
-  /** Accessible name for the steer action. */
-  steerQueued?: QueueDockLabelResolver<[index: number]>;
   /** Text for the blocked header. `blockedOn` is accepted as an alias. */
   blocked?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
   blockedOn?: QueueDockLabelResolver<[count: number, toolNames: string[]]>;
@@ -83,8 +82,6 @@ export const defaultQueueDockLabels = {
   moveUp: (index) => `Move queued message ${index + 1} up`,
   moveDown: (index) => `Move queued message ${index + 1} down`,
   dragHandle: (index) => `Drag queued message ${index + 1}`,
-  steer: "Send now",
-  steerQueued: (index) => `Steer queued message ${index + 1}`,
   blocked: (count, toolNames) =>
     toolNames.length > 0
       ? `${count} queued · waiting on tool ${toolNames.join(", ")}`
@@ -303,31 +300,11 @@ function QueueDockRow({
   }, [editing, prompt.text]);
 
   const controlsDisabled = disabled || pending || prompt.busy === true;
-  const reorder = callbacks?.reorder;
+  const retained = prompt.retained === true;
+  const reorder = retained ? undefined : callbacks?.reorder;
   const canReorder = Boolean(reorder) && !controlsDisabled && !editing;
   const isFirst = index === 0;
   const isLast = index === prompts.length - 1;
-  const steerText = resolveLabel(
-    labels?.steer,
-    defaultQueueDockLabels.steer,
-    index,
-  );
-  // A host that overrides only the visible steer label still gets a matching
-  // accessible name; the default keeps Backchat's "Steer queued message N".
-  const steerAria = labels?.steerQueued
-    ? resolveLabel(
-        labels.steerQueued,
-        defaultQueueDockLabels.steerQueued,
-        index,
-      )
-    : labels?.steer
-      ? `${steerText} ${index + 1}`
-      : resolveLabel(
-          undefined,
-          defaultQueueDockLabels.steerQueued,
-          index,
-        );
-
   const run = async (action: () => void | Promise<void>) => {
     if (pending) return;
     setPending(true);
@@ -383,11 +360,6 @@ function QueueDockRow({
   const remove = () => {
     if (!callbacks?.remove || controlsDisabled) return;
     void run(() => callbacks.remove?.(prompt.id) ?? undefined);
-  };
-
-  const steer = () => {
-    if (!callbacks?.steer || controlsDisabled) return;
-    void run(() => callbacks.steer?.(prompt.id) ?? undefined);
   };
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>) => {
@@ -562,21 +534,7 @@ function QueueDockRow({
               </button>
             </>
           ) : null}
-          {callbacks?.steer ? (
-            <button
-              type="button"
-              className="oma-queue-dock__button oma-queue-dock__button--steer"
-              data-queue-steer="true"
-              disabled={controlsDisabled}
-              aria-label={steerAria}
-              title={steerAria}
-              onClick={steer}
-            >
-              <SendHorizontalIcon className="oma-queue-dock__icon lucide-send-horizontal" />
-              <span>{steerText}</span>
-            </button>
-          ) : null}
-          {callbacks?.update ? (
+          {callbacks?.update && !retained ? (
             <button
               type="button"
               className="oma-queue-dock__button oma-queue-dock__button--icon"
@@ -596,7 +554,7 @@ function QueueDockRow({
               <PencilIcon className="oma-queue-dock__icon lucide-pencil" />
             </button>
           ) : null}
-          {callbacks?.remove ? (
+          {callbacks?.remove && !retained ? (
             <button
               type="button"
               className="oma-queue-dock__button oma-queue-dock__button--icon oma-queue-dock__button--danger"
@@ -683,25 +641,6 @@ function ArrowDownIcon({ className }: IconProps) {
     >
       <path d="M12 5v14" />
       <path d="m19 12-7 7-7-7" />
-    </svg>
-  );
-}
-
-function SendHorizontalIcon({ className }: IconProps) {
-  return (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="M3.714 3.048a.498.498 0 0 0-.683.627l2.843 7.627a2 2 0 0 1 0 1.396l-2.842 7.627a.498.498 0 0 0 .682.627l18-8.5a.5.5 0 0 0 0-.904z" />
-      <path d="M6 12h16" />
     </svg>
   );
 }

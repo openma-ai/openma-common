@@ -34,7 +34,18 @@ export type NormalizedSessionEvent =
   | { kind: "tool_input_start"; toolId: string; name: string; raw: WireSessionEvent }
   | { kind: "tool_use"; tool: CanonicalTool; raw: WireSessionEvent }
   | { kind: "tool_result"; toolId: string; output: unknown; isError: boolean; raw: WireSessionEvent }
-  | { kind: "notice"; tone: "warning" | "error"; message: string; source?: string; raw: WireSessionEvent }
+  | {
+      kind: "notice";
+      tone: "warning" | "error";
+      message: string;
+      source?: string;
+      /** Official CMA `session.error.error.retry_status`. `retrying` is a
+       * transient warning (the turn continues); `exhausted` ends the turn
+       * (idle `retries_exhausted` follows); `terminal` precedes
+       * `session.status_terminated`. */
+      retryStatus?: "retrying" | "exhausted" | "terminal";
+      raw: WireSessionEvent;
+    }
   | { kind: "turn_running"; raw: WireSessionEvent }
   | {
       kind: "turn_complete";
@@ -67,6 +78,7 @@ export type ConversationItem =
       tone: "warning" | "error";
       message: string;
       source?: string;
+      retryStatus?: "retrying" | "exhausted" | "terminal";
       cause?: { error: string; model?: string };
       raw: WireSessionEvent;
     };
@@ -314,14 +326,30 @@ export function normalizeSessionEvent(event: WireSessionEvent): NormalizedSessio
         source: stringField(event, "source"),
         raw: event,
       };
-    case "session.error":
+    case "session.error": {
+      // Official CMA: `error` is structured `{ type, message, retry_status }`.
+      // Legacy/OpenMA shapes carry a string `error` / `message` / `data`.
+      const data = openmaData(event);
+      const structured = (event.error && typeof event.error === "object" ? event.error
+        : data.error && typeof data.error === "object" ? data.error : undefined) as
+        { message?: unknown; retry_status?: unknown } | undefined;
+      const rawRetry = structured?.retry_status ?? data.retry_status ?? event.retry_status;
+      const retryStatus = rawRetry === "retrying" || rawRetry === "exhausted" || rawRetry === "terminal"
+        ? rawRetry : undefined;
+      const message = (typeof structured?.message === "string" && structured.message.length > 0
+        ? structured.message : undefined)
+        ?? stringField(event, "error", "message")
+        ?? (typeof data.message === "string" && data.message.length > 0 ? data.message : undefined)
+        ?? "Session error";
       return {
         kind: "notice",
-        tone: "error",
-        message: stringField(event, "error", "message") ?? "Session error",
+        tone: retryStatus === "retrying" ? "warning" : "error",
+        message,
         source: stringField(event, "source"),
+        ...(retryStatus ? { retryStatus } : {}),
         raw: event,
       };
+    }
     case "session.status_running":
     case "session.running":
       return { kind: "turn_running", raw: event };
@@ -394,6 +422,11 @@ export interface QueuedUserMessage {
    * server stamped it (legacy accept-time stamping) but it arrived while the
    * current turn was still running, so it waits for that turn to end. */
   reason: "pending" | "deferred";
+  /** Still queued after the session went idle with
+   * `stop_reason: retries_exhausted`: retained server-side (not flushed) and
+   * advances with the next round of events. Not withdrawable — hosts must not
+   * offer edit/remove for it. */
+  retained?: true;
   raw: WireSessionEvent;
 }
 
@@ -543,6 +576,7 @@ export function projectConversation(
 
   let lastEnded: ConversationTurn | undefined;
   let sessionState: ProjectedSessionState = "unknown";
+  let lastIdleStopReason: string | undefined;
   const ensureTurn = (event: WireSessionEvent) => {
     // An event that arrives after its turn ended (late tool result,
     // synthetic interrupted result, trailing message) belongs to that turn;
@@ -659,6 +693,7 @@ export function projectConversation(
           message: normalized.message,
           source: normalized.source,
           ...(normalized.tone === "error" && pendingModelError ? { cause: pendingModelError } : {}),
+          ...(normalized.retryStatus ? { retryStatus: normalized.retryStatus } : {}),
           raw: event,
         });
         if (normalized.tone === "error") {
@@ -668,6 +703,7 @@ export function projectConversation(
         break;
       case "turn_running":
         sessionState = "running";
+        lastIdleStopReason = undefined;
         if (turn === current && turn.status === "awaiting") {
           turn.status = "running";
           delete turn.awaitingToolCallIds;
@@ -675,6 +711,7 @@ export function projectConversation(
         break;
       case "turn_complete": {
         if (normalized.stopReason) turn.stopReason = normalized.stopReason;
+        lastIdleStopReason = normalized.stopReason;
         if (normalized.stopReason === "requires_action") {
           sessionState = "requires_action";
           // Official semantics: the turn is parked, not finished. It
@@ -716,8 +753,11 @@ export function projectConversation(
     turns.splice(turns.indexOf(flushedTurn.turn), 1);
     queuedDeferred.unshift({ order: flushedTurn.order, event: flushedTurn.event, normalized: flushedTurn.normalized });
   }
+  const retainedAfterExhausted = lastIdleStopReason === "retries_exhausted" && sessionState === "idle";
   const queued = [
-    ...pending,
+    ...pending.map((entry) => retainedAfterExhausted
+      ? { ...entry, message: { ...entry.message, retained: true as const } }
+      : entry),
     ...queuedDeferred.map(({ order, event, normalized }) => ({
       order,
       message: { id: normalized.id, text: normalized.text, reason: "deferred" as const, raw: event },

@@ -1097,16 +1097,11 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
   height: var(--oma-queue-dock-control-size);
 }
 
-.oma-queue-dock__button--text,
-.oma-queue-dock__button--steer {
+.oma-queue-dock__button--text {
   height: var(--oma-queue-dock-control-size);
   padding-inline: 0.375rem;
   font-size: var(--oma-queue-dock-font-size);
   white-space: nowrap;
-}
-
-.oma-queue-dock__button--steer {
-  padding-inline: 0.5rem;
 }
 
 .oma-queue-dock__button:hover:not(:disabled) {

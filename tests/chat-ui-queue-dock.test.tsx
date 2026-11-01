@@ -39,7 +39,6 @@ describe("QueueDock", () => {
           update: vi.fn(),
           remove: vi.fn(),
           reorder: vi.fn(),
-          steer: vi.fn(),
         }}
       />,
     );
@@ -50,15 +49,16 @@ describe("QueueDock", () => {
     expect(html).toContain('data-queue-move="down"');
     expect(html).toContain("lucide-arrow-up");
     expect(html).toContain("lucide-arrow-down");
-    expect(html).toContain('data-queue-steer="true"');
-    expect(html).toContain("lucide-send-horizontal");
+    // No Steer promote control (steer extension removed; official CMA).
+    expect(html).not.toContain("data-queue-steer");
+    expect(html).not.toContain("lucide-send-horizontal");
     expect(html).toContain("lucide-pencil");
     expect(html).toContain("lucide-trash-2");
     expect(html).toContain('aria-label="Edit queued message 1"');
     expect(html).toContain('aria-label="Remove queued message 2"');
     expect(html).toContain('aria-label="Move queued message 2 up"');
-    expect(html).toContain('aria-label="Steer queued message 1"');
-    expect(html).toContain(">Send now</span>");
+    expect(html).not.toContain("Steer queued message");
+    expect(html).not.toContain("Send now");
 
     // The arrow at an end exists but cannot move past it.
     expect(html).toMatch(/data-queue-move="up"[^>]*disabled/);
@@ -108,7 +108,6 @@ describe("QueueDock", () => {
     const labels: Partial<QueueDockLabels> = {
       title: (count) => `${count} messages waiting`,
       edit: (index) => `Change message ${index + 1}`,
-      steer: "Send it",
       blocked: (count, names) =>
         `${count} pending while ${names.join(" + ")} runs`,
     };
@@ -117,7 +116,7 @@ describe("QueueDock", () => {
       <QueueDock
         prompts={[prompts[0]!]}
         labels={labels}
-        callbacks={{ update: vi.fn(), steer: vi.fn() }}
+        callbacks={{ update: vi.fn() }}
         blocked={{
           reason: "requires_action",
           toolNames: ["Bash"],
@@ -127,9 +126,20 @@ describe("QueueDock", () => {
 
     expect(html).toContain('aria-label="1 messages waiting"');
     expect(html).toContain('aria-label="Change message 1"');
-    expect(html).toContain("Send it");
-    expect(html).toContain('aria-label="Send it 1"');
     expect(html).toContain("1 pending while Bash runs");
     expect(defaultQueueDockLabels.title(3)).toBe("3 queued");
+  });
+
+  it("renders a retained (post-retries_exhausted) row without withdraw controls", () => {
+    const html = renderToStaticMarkup(
+      <QueueDock
+        prompts={[{ id: "held-1", text: "Retained", retained: true }]}
+        callbacks={{ update: vi.fn(), remove: vi.fn(), reorder: vi.fn() }}
+      />,
+    );
+    expect(html).toContain("Retained");
+    expect(html).not.toContain("lucide-pencil");
+    expect(html).not.toContain("lucide-trash-2");
+    expect(html).not.toContain("data-queue-move");
   });
 });
