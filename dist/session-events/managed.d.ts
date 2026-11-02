@@ -231,4 +231,5 @@ export declare function projectCanonicalChatTurns(events: readonly WireSessionEv
 export declare function projectCanonicalChat(events: readonly WireSessionEvent[], options?: ConversationProjectionOptions): CanonicalChatProjection;
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
 export * from "../protocol/managed/index.js";
+export { pendingManagedActions, type PendingManagedAction, } from "./pending-actions.js";
 //# sourceMappingURL=managed.d.ts.map

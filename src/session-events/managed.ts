@@ -857,8 +857,18 @@ export function projectCanonicalChat(
       }
 
       const tool = item.tool;
-      const status: ToolEntry["status"] =
-        tool.status === "running" ? "in_progress" : tool.status;
+      // Parked requires_action tools stay pending (awaiting Allow/Deny or a
+      // custom result) so hosts do not label them Completed / in_progress.
+      const awaitingIds = turn.awaitingToolCallIds ?? [];
+      const parked =
+        turn.status === "awaiting" &&
+        awaitingIds.includes(tool.id) &&
+        tool.status === "running";
+      const status: ToolEntry["status"] = parked
+        ? "pending"
+        : tool.status === "running"
+          ? "in_progress"
+          : tool.status;
       const entry: ToolEntry = {
         toolCallId: tool.id,
         title: tool.name,
@@ -887,3 +897,8 @@ export function projectCanonicalChat(
 
 /** @deprecated Use @openma/common/protocol/managed for the v2 SDK codec. */
 export * from "../protocol/managed/index.js";
+
+export {
+  pendingManagedActions,
+  type PendingManagedAction,
+} from "./pending-actions.js";

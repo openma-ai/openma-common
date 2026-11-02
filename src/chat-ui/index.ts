@@ -6,4 +6,9 @@ export * from "./controller.js";
 export * from "./markdown.js";
 export * from "./presentation.js";
 export * from "./queue-dock.js";
+export * from "./tool-confirmation.js";
 export * from "./utils.js";
+export {
+  pendingManagedActions,
+  type PendingManagedAction,
+} from "../session-events/pending-actions.js";
