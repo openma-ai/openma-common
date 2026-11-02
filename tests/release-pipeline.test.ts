@@ -36,3 +36,12 @@ describe("release workflow wiring", () => {
     expect(heavy.match(/startsWith\(github.ref, 'refs\/tags\/v'\)/g)).toHaveLength(2);
   });
 });
+
+describe("browser runner compatibility", () => {
+  it("pins the browser surface job to the supported Ubuntu image", async () => {
+    const { readFileSync } = await import("node:fs");
+    const workflow = readFileSync(new URL("../.github/workflows/ci-heavy.yml", import.meta.url), "utf8");
+    const job = workflow.split("  verify-chat-ui-surface:")[1]!.split("  report-failure:")[0]!;
+    expect(job).toContain("runs-on: ubuntu-24.04");
+  });
+});

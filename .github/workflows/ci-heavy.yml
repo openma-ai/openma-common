@@ -132,7 +132,8 @@ jobs:
       startsWith(github.ref, 'refs/tags/v') ||
       contains(github.event.pull_request.labels.*.name, 'full-ci') ||
       (github.event_name == 'push' && needs.changes.outputs.code == 'true')
-    runs-on: ubuntu-latest
+    # Playwright 1.58.2 does not support Ubuntu 26.04 (ubuntu-latest).
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
