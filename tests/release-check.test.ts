@@ -150,3 +150,10 @@ describe("release check", () => {
     ])).toEqual([10, 12]);
   });
 });
+
+describe("beta release line", () => {
+  it("accepts beta versions for release branch validation", () => {
+    expect(parseVersion("0.14.0-beta.1")).toMatchObject({ major: 0, minor: 14, patch: 0, raw: "0.14.0-beta.1" });
+    expect(readmePinErrors("github:openma-ai/openma-common#v0.14.0-beta.1", "0.14.0-beta.1")).toEqual([]);
+  });
+});

@@ -4,53 +4,125 @@ on:
   push:
     tags: ["v*"]
 
+# Preserve every candidate's run/artifact. Different candidates cannot cancel
+# one another, and npm channel updates are serialized in the publish job.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
 
 jobs:
-  release-tag:
+  candidate:
     runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.identity.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify release ancestry and tested main base
+        id: identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-pipeline.mjs validate
+
+  verify:
+    needs: candidate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: "0.12.17"
+          enable-cache: false
+      - run: uv python install 3.12
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify
+      - run: pnpm test:perf
+      - run: node scripts/verify-acp-fork-browser.mjs
+      - name: Verify committed dist freshness
+        run: git diff --exit-code -- dist
+      - run: pnpm test:coverage
+
+  heavy:
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+      issues: write
+    needs: candidate
+    uses: ./.github/workflows/ci-heavy.yml
+
+  package:
+    needs: [verify, heavy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Validate tag, release notes, and dist
-        run: node scripts/release-check.mjs --tag
+      - name: Pack committed, verified dist (no rebuild)
+        run: |
+          npm pack --ignore-scripts --json > pack.json
+          node scripts/release-pipeline.mjs record
+      - name: Smoke test the actual tarball outside the source tree
+        run: |
+          tarball="$GITHUB_WORKSPACE/$(node -p 'require("./release-manifest.json").filename')"
+          smoke="$(mktemp -d)"
+          cp scripts/release-package-smoke.mjs "$smoke/smoke.mjs"
+          cd "$smoke"
+          npm init -y >/dev/null
+          npm install --ignore-scripts "$tarball" react@19 react-dom@19 @anthropic-ai/sdk@0.120.0 @opentelemetry/api@1.9.0
+          node smoke.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-package-${{ github.sha }}
+          path: |
+            openma-common-*.tgz
+            release-manifest.json
+          if-no-files-found: error
+          retention-days: 30
 
-  # Publish the validated tag to npm with the GitHub OIDC trusted publisher
-  # (no npm token). Idempotent: re-running a tag whose version is already on
-  # npm is a no-op, so a partial failure can be resumed by re-running the job.
   publish:
-    needs: release-tag
+    needs: [candidate, package]
     runs-on: ubuntu-latest
+    # Beta also requires explicit maintainer approval; retain the existing
+    # production environment and trusted publisher identity for both channels.
     environment: production
+    concurrency:
+      group: common-npm-publish
+      cancel-in-progress: false
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
-      - name: Publish @openma/common
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-package-${{ github.sha }}
+      - name: Verify and publish the exact tested artifact
+        env:
+          RELEASE_CHANNEL: ${{ needs.candidate.outputs.channel }}
         run: |
-          version="$(node -p 'require("./package.json").version')"
-          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
-            echo "tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
-            exit 1
-          fi
-          if npm view "@openma/common@${version}" version >/dev/null 2>&1; then
-            echo "@openma/common@${version} is already on npm; nothing to do."
-            exit 0
-          fi
+          node scripts/release-pipeline.mjs verify
           npm install -g npm@^11.5.1
-          npm publish
+          node scripts/release-publish.mjs

@@ -22,11 +22,11 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PIN = /github:openma-ai\/openma-common#v(\d+\.\d+\.\d+)/g;
+const PIN = /github:openma-ai\/openma-common#v(\d+\.\d+\.\d+(?:-beta\.\d+)?)/g;
 const UNRELEASED_NOTE = /^unreleased-.*\.md$/;
 
 export function parseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(?:0|[1-9]\d*))?$/.exec(version);
   if (!match) {
     throw new Error(`Version must be x.y.z, got ${JSON.stringify(version)}`);
   }
@@ -284,7 +284,7 @@ function checkPullRequest() {
     return;
   }
 
-  const notesPath = `docs/releases/v${nextVersion}.md`;
+  const notesPath = `docs/releases/v${nextVersion.replace(/-beta\.\d+$/, "")}.md`;
   const notesFile = path.join(root, notesPath);
   const releaseDir = path.join(root, "docs/releases");
   const errors = evaluateVersionBump({
@@ -317,7 +317,7 @@ function tagName() {
 function checkTag() {
   const version = headVersion();
   const tag = tagName();
-  const notesPath = `docs/releases/v${version}.md`;
+  const notesPath = `docs/releases/v${version.replace(/-beta\.\d+$/, "")}.md`;
   const errors = [];
   try {
     parseVersion(version);
