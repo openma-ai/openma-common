@@ -46,7 +46,6 @@ function render(turn: AgentUITurnState) {
 const awaitingTurn: AgentUITurnState = {
   id: "t",
   status: "awaiting",
-  promptText: "Do the thing",
   startedAt: "2026-10-31T15:50:57.835Z",
   endedAt: "2026-10-31T15:51:52.953Z",
   items: [

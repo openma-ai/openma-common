@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { decodeManagedSessionEvent } from "../src/protocol/managed/index.js";
+import { decodeManagedSessionEvent as decodeOfficialManagedSessionEvent } from "../src/protocol/managed/index.js";
 import { projectCanonicalChat } from "../src/session-events/managed.js";
 import { isOpenMAEvent } from "../src/session-events/openma.js";
+
+// OMA queue frames are an extension, not part of the official CMA SDK union.
+// Exercise the runtime decoder without widening the public official wire type.
+const decodeManagedSessionEvent = decodeOfficialManagedSessionEvent as unknown as (
+  event: { type: string; [key: string]: unknown },
+  context: Parameters<typeof decodeOfficialManagedSessionEvent>[1],
+) => ReturnType<typeof decodeOfficialManagedSessionEvent>;
 
 const ctx = { sessionId: "sesn_1", ingestedAt: "2026-10-31T08:00:00.000Z" };
 
