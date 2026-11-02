@@ -62,6 +62,10 @@
       "types": "./dist/session-events/openma.d.ts",
       "import": "./dist/session-events/openma.js"
     },
+    "./gui": {
+      "types": "./dist/gui/index.d.ts",
+      "import": "./dist/gui/index.js"
+    },
     "./session-events/acp": {
       "types": "./dist/session-events/acp.d.ts",
       "import": "./dist/session-events/acp.js"

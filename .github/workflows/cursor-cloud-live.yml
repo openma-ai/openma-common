@@ -30,6 +30,9 @@ concurrency:
 
 jobs:
   live:
+    # External credentials, quota and service availability are advisory.
+    # Keep failed steps/logs visible without gating merges or releases.
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -76,6 +79,10 @@ jobs:
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
           CURSOR_CLOUD_LIVE_SKIP_IF_UNSET: "1"
         run: pnpm test:live:cursor-cloud
+
+      - name: Report advisory live failure
+        if: failure()
+        run: echo "::warning::Cursor Cloud live verification failed (advisory only). Inspect the failed step for API quota, credentials, service availability or codec failures."
 
       - name: Delete the cloud agent if the test was interrupted
         if: always() && steps.gate.outputs.skip != 'true'

@@ -50,9 +50,9 @@ export interface VendorEventRecord {
     };
     readonly data: unknown;
 }
-export declare const OPENMA_CANONICAL_EVENT_TYPES: readonly ["user.message", "user.interrupt", "user.permission_response", "user.elicitation_response", "agent.message", "agent.message_chunk", "agent.thinking", "turn.queued", "turn.started", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted", "tool.started", "tool.progress", "tool.completed", "tool.failed", "tool.cancelled", "work_item.started", "work_item.progress", "work_item.output", "work_item.completed", "work_item.failed", "work_item.cancelled", "work_item.killed", "work_item.terminated", "work_item.missing_terminal", "work_item.reidentified", "work_item.classified", "monitor.event", "plan.updated", "plan.completed", "plan.removed", "session.started", "session.running", "session.idle", "session.terminated", "session.error", "system.notice", "command_catalog.updated", "capability.updated", "usage.updated", "callback.requested", "callback.completed", "callback.failed", "callback.notification", "user.message_chunk", "user.fs_write_response", "session.updated", "session.rescheduled", "system.message", "outcome.defined", "outcome.evaluation_started", "outcome.evaluation_progress", "outcome.evaluation_completed"];
+export declare const OPENMA_CANONICAL_EVENT_TYPES: readonly ["user.message", "user.interrupt", "user.permission_response", "user.elicitation_response", "agent.message", "agent.message_chunk", "agent.thinking", "turn.queued", "turn.started", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted", "turn.steered", "tool.started", "tool.progress", "tool.completed", "tool.failed", "tool.cancelled", "work_item.started", "work_item.progress", "work_item.output", "work_item.completed", "work_item.failed", "work_item.cancelled", "work_item.killed", "work_item.terminated", "work_item.missing_terminal", "work_item.reidentified", "work_item.classified", "monitor.event", "plan.updated", "plan.completed", "plan.removed", "session.started", "session.running", "session.idle", "session.terminated", "session.error", "system.notice", "command_catalog.updated", "capability.updated", "usage.updated", "callback.requested", "callback.completed", "callback.failed", "callback.notification", "user.message_chunk", "user.fs_write_response", "session.updated", "session.rescheduled", "system.message", "outcome.defined", "outcome.evaluation_started", "outcome.evaluation_progress", "outcome.evaluation_completed"];
 export type CanonicalEventType = (typeof OPENMA_CANONICAL_EVENT_TYPES)[number];
-export declare const OPENMA_EVENT_TYPES: readonly ["user.message", "user.interrupt", "user.permission_response", "user.elicitation_response", "agent.message", "agent.message_chunk", "agent.thinking", "turn.queued", "turn.started", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted", "tool.started", "tool.progress", "tool.completed", "tool.failed", "tool.cancelled", "work_item.started", "work_item.progress", "work_item.output", "work_item.completed", "work_item.failed", "work_item.cancelled", "work_item.killed", "work_item.terminated", "work_item.missing_terminal", "work_item.reidentified", "work_item.classified", "monitor.event", "plan.updated", "plan.completed", "plan.removed", "session.started", "session.running", "session.idle", "session.terminated", "session.error", "system.notice", "command_catalog.updated", "capability.updated", "usage.updated", "callback.requested", "callback.completed", "callback.failed", "callback.notification", "user.message_chunk", "user.fs_write_response", "session.updated", "session.rescheduled", "system.message", "outcome.defined", "outcome.evaluation_started", "outcome.evaluation_progress", "outcome.evaluation_completed", "vendor.event", "raw.event"];
+export declare const OPENMA_EVENT_TYPES: readonly ["user.message", "user.interrupt", "user.permission_response", "user.elicitation_response", "agent.message", "agent.message_chunk", "agent.thinking", "turn.queued", "turn.started", "turn.completed", "turn.failed", "turn.cancelled", "turn.interrupted", "turn.steered", "tool.started", "tool.progress", "tool.completed", "tool.failed", "tool.cancelled", "work_item.started", "work_item.progress", "work_item.output", "work_item.completed", "work_item.failed", "work_item.cancelled", "work_item.killed", "work_item.terminated", "work_item.missing_terminal", "work_item.reidentified", "work_item.classified", "monitor.event", "plan.updated", "plan.completed", "plan.removed", "session.started", "session.running", "session.idle", "session.terminated", "session.error", "system.notice", "command_catalog.updated", "capability.updated", "usage.updated", "callback.requested", "callback.completed", "callback.failed", "callback.notification", "user.message_chunk", "user.fs_write_response", "session.updated", "session.rescheduled", "system.message", "outcome.defined", "outcome.evaluation_started", "outcome.evaluation_progress", "outcome.evaluation_completed", "vendor.event", "raw.event"];
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed" | "cancelled";
 export type ToolOutputKind = "terminal" | "mcp" | "text" | "structured";
 export interface ToolOutputData {
@@ -97,6 +97,32 @@ export interface MessageEventData {
     content?: unknown;
     message_id?: string;
     phase?: "commentary" | "final_answer";
+    /**
+     * Delivery state projected from a harness adapter (e.g. CMA `processed_at`).
+     * GUI code must rely on this field — never on vendor `processed_at`.
+     * - `queued`: accepted but not yet processed
+     * - `processed`: processing finished (same event id may upgrade queued→processed)
+     */
+    delivery?: "queued" | "processed";
+    adapter_meta?: Record<string, unknown>;
+}
+/** Payload for `turn.queued`. When CMA echoes a user.message with
+ * `processed_at: null`, decode maps it here (message fields populated) so the
+ * GUI never sees Managed `processed_at`. Same `event_id` later upgrades to
+ * `user.message` once stamped. */
+export interface TurnQueuedData {
+    message_id?: string;
+    text?: string;
+    content?: unknown;
+    reason?: string;
+    /** Original Managed event type when this queued fact came from CMA. */
+    managed_event_type?: string;
+    adapter_meta?: Record<string, unknown>;
+}
+/** Payload for `turn.steered`: the queued user.message `message_id` joined
+ * the running turn instead of starting its own. */
+export interface TurnSteeredData {
+    message_id: string;
     adapter_meta?: Record<string, unknown>;
 }
 export interface OpenMAEventEnvelope<TType extends string, TData> {
@@ -143,6 +169,8 @@ export interface CallbackRequestedData extends CallbackLifecycleData {
 export type CallbackRequestedEvent = OpenMAEventEnvelope<"callback.requested", CallbackRequestedData>;
 export type CallbackEvent = CallbackRequestedEvent | OpenMAEventEnvelope<"callback.completed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.failed", CallbackLifecycleData> | OpenMAEventEnvelope<"callback.notification", CallbackLifecycleData>;
 export interface TurnTerminalData {
+    /** Set when a queued turn (one user.message) is cancelled before it ran. */
+    message_id?: string;
     stop_reason?: string;
     reason?: string;
     error?: string;
@@ -150,6 +178,7 @@ export interface TurnTerminalData {
     adapter_meta?: Record<string, unknown>;
 }
 export type TurnTerminalEvent = OpenMAEventEnvelope<"turn.completed", TurnTerminalData> | OpenMAEventEnvelope<"turn.failed", TurnTerminalData> | OpenMAEventEnvelope<"turn.cancelled", TurnTerminalData> | OpenMAEventEnvelope<"turn.interrupted", TurnTerminalData>;
+export type TurnSteeredEvent = OpenMAEventEnvelope<"turn.steered", TurnSteeredData>;
 /** One event delivered by a long-lived external subscription. Monitor
  * notifications do not necessarily carry a stable subscription id, so
  * correlation remains optional on the envelope's `work_item_id`. */
@@ -316,5 +345,11 @@ export interface WorkItemProjector {
  * `reduceWorkItems(allEvents)`. */
 export declare function createWorkItemProjector(): WorkItemProjector;
 export declare function finalizeWorkItems(registry: WorkItemRegistry): WorkItemRegistry;
+/** True when an OpenMA event represents CMA-style queued delivery.
+ * Prefer this over reading any harness `processed_at` field. */
+export declare function isOpenMAQueuedEvent(event: {
+    type?: string;
+    data?: unknown;
+} | null | undefined): boolean;
 export {};
 //# sourceMappingURL=openma.d.ts.map

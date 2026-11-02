@@ -1106,6 +1106,7 @@ function ChatComposerFrame({
 const TERMINAL_TURN_STATUS: Record<SessionTurnStatus, boolean> = {
   queued: false,
   running: false,
+  awaiting: false,
   unknown: false,
   complete: true,
   completed: true,
@@ -1463,7 +1464,7 @@ export function AgentUITurnView({
                         <span aria-hidden="true"> · </span>
                       </>
                     ) : null}
-                    {isStreaming
+                    {isStreaming || turn.status === "awaiting"
                       ? labels.workingFor(elapsedSeconds)
                       : labels.workedFor(elapsedSeconds)}
                   </span>

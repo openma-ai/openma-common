@@ -44,11 +44,14 @@ export declare function flattenSessionConfigSelectOptions(options: Extract<Sessi
     name: string;
     group?: string;
 }>;
-export type SessionTurnStatus = "queued" | "running" | "complete" | "completed" | "error" | "errored" | "cancelled" | "unknown" | "terminated";
+export type SessionTurnStatus = "queued" | "running" | "complete" | "completed" | "error" | "errored" | "cancelled" | "awaiting" | "unknown" | "terminated";
 export interface SessionTurnFrameLabels {
     queued?: ReactNode;
     cancelled?: ReactNode;
     unknown?: ReactNode;
+    /** Optional status line for an awaiting (requires_action) turn. Hosts
+     * usually render their own notice, so nothing is shown by default. */
+    awaiting?: ReactNode;
     terminated?: ReactNode;
     failed?: ReactNode;
 }

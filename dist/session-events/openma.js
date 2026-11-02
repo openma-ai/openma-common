@@ -98,6 +98,7 @@ export const OPENMA_CANONICAL_EVENT_TYPES = [
     "turn.failed",
     "turn.cancelled",
     "turn.interrupted",
+    "turn.steered",
     "tool.started",
     "tool.progress",
     "tool.completed",
@@ -520,5 +521,15 @@ export function finalizeWorkItems(registry) {
         });
     }
     return finalized;
+}
+/** True when an OpenMA event represents CMA-style queued delivery.
+ * Prefer this over reading any harness `processed_at` field. */
+export function isOpenMAQueuedEvent(event) {
+    if (!event || typeof event !== "object")
+        return false;
+    if (event.type === "turn.queued")
+        return true;
+    const data = event.data;
+    return data?.delivery === "queued";
 }
 //# sourceMappingURL=openma.js.map

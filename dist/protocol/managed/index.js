@@ -63,6 +63,140 @@ function managedEventEnvelope(event, context) {
         ...(context.seq !== undefined ? { seq: context.seq } : {}),
     };
 }
+/**
+ * OMA server-queue extension frames (not official CMA). The server owns the
+ * queue; these frames report what happened to one queued user.message:
+ * - `system.user_message_cancelled`: removed from the queue → `turn.cancelled`
+ * - `system.user_message_steered`: absorbed into the running turn → `turn.steered`
+ * Decoded here so GUIs only ever react to OpenMA queue-lifecycle events.
+ * `pending` / `promoted` are redundant with the CMA null → stamped re-emit
+ * and stay raw vendor records.
+ */
+function decodeOmaQueueLifecycleFrame(event, context) {
+    const kind = event.type === "system.user_message_cancelled"
+        ? "cancelled"
+        : event.type === "system.user_message_steered"
+            ? "steered"
+            : null;
+    if (kind === null)
+        return null;
+    const messageId = typeof event.event_id === "string" ? event.event_id : "";
+    if (messageId.length === 0)
+        return null;
+    const atMs = kind === "cancelled" ? event.cancelled_at : event.steered_at;
+    const occurredAt = typeof atMs === "number" && Number.isFinite(atMs)
+        ? new Date(atMs).toISOString()
+        : typeof atMs === "string" ? atMs : context.ingestedAt ?? new Date(0).toISOString();
+    const sessionThreadId = typeof event.session_thread_id === "string"
+        ? event.session_thread_id
+        : undefined;
+    return {
+        fidelity: "exact",
+        diagnostics: [],
+        event: createOpenMAEvent({
+            event_id: `oma:${kind}:${messageId}`,
+            session_id: context.sessionId,
+            ...(sessionThreadId ? { session_thread_id: sessionThreadId } : {}),
+            source: MANAGED_EVENT_SOURCE,
+            occurred_at: occurredAt,
+            ...(context.ingestedAt ? { ingested_at: context.ingestedAt } : {}),
+            ...(context.seq !== undefined ? { seq: context.seq } : {}),
+            type: kind === "cancelled" ? "turn.cancelled" : "turn.steered",
+            data: kind === "cancelled"
+                ? { message_id: messageId, reason: "removed_from_queue", adapter_meta: { managed_event_type: event.type } }
+                : { message_id: messageId, adapter_meta: { managed_event_type: event.type } },
+        }),
+    };
+}
+const OMA_QUEUE_CANCEL_REASONS = new Set([
+    "already_processing",
+    "already_cancelled",
+    "already_completed",
+    "held_after_exhausted",
+    "not_found",
+]);
+/**
+ * Thrown by a host transport when the CMA-style API rejects a send. When
+ * `rejection.settleOnly` (user.message during requires_action), chat-ui does
+ * not leave the prompt queued and marks the error `retainComposer` so the host
+ * keeps the user's text in the composer for a resend after the action settles.
+ */
+export class ManagedSendRejectionError extends Error {
+    rejection;
+    constructor(rejection) {
+        super(rejection.message);
+        this.name = "ManagedSendRejectionError";
+        this.rejection = rejection;
+    }
+}
+export function managedSendRejection(status, body) {
+    if (status < 400)
+        return null;
+    const error = body && typeof body === "object"
+        ? body.error
+        : undefined;
+    const type = typeof error?.type === "string" ? error.type : "api_error";
+    const message = typeof error?.message === "string" && error.message.length > 0
+        ? error.message
+        : `Request failed (${status})`;
+    const settleOnly = status === 400 && type === "invalid_request_error"
+        && /settle|requires_action|budget_reached/i.test(message);
+    return { status, type, message, settleOnly };
+}
+/** Encode a cancel outcome for the DELETE pending response body. */
+export function encodeOmaQueueCancelResponse(input) {
+    if (input.cancelled) {
+        return { cancelled: true, id: input.id, cancelled_at: input.cancelledAt };
+    }
+    return {
+        cancelled: false,
+        reason: input.reason,
+        id: input.id,
+        ...(input.processedAt ? { processed_at: input.processedAt } : {}),
+    };
+}
+/** Decode / validate a cancel HTTP JSON body. Returns null if malformed. */
+export function decodeOmaQueueCancelResponse(value) {
+    if (value === null || typeof value !== "object")
+        return null;
+    const raw = value;
+    if (typeof raw.id !== "string" || raw.id.length === 0)
+        return null;
+    if (raw.cancelled === true) {
+        if (typeof raw.cancelled_at !== "string")
+            return null;
+        return { cancelled: true, id: raw.id, cancelled_at: raw.cancelled_at };
+    }
+    if (raw.cancelled === false) {
+        if (typeof raw.reason !== "string" || !OMA_QUEUE_CANCEL_REASONS.has(raw.reason)) {
+            return null;
+        }
+        return {
+            cancelled: false,
+            reason: raw.reason,
+            id: raw.id,
+            ...(typeof raw.processed_at === "string" ? { processed_at: raw.processed_at } : {}),
+        };
+    }
+    return null;
+}
+/** Official CMA queueable input types: processed_at is null while queued. */
+const MANAGED_QUEUEABLE_INPUT_TYPES = new Set([
+    "user.message",
+    "user.interrupt",
+    "user.tool_confirmation",
+    "system.message",
+]);
+function isManagedProcessedAtQueued(event) {
+    if (!MANAGED_QUEUEABLE_INPUT_TYPES.has(event.type))
+        return false;
+    return !Object.prototype.hasOwnProperty.call(event, "processed_at")
+        || event.processed_at === null
+        || event.processed_at === undefined;
+}
+function isManagedProcessedAtStamped(event) {
+    return typeof event.processed_at === "string" && event.processed_at.length > 0;
+}
 function managedContentText(content) {
     if (typeof content === "string")
         return content;
@@ -80,6 +214,9 @@ function managedContentText(content) {
 }
 export function decodeManagedSessionEvent(input, context) {
     const event = input;
+    const queueLifecycle = decodeOmaQueueLifecycleFrame(event, context);
+    if (queueLifecycle)
+        return queueLifecycle;
     if (typeof event.id !== "string" || event.id.length === 0) {
         const eventId = `managed:${event.type}:${context.seq ?? "unsequenced"}`;
         const message = `Managed Agents event ${event.type} is missing required id`;
@@ -308,6 +445,7 @@ export function decodeManagedSessionEvent(input, context) {
     if (event.type === "system.message") {
         const id = event.id;
         const content = event.content;
+        const queued = isManagedProcessedAtQueued(event);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -319,11 +457,13 @@ export function decodeManagedSessionEvent(input, context) {
                     message_id: id,
                     text: managedContentText(content),
                     content,
+                    delivery: queued ? "queued" : "processed",
                 },
             }),
         };
     }
     if (event.type === "user.tool_confirmation") {
+        const queued = isManagedProcessedAtQueued(event);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -337,6 +477,7 @@ export function decodeManagedSessionEvent(input, context) {
                     ...(typeof event.deny_message === "string"
                         ? { message: event.deny_message }
                         : {}),
+                    delivery: queued ? "queued" : "processed",
                     adapter_meta: { managed_event_type: event.type },
                 },
             }),
@@ -372,6 +513,7 @@ export function decodeManagedSessionEvent(input, context) {
         };
     }
     if (event.type === "user.interrupt") {
+        const queued = isManagedProcessedAtQueued(event);
         return {
             fidelity: "exact",
             diagnostics: [],
@@ -380,6 +522,7 @@ export function decodeManagedSessionEvent(input, context) {
                 type: "user.interrupt",
                 source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
                 data: {
+                    delivery: queued ? "queued" : "processed",
                     adapter_meta: { managed_event_type: event.type },
                 },
             }),
@@ -468,22 +611,43 @@ export function decodeManagedSessionEvent(input, context) {
     }
     const id = event.id;
     const content = event.content;
-    const timestampMissing = typeof event.processed_at !== "string";
+    const text = managedContentText(content);
+    // Official CMA: processed_at null means queued — map to OpenMA turn.queued
+    // so GUI never consults Managed processed_at. Same id later re-emits as
+    // user.message once stamped.
+    if (isManagedProcessedAtQueued(event)) {
+        return {
+            fidelity: "exact",
+            diagnostics: [],
+            event: createOpenMAEvent({
+                ...managedEventEnvelope(event, context),
+                type: "turn.queued",
+                source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
+                data: {
+                    message_id: id,
+                    text,
+                    content,
+                    managed_event_type: "user.message",
+                    adapter_meta: {
+                        managed_event_type: "user.message",
+                        delivery: "queued",
+                    },
+                },
+            }),
+        };
+    }
     return {
-        fidelity: timestampMissing ? "lossy" : "exact",
-        diagnostics: timestampMissing
-            ? [{
-                    code: "managed_event_timestamp_missing",
-                    message: `Managed Agents event ${id} has no processed_at; used ingestedAt`,
-                }]
-            : [],
+        fidelity: "exact",
+        diagnostics: [],
         event: createOpenMAEvent({
             ...managedEventEnvelope(event, context),
             type: "user.message",
+            source: { ...MANAGED_EVENT_SOURCE, kind: "user" },
             data: {
                 message_id: id,
-                text: managedContentText(content),
+                text,
                 content,
+                delivery: "processed",
             },
         }),
     };

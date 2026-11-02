@@ -26,14 +26,52 @@ describe("ManagedAgentsSessionHost", () => {
     await Promise.resolve();
     await host.steer({ sessionId: "session-without-steer", eventId: "steer-1", text: "change" });
     expect(steerCalls).toBe(0);
-    expect(events).toContainEqual(expect.objectContaining({ type: "session.error", turnId: "steer-1", message: "ACP agent does not support session steering" }));
+    // Unsupported steer falls back to queue — no session.error, message not dropped.
+    expect(events.some((e: any) => e.type === "session.error" && e.turnId === "steer-1")).toBe(false);
     finish();
     await turn;
+    // Allow the fallback prompt (steer-1) to finish after the in-flight turn unblocks.
+    await new Promise((r) => setTimeout(r, 0));
     await host.prompt({ sessionId: "session-without-steer", turnId: "turn-2", text: "continue" });
-    expect(prompts).toBe(2);
+    expect(prompts).toBeGreaterThanOrEqual(2);
     expect(events).toContainEqual(expect.objectContaining({ type: "session.complete", turnId: "turn-2" }));
+    expect(events).toContainEqual(expect.objectContaining({ type: "session.complete", turnId: "steer-1" }));
     expect(disposeCount).toBe(0);
     await host.dispose("session-without-steer");
+  });
+
+  it("holds a fallback steer until an open permission request settles, without cancelling it", async () => {
+    const prompts: string[] = [];
+    let open = 1;
+    let settle!: () => void;
+    const settled = new Promise<void>(resolve => { settle = () => { open = 0; resolve(); }; });
+    let cancels = 0;
+    let finish!: () => void;
+    const blocked = new Promise<void>(resolve => { finish = resolve; });
+    const session = acpSessionFixture({
+      acpSessionId: "acp-permission", supportsSteering: true,
+      async steer() { return "promptRequired"; },
+      async *prompt(text) { prompts.push(text); if (text === "hello") await blocked; },
+      openPermissionRequests: () => open,
+      whenPermissionsSettled: () => settled,
+    });
+    session.cancelCurrentTurn = async () => { cancels += 1; };
+    const host = new ManagedAgentsSessionHost({ runtime: { async start() { return session; } }, emit: () => {} });
+    await host.start({ sessionId: "s", options: { agent: { command: "x" } } });
+    const turn = host.prompt({ sessionId: "s", turnId: "t1", text: "hello" });
+    await Promise.resolve();
+    await host.steer({ sessionId: "s", eventId: "steer-1", text: "also this" });
+    await new Promise(r => setTimeout(r, 0));
+    expect(prompts).toEqual(["hello"]);
+    expect(cancels).toBe(0);
+    settle();
+    await new Promise(r => setTimeout(r, 0));
+    finish();
+    await turn;
+    await new Promise(r => setTimeout(r, 0));
+    expect(prompts).toEqual(["hello", "also this"]);
+    expect(cancels).toBe(0);
+    await host.dispose("s");
   });
 
   it("starts one ACP session and re-announces it idempotently", async () => {

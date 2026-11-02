@@ -31,6 +31,9 @@ export type AgentUISessionStatus =
 
 export type AgentUITurnStatus =
   | "unknown"
+  /** Parked on requires_action (official Managed Agents): the turn is not
+   * finished and continues once tool results arrive. Never animates. */
+  | "awaiting"
   | "queued"
   | "running"
   | "completed"

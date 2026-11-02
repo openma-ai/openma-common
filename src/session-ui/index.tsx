@@ -554,6 +554,7 @@ export type SessionTurnStatus =
   | "error"
   | "errored"
   | "cancelled"
+  | "awaiting"
   | "unknown"
   | "terminated";
 
@@ -561,6 +562,9 @@ export interface SessionTurnFrameLabels {
   queued?: ReactNode;
   cancelled?: ReactNode;
   unknown?: ReactNode;
+  /** Optional status line for an awaiting (requires_action) turn. Hosts
+   * usually render their own notice, so nothing is shown by default. */
+  awaiting?: ReactNode;
   terminated?: ReactNode;
   failed?: ReactNode;
 }
@@ -818,6 +822,16 @@ function renderStatus(
         {labels?.cancelled ?? "cancelled"}
       </p>
     );
+  }
+  if (status === "awaiting") {
+    return labels?.awaiting ? (
+      <p
+        className="text-xs italic text-fg-subtle"
+        data-session-turn-status-message="awaiting"
+      >
+        {labels.awaiting}
+      </p>
+    ) : null;
   }
   if (status === "unknown") {
     return (

@@ -349,32 +349,41 @@ export class ManagedAgentsSessionHost {
       });
       return;
     }
+    // Unsupported steering / promptRequired / failed / throw → queue as a
+    // normal prompt (no session.error, message is not dropped). When another
+    // turn is already in flight, do not await: steer must return promptly and
+    // the fallback prompt runs concurrently (ACP backends serialize).
+    // While session/request_permission is open, a fallback prompt would race
+    // the blocked turn (and some agents cancel the running prompt, which
+    // cancels the permission request and hides its card). Match
+    // claude-agent-acp's "later" steering: wait for the permission to settle,
+    // never cancel it; only an explicit session/cancel ends it.
+    const queueAsPrompt = () => {
+      const send = () => {
+        void this.prompt({
+          sessionId: input.sessionId,
+          turnId: input.eventId,
+          text: input.text,
+        });
+      };
+      if ((session.acp.openPermissionRequests ?? 0) > 0 && session.acp.whenPermissionsSettled) {
+        void session.acp.whenPermissionsSettled().then(send, send);
+        return;
+      }
+      send();
+    };
     if (!session.acp.supportsSteering) {
-      this.#emit({
-        type: "session.error",
-        sessionId: input.sessionId,
-        turnId: input.eventId,
-        message: "ACP agent does not support session steering",
-      });
+      queueAsPrompt();
       return;
     }
     try {
       const outcome = await session.acp.steer(input.text);
-      if (outcome === "failed") {
-        this.#emit({
-          type: "session.error",
-          sessionId: input.sessionId,
-          turnId: input.eventId,
-          message: "ACP agent rejected session steering",
-        });
+      if (outcome === "promptRequired" || outcome === "failed") {
+        queueAsPrompt();
       }
     } catch (error) {
-      this.#emit({
-        type: "session.error",
-        sessionId: input.sessionId,
-        turnId: input.eventId,
-        message: error instanceof Error ? error.message : String(error),
-      });
+      void error;
+      queueAsPrompt();
     }
   }
 
