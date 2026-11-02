@@ -1168,3 +1168,121 @@ button.chat-interactive-surface--chip.chat-reasoning-trigger--chip.activity-disc
 .oma-queue-dock__button--interrupt:hover:not(:disabled) {
   color: var(--oma-queue-dock-danger);
 }
+
+/* Managed always_ask tool confirmation (Allow / Deny). */
+.oma-tool-confirmation {
+  --oma-tool-confirmation-bg: var(--chat-bg-surface, var(--bg-surface, Canvas));
+  --oma-tool-confirmation-fg: var(--chat-fg, var(--fg, CanvasText));
+  --oma-tool-confirmation-fg-subtle: var(
+    --chat-fg-subtle,
+    var(--fg-subtle, GrayText)
+  );
+  --oma-tool-confirmation-border: color-mix(
+    in srgb,
+    var(--oma-tool-confirmation-fg) 14%,
+    transparent
+  );
+  --oma-tool-confirmation-warning: var(--chat-warning, var(--warning, #d97706));
+  --oma-tool-confirmation-radius: var(--composer-radius, 0.75rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.oma-tool-confirmation__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--oma-tool-confirmation-border);
+  border-radius: var(--oma-tool-confirmation-radius);
+  background: var(--oma-tool-confirmation-bg);
+  color: var(--oma-tool-confirmation-fg);
+}
+
+.oma-tool-confirmation__eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--oma-tool-confirmation-warning);
+}
+
+.oma-tool-confirmation__prompt {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.oma-tool-confirmation__input {
+  margin: 0;
+  max-height: 8rem;
+  overflow: auto;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--oma-tool-confirmation-fg) 6%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--oma-tool-confirmation-fg-subtle);
+}
+
+.oma-tool-confirmation__deny-message {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 12px;
+  color: var(--oma-tool-confirmation-fg-subtle);
+}
+
+.oma-tool-confirmation__deny-message input {
+  border: 1px solid var(--oma-tool-confirmation-border);
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.625rem;
+  background: transparent;
+  color: var(--oma-tool-confirmation-fg);
+  font: inherit;
+}
+
+.oma-tool-confirmation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+}
+
+.oma-tool-confirmation__button {
+  min-width: 5rem;
+  border-radius: 999px;
+  border: 1px solid var(--oma-tool-confirmation-border);
+  padding: 0.375rem 0.875rem;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: transparent;
+  color: var(--oma-tool-confirmation-fg);
+}
+
+.oma-tool-confirmation__button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.oma-tool-confirmation__button--deny:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--oma-tool-confirmation-fg) 8%, transparent);
+}
+
+.oma-tool-confirmation__button--allow {
+  border-color: transparent;
+  background: var(--oma-tool-confirmation-fg);
+  color: var(--oma-tool-confirmation-bg);
+}
+
+.oma-tool-confirmation__button--allow:hover:not(:disabled) {
+  opacity: 0.92;
+}
