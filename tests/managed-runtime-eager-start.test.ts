@@ -98,3 +98,29 @@ it("opens the second span only when steering requires a real prompt fallback", a
     expect(f.outputs.filter(event => event.type === "span.model_request_end")).toHaveLength(2);
   } finally { await f.close(); }
 });
+
+it("keeps confirmed continuations on the owner span but opens a fresh fallback turn", async () => {
+  const outputs: Array<{ type: string }> = [];
+  const channel = createManagedHarnessHttpControlChannel({
+    scope, harness: { id: "acp", version: "1" }, workspacePath: "/workspace",
+    apiBaseUrl: "https://test", sessionsToken: "token", publishTurnStartBeforeDispatch: true,
+    onBeforeDispatch: async () => {},
+    onFallbackOwner: async ({ command }) => command.turnId === "correction" ? "root" : null,
+    fetch: async (_url, init) => {
+      outputs.push(...JSON.parse(String(init?.body)).events);
+      return Response.json({});
+    },
+  });
+  const command = (turnId: string) => ({
+    type: "session.prompt" as const, sessionId: "s", turnId, text: turnId,
+    input: { eventId: turnId, event: message(turnId) },
+  });
+  const signal = new AbortController().signal;
+  await channel.beforeDispatch!(command("root"), signal, "prompt");
+  expect(await channel.fallbackOwner!(command("correction"), signal)).toBe("root");
+  await channel.beforeDispatch!(command("correction"), signal, "prompt");
+  expect(outputs.filter(event => event.type === "span.model_request_start")).toHaveLength(1);
+  expect(await channel.fallbackOwner!(command("next"), signal)).toBeNull();
+  await channel.beforeDispatch!(command("next"), signal, "prompt");
+  expect(outputs.filter(event => event.type === "span.model_request_start")).toHaveLength(2);
+});
