@@ -39,6 +39,12 @@ registerHooks({
     return next(specifier, context);
   },
 });
-// macOS may synthesize this noncredential variable during process startup.
-delete process.env.__CF_USER_TEXT_ENCODING;
+// OS process startup can synthesize these noncredential variables even when
+// execFile receives a minimal env. Remove only known platform additions before
+// loading the runtime; scenario retains its exact three-variable assertion.
+const startupVariables = process.platform === 'win32'
+  ? ['HOMEDRIVE', 'HOMEPATH', 'LOGONSERVER', 'PATH', 'SYSTEMDRIVE', 'SYSTEMROOT',
+     'TEMP', 'USERDOMAIN', 'USERNAME', 'USERPROFILE', 'WINDIR']
+  : ['__CF_USER_TEXT_ENCODING'];
+for (const name of startupVariables) delete process.env[name];
 await import('./scenario.mjs');
