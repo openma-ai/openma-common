@@ -99,7 +99,7 @@ describe("Managed harness HTTP control channel", () => {
       commands.push(command);
     }
 
-    expect(commands).toEqual([
+    expect(commands).toMatchObject([
       {
         type: "session.start",
         sessionId: scope.sessionId,
@@ -218,7 +218,7 @@ describe("Managed harness HTTP control channel", () => {
     const iterator = channel.commands(new AbortController().signal)[Symbol.asyncIterator]();
 
     await iterator.next();
-    await expect(iterator.next()).resolves.toEqual({
+    await expect(iterator.next()).resolves.toMatchObject({
       done: false,
       value: {
         type: "session.prompt",
@@ -296,12 +296,14 @@ describe("Managed harness HTTP control channel", () => {
       sessionId: scope.sessionId,
       turnId: "turn_1",
       text: "start the analysis",
+      input: expect.objectContaining({ eventId: "turn_1" }),
     });
     expect(commands).toContainEqual({
       type: "session.steer",
       sessionId: scope.sessionId,
       eventId: "steer_1",
       text: "focus on the cache path",
+      input: expect.objectContaining({ eventId: "steer_1" }),
     });
   });
 
@@ -475,7 +477,7 @@ describe("Managed harness HTTP control channel", () => {
     expect(request.headers.get("authorization")).toBe("Bearer session-token");
   });
 
-  it("maps every canonical user input shape and ignores an idle interrupt", async () => {
+  it("maps runnable inputs without turning invalid answers or approvals into model prompts", async () => {
     let eventRequest = 0;
     const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0], init?: RequestInit) => {
       const request = new Request(input, init);
@@ -556,14 +558,6 @@ describe("Managed harness HTTP control channel", () => {
         turnId: "custom",
         text: "Custom tool result for custom_1:\n[image chart url: https://image.test]",
       }),
-      expect.objectContaining({
-        turnId: "custom_unknown",
-        text: "Custom tool result for unknown:\n[image inline]",
-      }),
-      expect.objectContaining({
-        turnId: "confirmation",
-        text: "Tool unknown was answered.",
-      }),
       expect.objectContaining({ turnId: "outcome", text: "Outcome requested: " }),
     ]);
     expect(commands.filter((command) => command.type === "session.steer")).toEqual([
@@ -572,6 +566,10 @@ describe("Managed harness HTTP control channel", () => {
         text: "[image inline]\n[document spec file: file_2]",
       }),
     ]);
+    // Approval answers are a control operation, never new model instructions.
+    // An unidentified custom result cannot resume an outstanding tool either.
+    expect(commands.some(command => command.type === "session.prompt" &&
+      ["confirmation", "custom_unknown"].includes(command.turnId))).toBe(false);
     expect(commands.at(-2)).toEqual({ type: "session.dispose", sessionId: scope.sessionId });
   });
 

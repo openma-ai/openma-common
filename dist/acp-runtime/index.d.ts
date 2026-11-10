@@ -8,4 +8,6 @@ export type { AcpForkPoint, AcpForkSupport, AcpForkSupportLevel, AcpForkSupportR
 export { ACP_AUTH_REQUIRED_CODE, isAuthRequired, isAuthenticationRequiredError, } from "./errors.js";
 export { authenticateAgent, disposeAllAcpProbes, probeAcpSession, probeAgentSessionConfig, probeAgentAuthStatus, } from "./probe.js";
 export type { AuthenticateAgentOptions, AuthenticateAgentResult, ProbeAcpSessionOptions, ProbeAcpSessionResult, ProbeAgentConfigOptionsOptions, ProbeAgentSessionConfigResult, ProbeAgentAuthMethod, ProbeAgentAuthStatus, ProbeAgentAuthStatusOptions, TerminalAuthLaunchOptions, } from "./probe.js";
+export { applyAcpPermissionMode, AcpPermissionModeError } from "./permission-mapping.js";
+export type { AcpPermissionMode, ApplyAcpPermissionModeOptions, AcpPermissionModeResult, AcpPermissionModeErrorCode, } from "./permission-mapping.js";
 //# sourceMappingURL=index.d.ts.map

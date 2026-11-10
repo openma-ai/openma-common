@@ -1,3 +1,5 @@
+import { normalizeSessionEvent } from "../session-events/managed.js";
+import { planManagedControlAnswer } from "./control-input-plan.js";
 import { ManagedAcpEventProjector } from "./managed-event-projector.js";
 const MANAGED_AGENTS_BETA = "managed-agents-2026-04-01";
 const DEFAULT_POLL_INTERVAL_MS = 500;
@@ -90,7 +92,7 @@ function parseEventPage(value) {
             || typeof candidate.id !== "string"
             || candidate.id.length === 0
             || typeof candidate.type !== "string"
-            || typeof candidate.processed_at !== "string") {
+            || (candidate.processed_at !== null && typeof candidate.processed_at !== "string")) {
             throw new ManagedHarnessHttpError("Session event is invalid", null);
         }
         return candidate;
@@ -133,13 +135,32 @@ function eventPrompt(event) {
             return `Tool result for ${String(event.tool_use_id ?? "unknown")}:\n${contentText(event.content)}`;
         case "user.custom_tool_result":
             return `Custom tool result for ${String(event.custom_tool_use_id ?? "unknown")}:\n${contentText(event.content)}`;
-        case "user.tool_confirmation":
-            return `Tool ${String(event.tool_use_id ?? "unknown")} was ${String(event.result ?? "answered")}.`;
+        case "session.updated":
+            return event.resume === true ? "" : null;
         case "user.define_outcome":
             return `Outcome requested: ${String(event.description ?? "")}`;
         default:
             return null;
     }
+}
+/** processed_at is acceptance time for outcomes/results/resume, not a receipt.
+ * Native source_position is authoritative whenever present. Legacy public
+ * histories retain their old timestamp behavior (they cannot prove CAS). */
+function inputConsumed(event) {
+    if (isRecord(event.source_position)) {
+        return typeof event.source_position.consumed_by_execution_id === "string"
+            && event.source_position.consumed_by_execution_id.length > 0;
+    }
+    return event.processed_at !== null;
+}
+function inputTurnId(event) {
+    const execution = isRecord(event.source_position) ? event.source_position.execution_id : undefined;
+    return typeof execution === "string" && execution.length > 0 ? execution : event.id;
+}
+function parkedIdle(event) {
+    const normalized = normalizeSessionEvent(event);
+    return normalized.kind === "turn_complete"
+        && (normalized.stopReason === "requires_action" || normalized.stopReason === "budget_reached");
 }
 function terminalEvent(event) {
     return event.type === "session.status_terminated" || event.type === "session.deleted";
@@ -280,9 +301,14 @@ export function createManagedHarnessHttpControlChannel(options) {
     const controller = new AbortController();
     const seenEventIds = new Set();
     let latestProcessedAt;
+    let nativeCursor = null;
     let activeTurnId = null;
     let pump;
     let consumed = false;
+    const continuationInputs = new Set();
+    const history = [];
+    const answerContext = [];
+    const systemContext = [];
     const request = createAuthenticatedRequester({
         apiBaseUrl: options.apiBaseUrl,
         sessionsToken: options.sessionsToken,
@@ -302,6 +328,21 @@ export function createManagedHarnessHttpControlChannel(options) {
     };
     const loadEvents = async (signal) => {
         const all = [];
+        if (options.eventReader) {
+            for (;;) {
+                const result = await options.eventReader.read({ scope: options.scope, cursor: nativeCursor, limit: 100, signal });
+                const decoded = parseEventPage({ data: result.events, next_page: null });
+                if ((decoded.data.length > 0 || result.hasMore) && (result.cursor === null || result.cursor === nativeCursor)) {
+                    throw new ManagedHarnessHttpError("Native eventReader cursor must advance", null);
+                }
+                all.push(...decoded.data);
+                nativeCursor = result.cursor;
+                if (!result.hasMore)
+                    return all;
+            }
+        }
+        // Legacy timestamp-only HTTP remains for processed histories. Queued
+        // inputs require a native reader; do not pretend mutable time is safe.
         let page = null;
         do {
             const query = new URLSearchParams({ order: "asc", limit: "100" });
@@ -313,6 +354,8 @@ export function createManagedHarnessHttpControlChannel(options) {
             const response = await request(`/v1/sessions/${encodeURIComponent(options.scope.sessionId)}/events?${query}`, { method: "GET" }, signal);
             const decoded = parseEventPage(await response.json());
             for (const event of decoded.data) {
+                if (event.processed_at === null)
+                    throw new ManagedHarnessHttpError("Queued inputs require a stable eventReader", null);
                 if (seenEventIds.has(event.id))
                     continue;
                 seenEventIds.add(event.id);
@@ -325,7 +368,23 @@ export function createManagedHarnessHttpControlChannel(options) {
         } while (page !== null);
         return all;
     };
-    const enqueueEvent = (event) => {
+    const enqueueEvent = async (event, replayOnly = false) => {
+        const answerPlan = event.type === "user.custom_tool_result" ? planManagedControlAnswer(history, event) : null;
+        if (event.type !== "user.tool_confirmation" || replayOnly)
+            history.push(event);
+        if (replayOnly) {
+            if (event.type === "user.message" && inputConsumed(event))
+                activeTurnId ??= inputTurnId(event);
+            if (event.type === "session.status_idle" && !parkedIdle(event)) {
+                activeTurnId = null;
+                answerContext.length = 0;
+            }
+            // Previously consumed partial answers still belong to the continuation.
+            if (event.type === "user.custom_tool_result" && answerPlan === "partial") {
+                answerContext.push(eventPrompt(event));
+            }
+            return false;
+        }
         if (terminalEvent(event)) {
             queue.push({ type: "session.dispose", sessionId: options.scope.sessionId });
             queue.push({ type: "control.complete", workId: options.scope.workId });
@@ -333,7 +392,10 @@ export function createManagedHarnessHttpControlChannel(options) {
             return true;
         }
         if (event.type === "session.status_idle") {
-            activeTurnId = null;
+            if (!parkedIdle(event)) {
+                activeTurnId = null;
+                answerContext.length = 0;
+            }
             return false;
         }
         if (event.type === "user.interrupt") {
@@ -349,23 +411,65 @@ export function createManagedHarnessHttpControlChannel(options) {
             }
             return false;
         }
-        const text = eventPrompt(event);
+        if (isRecord(event.source_position) && inputConsumed(event)) {
+            if (event.type === "user.message")
+                activeTurnId ??= inputTurnId(event);
+            return false;
+        }
+        if (event.type === "user.tool_confirmation") {
+            const result = await options.onToolConfirmation?.({ scope: options.scope, event, activeTurnId, signal: controller.signal });
+            if (result === "answered")
+                history.push(event);
+            return false;
+        }
+        let text = eventPrompt(event);
+        // Canonical native feeds attach source metadata; legacy public transport
+        // remains compatible until its consumers opt into the private reader.
+        if (event.type === "system.message" && isRecord(event.source_position)) {
+            if (text)
+                systemContext.push(text);
+            return false;
+        }
+        if (event.type === "user.custom_tool_result") {
+            const plan = answerPlan;
+            if (plan !== "release") {
+                await options.onInputSettled?.({ scope: options.scope, input: { eventId: event.id, event }, turnId: inputTurnId(event), reason: plan, signal: controller.signal });
+                if (plan === "partial" && text !== null)
+                    answerContext.push(text);
+                return false;
+            }
+            text = [...answerContext, text].filter(part => part !== null).join("\n\n");
+            answerContext.length = 0;
+        }
         if (text !== null) {
+            if (systemContext.length > 0) {
+                text = [...systemContext, text].join("\n\n");
+                systemContext.length = 0;
+            }
+            const input = { eventId: event.id, event };
+            if (event.type === "user.define_outcome")
+                input.outcome = {
+                    id: typeof event.outcome_id === "string" ? event.outcome_id : `outcome_${event.id}`,
+                    description: String(event.description ?? ""), rubric: event.rubric,
+                    maxIterations: event.max_iterations === undefined ? null : event.max_iterations,
+                };
             if (event.type === "user.message" && activeTurnId !== null) {
                 queue.push({
                     type: "session.steer",
                     sessionId: options.scope.sessionId,
-                    eventId: event.id,
+                    eventId: inputTurnId(event),
                     text,
+                    input,
                 });
                 return false;
             }
-            activeTurnId = event.id;
+            activeTurnId = inputTurnId(event);
             queue.push({
                 type: "session.prompt",
                 sessionId: options.scope.sessionId,
-                turnId: event.id,
+                turnId: inputTurnId(event),
                 text,
+                input,
             });
         }
         return false;
@@ -384,11 +488,12 @@ export function createManagedHarnessHttpControlChannel(options) {
         let canonicalCompletedTurnId;
         for (let index = 0; index < initial.length; index += 1) {
             const event = initial[index];
-            if (eventPrompt(event) !== null)
-                latestInputId = event.id;
+            if (event.type !== "system.message" && eventPrompt(event) !== null && inputConsumed(event))
+                latestInputId = inputTurnId(event);
             if (event.type === "session.status_idle") {
                 start = index + 1;
-                canonicalCompletedTurnId = latestInputId;
+                if (!parkedIdle(event))
+                    canonicalCompletedTurnId = latestInputId;
             }
         }
         queue.push({
@@ -401,14 +506,21 @@ export function createManagedHarnessHttpControlChannel(options) {
                 ? {}
                 : { canonicalCompletedTurnId }),
         });
-        for (const event of initial.slice(start)) {
-            if (enqueueEvent(event))
+        const pending = [];
+        for (const event of initial.slice(0, start)) {
+            if (!inputConsumed(event) && (eventPrompt(event) !== null || event.type === "user.tool_confirmation"))
+                pending.push(event);
+            else
+                await enqueueEvent(event, true);
+        }
+        for (const event of [...pending, ...initial.slice(start)]) {
+            if (await enqueueEvent(event))
                 return;
         }
         while (!signal.aborted) {
             await scheduler.sleep(pollIntervalMs, signal);
             for (const event of await loadEvents(signal)) {
-                if (enqueueEvent(event))
+                if (await enqueueEvent(event))
                     return;
             }
         }
@@ -427,6 +539,32 @@ export function createManagedHarnessHttpControlChannel(options) {
         }).finally(() => externalSignal.removeEventListener("abort", abort));
     };
     return {
+        ...(options.onBeforeDispatch ? { async beforeDispatch(command, signal, kind = "prompt") {
+                if (!command.input)
+                    throw new Error("Canonical input context is required");
+                await options.onBeforeDispatch({ scope: options.scope, command, input: command.input, signal, kind });
+                // Steering may inject into the existing prompt, so admission alone
+                // must not open a new turn/span. A confirmed prompt fallback calls
+                // this gate again with kind="prompt" before native dispatch.
+                if (options.publishTurnStartBeforeDispatch && kind === "prompt" && !continuationInputs.has(command.turnId)) {
+                    signal.throwIfAborted();
+                    const events = projector.startTurn(command.turnId);
+                    if (events.length > 0)
+                        await request(`/v1/oma/sessions/${encodeURIComponent(options.scope.sessionId)}/runtime-events`, { method: "POST", body: JSON.stringify({ events }) }, signal);
+                    signal.throwIfAborted();
+                }
+            } } : {}),
+        ...(options.onFallbackOwner ? { async fallbackOwner(command, signal) {
+                const owner = await options.onFallbackOwner({ command, signal });
+                if (owner !== null)
+                    continuationInputs.add(command.turnId);
+                return owner;
+            } } : {}),
+        ...(options.onConsumed ? { async onConsumed(command, acceptance) {
+                if (!command.input)
+                    throw new Error("Canonical input context is required");
+                await options.onConsumed({ scope: options.scope, command, input: command.input, acceptance });
+            } } : {}),
         commands(signal) {
             if (consumed)
                 throw new Error("Harness control commands may only be consumed once");

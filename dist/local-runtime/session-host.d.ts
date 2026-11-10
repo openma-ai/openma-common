@@ -1,6 +1,29 @@
 import type { AcpRuntime, SessionOptions } from "../acp-runtime/index.js";
 import type { SessionHostEvent } from "../session-kernel/index.js";
 import type { ManagedAgentsSessionCheckpointStore } from "./checkpoint.js";
+export type ManagedAgentsInputAcceptance = "prompt-dispatched" | "injected" | "startedNewTurn";
+/** Per-dispatch control-plane hooks. Neither hook creates a reservation ledger.
+ * A dispatched prompt is not proof of remote acceptance or exactly-once execution. */
+export interface ManagedAgentsInputDispatchHooks {
+    signal?: AbortSignal;
+    beforeDispatch(kind?: "prompt" | "steer"): Promise<void>;
+    onConsumed(acceptance: ManagedAgentsInputAcceptance): Promise<void>;
+    /** Wrap only a confirmed prompt fallback, after permission has settled.
+     * The supplied dispatch retains the original gate and receipt hooks. */
+    runPromptFallback?(input: ManagedAgentsSessionPromptInput, dispatch: () => Promise<void>): Promise<void>;
+}
+/** Lifecycle controls do not opt into fenced consumption semantics. */
+export interface ManagedAgentsDispatchLifecycle {
+    signal?: AbortSignal;
+    runPromptFallback?(input: ManagedAgentsSessionPromptInput, dispatch: () => Promise<void>): Promise<void>;
+}
+export declare class ManagedAgentsInputDispatchError extends Error {
+    readonly inputId: string;
+    readonly phase: "dispatch" | "receipt";
+    readonly name = "ManagedAgentsInputDispatchError";
+    readonly outcome = "unknown";
+    constructor(inputId: string, phase: "dispatch" | "receipt", cause: unknown);
+}
 export interface ManagedAgentsSessionHostDependencies {
     runtime: AcpRuntime;
     emit(event: SessionHostEvent): void;
@@ -52,8 +75,8 @@ export declare class ManagedAgentsSessionHost {
     announceAll(): void;
     activeTurnCount(): number;
     start(input: ManagedAgentsSessionStartInput): Promise<void>;
-    prompt(input: ManagedAgentsSessionPromptInput): Promise<void>;
-    steer(input: ManagedAgentsSessionSteerInput): Promise<void>;
+    prompt(input: ManagedAgentsSessionPromptInput, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void>;
+    steer(input: ManagedAgentsSessionSteerInput, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void>;
     dispose(sessionId: string): Promise<void>;
     disposeAll(): Promise<void>;
     drain(options: ManagedAgentsDrainOptions): Promise<ManagedAgentsDrainReport>;

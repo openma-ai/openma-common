@@ -18,7 +18,7 @@ class ManagedAgentsRuntimeLoop {
         this.#sink = sink;
         this.#sessionHost.announceAll();
     }
-    async dispatch(command) {
+    async dispatch(command, hooks, lifecycle) {
         switch (command.type) {
             case "session.start": {
                 if (this.#sessionHost.announce(command.sessionId))
@@ -43,14 +43,14 @@ class ManagedAgentsRuntimeLoop {
                     sessionId: command.sessionId,
                     turnId: command.turnId,
                     text: command.text,
-                });
+                }, hooks, lifecycle);
                 return;
             case "session.steer":
                 await this.#sessionHost.steer({
                     sessionId: command.sessionId,
                     eventId: command.eventId,
                     text: command.text,
-                });
+                }, hooks, lifecycle);
                 return;
             case "session.cancel":
                 await this.#sessionHost.cancel(command.sessionId, command.turnId);

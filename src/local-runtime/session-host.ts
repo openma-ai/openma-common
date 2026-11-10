@@ -9,6 +9,48 @@ import type {
   ManagedAgentsSessionCheckpointStore,
 } from "./checkpoint.js";
 
+export type ManagedAgentsInputAcceptance = "prompt-dispatched" | "injected" | "startedNewTurn";
+
+/** Per-dispatch control-plane hooks. Neither hook creates a reservation ledger.
+ * A dispatched prompt is not proof of remote acceptance or exactly-once execution. */
+export interface ManagedAgentsInputDispatchHooks {
+  signal?: AbortSignal;
+  beforeDispatch(kind?: "prompt" | "steer"): Promise<void>;
+  onConsumed(acceptance: ManagedAgentsInputAcceptance): Promise<void>;
+  /** Wrap only a confirmed prompt fallback, after permission has settled.
+   * The supplied dispatch retains the original gate and receipt hooks. */
+  runPromptFallback?(input: ManagedAgentsSessionPromptInput, dispatch: () => Promise<void>): Promise<void>;
+}
+
+/** Lifecycle controls do not opt into fenced consumption semantics. */
+export interface ManagedAgentsDispatchLifecycle {
+  signal?: AbortSignal;
+  runPromptFallback?(input: ManagedAgentsSessionPromptInput, dispatch: () => Promise<void>): Promise<void>;
+}
+
+export class ManagedAgentsInputDispatchError extends Error {
+  readonly name = "ManagedAgentsInputDispatchError";
+  readonly outcome = "unknown";
+  constructor(readonly inputId: string, readonly phase: "dispatch" | "receipt", cause: unknown) {
+    super(
+      `Input ${inputId} has unknown ${phase} outcome; do not automatically replay`,
+      { cause },
+    );
+  }
+}
+
+async function waitForPermission(wait: Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) return wait;
+  let abort!: () => void;
+  try {
+    await Promise.race([wait, new Promise<never>((_, reject) => {
+      abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+    })]);
+  } finally { signal.removeEventListener("abort", abort); }
+}
+
 export interface ManagedAgentsSessionHostDependencies {
   runtime: AcpRuntime;
   emit(event: SessionHostEvent): void;
@@ -64,8 +106,11 @@ export interface ManagedAgentsSessionSteerInput {
 
 interface ActiveSession {
   acp: AcpSession;
+  dispatchAbort: AbortController;
   turns: Map<string, AbortController>;
   completedTurns: Set<string>;
+  inputFailures: Map<string, ManagedAgentsInputDispatchError>;
+  inputDispatches: Map<string, Promise<void>>;
   checkpoint?: ManagedAgentsSessionCheckpoint;
 }
 
@@ -194,7 +239,10 @@ export class ManagedAgentsSessionHost {
     }
     this.#sessions.set(input.sessionId, {
       acp: session,
+      dispatchAbort: new AbortController(),
       turns: new Map(),
+      inputFailures: new Map(),
+      inputDispatches: new Map(),
       completedTurns: new Set(
         durableCheckpoint?.lastCompletedTurnId
           ? [durableCheckpoint.lastCompletedTurnId]
@@ -230,7 +278,7 @@ export class ManagedAgentsSessionHost {
     });
   }
 
-  async prompt(input: ManagedAgentsSessionPromptInput): Promise<void> {
+  async prompt(input: ManagedAgentsSessionPromptInput, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void> {
     const session = this.#liveSession(input.sessionId);
     if (!session) {
       this.#emit({
@@ -241,6 +289,8 @@ export class ManagedAgentsSessionHost {
       });
       return;
     }
+    const previousFailure = session.inputFailures.get(input.turnId);
+    if (previousFailure) throw previousFailure;
     if (session.completedTurns.has(input.turnId)) {
       this.#emit({
         type: "session.complete",
@@ -267,11 +317,36 @@ export class ManagedAgentsSessionHost {
     // Lease storage may yield while shutdown starts.
     if (rejectDuringDrain()) return;
     const controller = new AbortController();
+    const signal = lifecycle?.signal ?? hooks?.signal;
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
     session.turns.set(input.turnId, controller);
     let promptError: string | undefined;
+    let dispatched = false;
+    let attempted = false;
     try {
+      signal?.throwIfAborted();
+      if (hooks) {
+        hooks.signal?.throwIfAborted();
+        await waitForPermission(hooks.beforeDispatch("prompt"), hooks.signal);
+        hooks.signal?.throwIfAborted();
+        controller.signal.throwIfAborted();
+      }
+      signal?.throwIfAborted();
+      controller.signal.throwIfAborted();
+      // Every async admission/lease wait is now over. Keep this check and
+      // the ACP invocation in the same synchronous dispatch boundary.
+      if (this.#draining || this.#sessions.get(input.sessionId) !== session || !session.acp.isAlive()) {
+        throw new Error("Session no longer admits input dispatch");
+      }
+      attempted = true;
       for await (const event of session.acp.prompt(input.text, {
         abortSignal: controller.signal,
+        ...(hooks ? { onDispatched: async () => {
+          dispatched = true;
+          try { await hooks.onConsumed("prompt-dispatched"); }
+          catch (error) { throw new ManagedAgentsInputDispatchError(input.turnId, "receipt", error); }
+        } } : {}),
       })) {
         if (controller.signal.aborted) break;
         const sentinel = event as {
@@ -300,6 +375,8 @@ export class ManagedAgentsSessionHost {
           event,
         });
       }
+      if (hooks && !dispatched) throw new Error("ACP adapter did not report prompt dispatch");
+      if (hooks && promptError) throw new ManagedAgentsInputDispatchError(input.turnId, "dispatch", promptError);
       if (promptError) {
         this.#emit({
             type: "session.error",
@@ -319,6 +396,15 @@ export class ManagedAgentsSessionHost {
         });
       }
     } catch (error) {
+      if (hooks) {
+        if (attempted || error instanceof ManagedAgentsInputDispatchError) {
+          const failure = error instanceof ManagedAgentsInputDispatchError ? error : new ManagedAgentsInputDispatchError(input.turnId, "dispatch", error);
+          session.inputFailures.set(input.turnId, failure);
+          controller.abort(failure);
+          throw failure;
+        }
+        throw error;
+      }
       this.#emit({
         type: "session.error",
         sessionId: input.sessionId,
@@ -326,11 +412,12 @@ export class ManagedAgentsSessionHost {
         message: error instanceof Error ? error.message : String(error),
       });
     } finally {
+      signal?.removeEventListener("abort", abort);
       session.turns.delete(input.turnId);
     }
   }
 
-  async steer(input: ManagedAgentsSessionSteerInput): Promise<void> {
+  async steer(input: ManagedAgentsSessionSteerInput, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void> {
     const session = this.#liveSession(input.sessionId);
     if (!session) {
       this.#emit({
@@ -339,6 +426,95 @@ export class ManagedAgentsSessionHost {
         turnId: input.eventId,
         message: "no such session",
       });
+      return;
+    }
+    const failure = session.inputFailures.get(input.eventId);
+    if (failure) throw failure;
+    if (hooks && session.completedTurns.has(input.eventId)) return;
+    if (hooks) {
+      const pending = session.inputDispatches.get(input.eventId);
+      if (pending) return pending;
+      // Host disposal must revoke admission even when callers omit a signal
+      // and adapters keep reporting isAlive() after disposal.
+      const signal = hooks.signal
+        ? AbortSignal.any([hooks.signal, session.dispatchAbort.signal])
+        : session.dispatchAbort.signal;
+      const assertCurrent = () => {
+        signal.throwIfAborted();
+        if (this.#draining || this.#sessions.get(input.sessionId) !== session || !session.acp.isAlive()) {
+          throw new Error("Session changed before input dispatch");
+        }
+      };
+      const task = Promise.resolve().then(async () => {
+        const fallback = async () => {
+          if ((session.acp.openPermissionRequests ?? 0) > 0 && session.acp.whenPermissionsSettled) {
+            await waitForPermission(session.acp.whenPermissionsSettled(), signal);
+          }
+          assertCurrent();
+          const prompt = { sessionId: input.sessionId, turnId: input.eventId, text: input.text };
+          // The host admission signal only guards the pre-dispatch wait.
+          // Once submitted, the prompt retains caller cancellation and its
+          // turn controller; drain must allow its normal grace period.
+          const dispatch = () => this.prompt(prompt, {
+            ...hooks,
+            beforeDispatch: async () => {
+              assertCurrent();
+              await waitForPermission(hooks.beforeDispatch("prompt"), signal);
+              assertCurrent();
+            },
+          });
+          if (hooks.runPromptFallback) await hooks.runPromptFallback(prompt, dispatch);
+          else await dispatch();
+        };
+        if (session.turns.size === 0 || !session.acp.supportsSteering) return fallback();
+        assertCurrent();
+        await waitForPermission(hooks.beforeDispatch("steer"), signal);
+        assertCurrent();
+        let outcome;
+        try { outcome = await session.acp.steer(input.text); }
+        catch (error) {
+          const failure = new ManagedAgentsInputDispatchError(input.eventId, "dispatch", error);
+          session.inputFailures.set(input.eventId, failure);
+          throw failure;
+        }
+        if (outcome === "promptRequired") return fallback();
+        if (outcome !== "injected" && outcome !== "startedNewTurn") {
+          const failure = new ManagedAgentsInputDispatchError(input.eventId, "dispatch", outcome);
+          session.inputFailures.set(input.eventId, failure);
+          throw failure;
+        }
+        // Acceptance remains a fact even if cancellation raced the response.
+        try { await hooks.onConsumed(outcome); }
+        catch (error) {
+          const failure = new ManagedAgentsInputDispatchError(input.eventId, "receipt", error);
+          session.inputFailures.set(input.eventId, failure);
+          throw failure;
+        }
+        session.completedTurns.add(input.eventId);
+        return;
+      });
+      session.inputDispatches.set(input.eventId, task);
+      try { await task; }
+      finally { session.inputDispatches.delete(input.eventId); }
+      return;
+    }
+    if (lifecycle?.runPromptFallback) {
+      // Completion-only observers preserve legacy failed/throw fallback policy.
+      // Do not catch errors from fallback/evaluation as native steer failures.
+      const fallback = async () => {
+        if ((session.acp.openPermissionRequests ?? 0) > 0 && session.acp.whenPermissionsSettled) {
+          await waitForPermission(session.acp.whenPermissionsSettled().catch(() => undefined), lifecycle.signal);
+        }
+        lifecycle.signal?.throwIfAborted();
+        const prompt = { sessionId: input.sessionId, turnId: input.eventId, text: input.text };
+        await lifecycle.runPromptFallback!(prompt, () => this.prompt(prompt, undefined, lifecycle));
+      };
+      lifecycle.signal?.throwIfAborted();
+      if (session.turns.size === 0 || !session.acp.supportsSteering) return fallback();
+      let outcome;
+      try { outcome = await session.acp.steer(input.text); }
+      catch { return fallback(); }
+      if (outcome === "promptRequired" || outcome === "failed") await fallback();
       return;
     }
     if (session.turns.size === 0) {
@@ -390,9 +566,10 @@ export class ManagedAgentsSessionHost {
   async dispose(sessionId: string): Promise<void> {
     const session = this.#sessions.get(sessionId);
     if (session) {
+      session.dispatchAbort.abort(new Error("Session disposed"));
       for (const controller of session.turns.values()) controller.abort();
       await session.acp.dispose().catch(() => undefined);
-      this.#sessions.delete(sessionId);
+      if (this.#sessions.get(sessionId) === session) this.#sessions.delete(sessionId);
     }
     this.#resumeSessionIds.delete(sessionId);
     if (this.#checkpointStore) {
@@ -412,14 +589,20 @@ export class ManagedAgentsSessionHost {
   async disposeAll(): Promise<void> {
     const sessions = [...this.#sessions.entries()];
     await Promise.all(sessions.map(async ([sessionId, session]) => {
+      session.dispatchAbort.abort(new Error("Session disposed"));
       for (const controller of session.turns.values()) controller.abort();
       await session.acp.dispose().catch(() => undefined);
-      this.#sessions.delete(sessionId);
+      if (this.#sessions.get(sessionId) === session) this.#sessions.delete(sessionId);
     }));
   }
 
   async drain(options: ManagedAgentsDrainOptions): Promise<ManagedAgentsDrainReport> {
     this.#draining = true;
+    // Close admission immediately, not after the active-turn grace period.
+    // Already submitted steer calls still settle their acceptance receipts.
+    for (const session of this.#sessions.values()) {
+      session.dispatchAbort.abort(new Error("Session host draining"));
+    }
     const initialTurns = this.activeTurnCount();
     const sessions = this.sessionCount();
     const startedAt = this.#scheduler.now();
@@ -460,6 +643,7 @@ export class ManagedAgentsSessionHost {
     if (this.#sessions.get(sessionId) !== session || !session.turns.has(turnId)) {
       return;
     }
+    session.dispatchAbort.abort(new Error("Session no longer live"));
     this.#rememberForRecovery(sessionId, session);
     this.#sessions.delete(sessionId);
     await session.acp.dispose().catch(() => undefined);
@@ -469,6 +653,7 @@ export class ManagedAgentsSessionHost {
     const session = this.#sessions.get(sessionId);
     if (!session) return undefined;
     if (session.acp.isAlive()) return session;
+    session.dispatchAbort.abort(new Error("Session no longer live"));
     this.#rememberForRecovery(sessionId, session);
     this.#sessions.delete(sessionId);
     void session.acp.dispose().catch(() => undefined);
@@ -518,6 +703,7 @@ export class ManagedAgentsSessionHost {
       session.checkpoint = retainedCheckpoint;
       return true;
     }
+    session.dispatchAbort.abort(new Error("Session generation lease lost"));
     if (this.#sessions.get(sessionId) === session) {
       this.#sessions.delete(sessionId);
     }
@@ -545,6 +731,7 @@ export class ManagedAgentsSessionHost {
       session.checkpoint = completedCheckpoint;
       return true;
     }
+    session.dispatchAbort.abort(new Error("Session generation lease lost"));
     if (this.#sessions.get(sessionId) === session) {
       this.#sessions.delete(sessionId);
     }

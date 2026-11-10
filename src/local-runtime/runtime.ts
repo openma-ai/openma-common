@@ -21,6 +21,8 @@ export type ManagedAgentsSessionCommand =
 
 import {
   ManagedAgentsSessionHost,
+  type ManagedAgentsInputDispatchHooks,
+  type ManagedAgentsDispatchLifecycle,
   type ManagedAgentsDrainOptions,
   type ManagedAgentsDrainReport,
   type ManagedAgentsRuntimeScheduler,
@@ -46,7 +48,7 @@ export interface ManagedAgentsRuntimeDependencies {
 
 export interface ManagedAgentsRuntime {
   attach(sink: ManagedAgentsRuntimeEventSink): void;
-  dispatch(command: ManagedAgentsSessionCommand): Promise<void>;
+  dispatch(command: ManagedAgentsSessionCommand, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void>;
   drain(options: ManagedAgentsDrainOptions): Promise<ManagedAgentsDrainReport>;
   announceAll(): void;
   hasSession(sessionId: string): boolean;
@@ -76,7 +78,7 @@ class ManagedAgentsRuntimeLoop implements ManagedAgentsRuntime {
     this.#sessionHost.announceAll();
   }
 
-  async dispatch(command: ManagedAgentsSessionCommand): Promise<void> {
+  async dispatch(command: ManagedAgentsSessionCommand, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void> {
     switch (command.type) {
       case "session.start": {
         if (this.#sessionHost.announce(command.sessionId)) return;
@@ -99,14 +101,14 @@ class ManagedAgentsRuntimeLoop implements ManagedAgentsRuntime {
           sessionId: command.sessionId,
           turnId: command.turnId,
           text: command.text,
-        });
+        }, hooks, lifecycle);
         return;
       case "session.steer":
         await this.#sessionHost.steer({
           sessionId: command.sessionId,
           eventId: command.eventId,
           text: command.text,
-        });
+        }, hooks, lifecycle);
         return;
       case "session.cancel":
         await this.#sessionHost.cancel(command.sessionId, command.turnId);

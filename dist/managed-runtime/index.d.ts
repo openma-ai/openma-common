@@ -1,7 +1,9 @@
+import { type ManagedHarnessFinalizationPort } from "./finalization.js";
+export { ManagedHarnessFinalizationError, type ManagedHarnessFinalizationPort, type ManagedHarnessFinalizationContext, type ManagedHarnessFinalizationPhase, } from "./finalization.js";
 import type { AcpRuntime } from "../acp-runtime/index.js";
 import type { HarnessSupervisorHarness } from "./contracts.js";
-import { type ManagedAgentsSessionSteerCommand, type ManagedAgentsSessionPreparationPort } from "../local-runtime/index.js";
-import type { SessionCommand, SessionHostEvent, SessionStartCommand } from "../session-kernel/index.js";
+import { type ManagedAgentsSessionSteerCommand, type ManagedAgentsInputAcceptance, type ManagedAgentsSessionPreparationPort } from "../local-runtime/index.js";
+import type { SessionCommand, SessionHostEvent, SessionStartCommand, SessionPromptCommand } from "../session-kernel/index.js";
 export * from "./semantic-recovery.js";
 export * from "./managed-event-projector.js";
 export * from "./http-control.js";
@@ -12,7 +14,37 @@ export type ManagedHarnessRecoveryReason = "native-state-missing" | "native-stat
 export type ManagedHarnessSessionStartCommand = SessionStartCommand & {
     canonicalCompletedTurnId?: string;
 };
-export type ManagedHarnessControlMessage = SessionCommand | ManagedAgentsSessionSteerCommand | ManagedHarnessSessionStartCommand | {
+/** Canonical input data is not a processing receipt or an authorization grant. */
+export interface ManagedHarnessInputContext {
+    eventId: string;
+    event: Readonly<Record<string, unknown>>;
+    outcome?: {
+        id: string;
+        description: string;
+        rubric: unknown;
+        maxIterations?: number | null;
+    };
+}
+export type ManagedHarnessPromptCommand = SessionPromptCommand & {
+    input?: ManagedHarnessInputContext;
+};
+export type ManagedHarnessSteerCommand = ManagedAgentsSessionSteerCommand & {
+    input?: ManagedHarnessInputContext;
+};
+/** Runs after a successful native turn, outside the publication chain.
+ * Await all revisions and evaluation writes before returning. Only then is the
+ * canonical completion published. Revisions do not consume canonical inputs. */
+export interface ManagedHarnessTurnCompletion {
+    command: ManagedHarnessPromptCommand;
+    signal: AbortSignal;
+    runRevision(input: {
+        turnId: string;
+        text: string;
+    }): Promise<void>;
+    cancel(): Promise<void>;
+    flush(): Promise<void>;
+}
+export type ManagedHarnessControlMessage = Exclude<SessionCommand, SessionPromptCommand> | ManagedHarnessPromptCommand | ManagedHarnessSteerCommand | ManagedHarnessSessionStartCommand | {
     type: "control.complete";
     workId: string;
 };
@@ -30,6 +62,16 @@ export interface ManagedHarnessControlChannel {
     commands(signal: AbortSignal): AsyncIterable<ManagedHarnessControlMessage>;
     publish(event: ManagedHarnessPublishedEvent): Promise<void>;
     close(): Promise<void>;
+    /** Awaited in the serial prompt lane immediately before runtime dispatch.
+     * Throw to fence execution. Hosts own authorization, idempotency and receipts.
+     * This gate is not a consumption receipt. Configuring either this gate or
+     * onConsumed opts steer into fenced dispatch: failed/throw/receipt failure
+     * is unknown, not legacy automatic fallback. With neither, legacy behavior
+     * is retained. */
+    beforeDispatch?(command: ManagedHarnessPromptCommand, signal: AbortSignal, kind?: "prompt" | "steer"): Promise<void>;
+    /** Called only for a confirmed native promptRequired after steer admission. */
+    fallbackOwner?(command: ManagedHarnessPromptCommand, signal: AbortSignal): Promise<string | null>;
+    onConsumed?(command: ManagedHarnessPromptCommand, acceptance: ManagedAgentsInputAcceptance): Promise<void>;
 }
 export interface ManagedHarnessSessionStatePreparation {
     command: SessionStartCommand;
@@ -70,6 +112,9 @@ export interface ManagedAcpSupervisorHarnessOptions {
     sessionPreparation: ManagedAgentsSessionPreparationPort;
     sessionState: ManagedHarnessSessionStatePort;
     semanticRecovery?: ManagedHarnessSemanticRecoveryPort;
+    onTurnComplete?(turn: ManagedHarnessTurnCompletion): Promise<void>;
+    /** Opt in to strict pre-terminal persistence and post-terminal publication. */
+    finalization?: ManagedHarnessFinalizationPort;
     drainDeadlineMs?: number;
     drainPollIntervalMs?: number;
     abortGraceMs?: number;

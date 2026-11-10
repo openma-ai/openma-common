@@ -56,3 +56,10 @@ export type {
   ProbeAgentAuthStatusOptions,
   TerminalAuthLaunchOptions,
 } from "./probe.js";
+export { applyAcpPermissionMode, AcpPermissionModeError } from "./permission-mapping.js";
+export type {
+  AcpPermissionMode,
+  ApplyAcpPermissionModeOptions,
+  AcpPermissionModeResult,
+  AcpPermissionModeErrorCode,
+} from "./permission-mapping.js";

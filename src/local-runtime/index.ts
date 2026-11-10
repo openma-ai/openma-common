@@ -1,5 +1,9 @@
 export {
   ManagedAgentsSessionHost,
+  ManagedAgentsInputDispatchError,
+  type ManagedAgentsInputDispatchHooks,
+  type ManagedAgentsDispatchLifecycle,
+  type ManagedAgentsInputAcceptance,
   systemRuntimeScheduler,
   type ManagedAgentsDrainOptions,
   type ManagedAgentsDrainReport,

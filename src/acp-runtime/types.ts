@@ -182,7 +182,7 @@ export interface AcpSession {
   whenPermissionsSettled?(): Promise<void>;
   prompt(
     input: string | readonly schema.ContentBlock[],
-    opts?: { abortSignal?: AbortSignal },
+    opts?: { abortSignal?: AbortSignal; onDispatched?(): Promise<void> },
   ): AsyncIterable<unknown>;
   steer(input: string | readonly schema.ContentBlock[]): Promise<SteeringOutcome>;
   /** Send the standard ACP `session/cancel` input even when the active turn
