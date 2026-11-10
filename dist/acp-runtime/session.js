@@ -782,8 +782,6 @@ export class AcpSessionImpl {
         }
         options?.abortSignal?.throwIfAborted();
         this.#disposeSignal.signal.throwIfAborted();
-        if (this.#disposed)
-            throw new Error("ACP session disposed before prompt dispatch");
         const turnAbort = new AbortController();
         let rpcSettled = false;
         let receiptPending = options?.onDispatched !== undefined;
@@ -833,8 +831,6 @@ export class AcpSessionImpl {
         let timedOut = false;
         if (timeoutMs) {
             timer = setTimeout(() => {
-                if (ended && !receiptPending)
-                    return;
                 timedOut = true;
                 ended = true;
                 const message = `ACP prompt timed out after ${timeoutMs}ms`;

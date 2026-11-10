@@ -111,7 +111,7 @@ export async function applyAcpPermissionMode(
   }
   pending.add(session);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let onAbort: (() => void) | undefined;
+  let onAbort!: () => void;
   try {
     const interruption = new Promise<never>((_, reject) => {
       onAbort = () => reject(new AcpPermissionModeError("aborted", "Permission mode application aborted; remote outcome unknown", "unknown"));
@@ -149,6 +149,6 @@ export async function applyAcpPermissionMode(
     return { status: "applied", mode, nativeModeId, harnessId, version: info.version, verification: "session/set_config_option" };
   } finally {
     clearTimeout(timer);
-    if (onAbort) abortSignal?.removeEventListener("abort", onAbort);
+    abortSignal?.removeEventListener("abort", onAbort);
   }
 }

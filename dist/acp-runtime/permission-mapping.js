@@ -122,8 +122,7 @@ export async function applyAcpPermissionMode(session, options) {
     }
     finally {
         clearTimeout(timer);
-        if (onAbort)
-            abortSignal?.removeEventListener("abort", onAbort);
+        abortSignal?.removeEventListener("abort", onAbort);
     }
 }
 //# sourceMappingURL=permission-mapping.js.map
