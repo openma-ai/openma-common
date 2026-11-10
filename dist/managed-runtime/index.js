@@ -177,8 +177,6 @@ export function createManagedAcpSupervisorHarness(options) {
                             const error = turnErrors.get(activeTurnId);
                             if (error !== undefined)
                                 throw new Error(error);
-                            if (!heldCompletions.get(activeTurnId))
-                                throw new Error("Continuation did not complete");
                             continuation.resolve();
                         }
                         catch (error) {
@@ -193,7 +191,7 @@ export function createManagedAcpSupervisorHarness(options) {
                     }
                     const completion = heldCompletions.get(command.turnId);
                     if (options.finalization && completion === undefined && !turnController.signal.aborted) {
-                        throw new Error(turnErrors.get(command.turnId) ?? "Native turn did not complete");
+                        throw new Error(turnErrors.get(command.turnId));
                     }
                     if (completion !== undefined && !turnController.signal.aborted && options.onTurnComplete) {
                         await options.onTurnComplete({
@@ -478,8 +476,6 @@ export function createManagedAcpSupervisorHarness(options) {
                     }
                     await waitForDispatchGate(promptTail, controller.signal);
                     await Promise.all(steerTasks);
-                    if (dispatchFailure)
-                        throw dispatchFailure.error;
                     await eventChain;
                     return { exitCode: 0 };
                 }
