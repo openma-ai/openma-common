@@ -19,6 +19,9 @@ export declare class ManagedAcpEventProjector {
     #private;
     private readonly options;
     constructor(options: ManagedAcpEventProjectorOptions);
+    /** Explicit managed-adapter start boundary, before a native permission
+     * callback can publish a pause. Legacy consumers still start on first event. */
+    startTurn(turnId: string): ManagedRuntimeEventWire[];
     project(event: SessionHostEvent): ManagedRuntimeEventWire[];
 }
 //# sourceMappingURL=managed-event-projector.d.ts.map

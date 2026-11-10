@@ -308,3 +308,14 @@ describe("ManagedAcpEventProjector", () => {
     ]));
   });
 });
+
+it("can establish turn start before native callbacks without emitting a late running twice", () => {
+  const projector = fixtureProjector();
+  expect(projector.startTurn("turn_1").map(event => event.type))
+    .toEqual(["session.status_running", "span.model_request_start"]);
+  expect(projector.startTurn("turn_1")).toEqual([]);
+  const updates = projector.project(stream("turn_1", {sessionUpdate:"tool_call",toolCallId:"tool",title:"Read",kind:"read",status:"pending",rawInput:{}}));
+  expect(updates.some(event=>event.type === "session.status_running")).toBe(false);
+  projector.project({type:"session.complete",sessionId:"session_1",turnId:"turn_1"});
+  expect(projector.startTurn("turn_1")).toEqual([]);
+});

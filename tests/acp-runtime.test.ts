@@ -18,6 +18,134 @@ import {
 import type { ChildHandle } from "../src/acp-runtime/types.js";
 
 describe("shared ACP session runtime", () => {
+  it("never dispatches when admission has exhausted the per-turn time budget", async () => {
+    let calls = 0;
+    const harness = createHarness(() => ({
+      async initialize() { return { protocolVersion: PROTOCOL_VERSION }; },
+      async newSession() { return { sessionId: "expired-admission" }; },
+      async prompt() { calls++; return { stopReason: "end_turn" }; },
+      async cancel() {}, async authenticate() { return {}; },
+    }));
+    const session = new AcpSessionImpl({ child: harness.child, id: "expired-admission", options: {
+      agent: { command: "fake" }, perTurnTimeoutMs: 100,
+    } });
+    try {
+      await session.init();
+      // Advance only the wall clock between admission and submission; no
+      // timer or RPC is fabricated, and no model request may cross the bound.
+      const clock = vi.spyOn(Date, "now").mockReturnValueOnce(1000).mockReturnValue(1100);
+      const events: unknown[] = [];
+      try { for await (const event of session.prompt("expired")) events.push(event); }
+      finally { clock.mockRestore(); }
+      expect(calls).toBe(0);
+      expect(events).toEqual([expect.objectContaining({ type: "promptError", error: expect.stringContaining("timed out after 100ms") })]);
+    } finally { await session.dispose(); }
+  });
+
+  it("releases a successful delayed receipt after RPC completion and admits the next prompt", async () => {
+    let release!: () => void;
+    const receipt = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    const harness = createHarness(() => ({
+      async initialize() { return { protocolVersion: PROTOCOL_VERSION }; },
+      async newSession() { return { sessionId: "delayed-success" }; },
+      async prompt() { calls++; return { stopReason: "end_turn" }; },
+      async cancel() {}, async authenticate() { return {}; },
+    }));
+    const session = new AcpSessionImpl({ child: harness.child, id: "delayed-success", options: { agent: { command: "fake" } } });
+    let finished = false;
+    const events: unknown[] = [];
+    let running: Promise<void> | undefined;
+    try {
+      await session.init();
+      running = (async () => {
+        for await (const event of session.prompt("first", { onDispatched: () => receipt })) events.push(event);
+        finished = true;
+      })();
+      await vi.waitFor(() => expect(calls).toBe(1));
+      expect(finished).toBe(false);
+      release(); await running;
+      expect(events.filter(event => (event as { type?: string }).type === "promptComplete")).toHaveLength(1);
+      for await (const event of session.prompt("second")) events.push(event);
+      expect(calls).toBe(2);
+      expect(events.filter(event => (event as { type?: string }).type === "promptComplete")).toHaveLength(2);
+    } finally { release(); await running; await session.dispose(); }
+  });
+
+  it("awaits the actual prompt dispatch receipt before exposing stream completion", async () => {
+    let receipts = 0, prompts = 0;
+    const harness = createHarness(() => ({
+      async initialize() { return { protocolVersion: PROTOCOL_VERSION }; },
+      async newSession() { return { sessionId: "dispatch" }; },
+      async prompt() { prompts += 1; return { stopReason: "end_turn" }; },
+      async cancel() {}, async authenticate() { return {}; },
+    }));
+    const session = new AcpSessionImpl({ child: harness.child, id: "dispatch", options: { agent: { command: "fake-agent" } } });
+    try {
+      await session.init();
+      const events: unknown[] = [];
+      const run = async () => { for await (const event of session.prompt("hello", {
+        onDispatched: async () => { receipts += 1; throw new Error("receipt offline"); },
+      })) events.push(event); };
+      await expect(run()).rejects.toThrow("receipt offline");
+      expect(receipts).toBe(1);
+      await vi.waitFor(() => expect(prompts).toBe(1));
+      expect(events).toEqual([]);
+    } finally { await session.dispose(); }
+  });
+
+  it("isolates late output from a receipt-failed prompt before admitting the next prompt", async () => {
+    let releaseOld!: () => void; const old = new Promise<void>(r => { releaseOld = r; });
+    let calls = 0;
+    const harness = createHarness(conn => ({
+      async initialize() { return { protocolVersion: PROTOCOL_VERSION }; },
+      async newSession() { return { sessionId: "isolation" }; },
+      async prompt() {
+        const n = ++calls; if (n === 1) await old;
+        await conn.sessionUpdate({ sessionId: "isolation", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: n === 1 ? "OLD" : "NEW" } } });
+        return { stopReason: "end_turn" };
+      },
+      async cancel() {}, async authenticate() { return {}; },
+    }));
+    const session = new AcpSessionImpl({ child: harness.child, id: "isolation", options: { agent: { command: "fake-agent" } } });
+    try {
+      await session.init();
+      await expect(async () => { for await (const _ of session.prompt("old", { onDispatched: async () => { throw new Error("receipt offline"); } })) {} }).rejects.toThrow("receipt offline");
+      await vi.waitFor(() => expect(calls).toBe(1));
+      const events: unknown[] = [];
+      const next = (async () => { for await (const event of session.prompt("new")) events.push(event); })();
+      await new Promise(r => setTimeout(r, 10));
+      expect(calls).toBe(1); // New submission waits for the old RPC, not just cancel().
+      releaseOld(); await next;
+      expect(events).toContainEqual(expect.objectContaining({ content: { type: "text", text: "NEW" } }));
+      expect(events).not.toContainEqual(expect.objectContaining({ content: { type: "text", text: "OLD" } }));
+      expect(events.filter(e => (e as { type?: string }).type === "promptComplete")).toHaveLength(1);
+    } finally { releaseOld(); await session.dispose(); }
+  });
+
+  it.each(["timeout", "abort", "dispose"] as const)("failed receipt drain is bounded by %s and never sends late", async mode => {
+    let release!: () => void; const old = new Promise<void>(r => { release = r; }); let calls = 0;
+    const harness = createHarness(() => ({
+      async initialize() { return { protocolVersion: PROTOCOL_VERSION }; },
+      async newSession() { return { sessionId: "bounded" }; },
+      async prompt() { calls++; await old; return { stopReason: "end_turn" }; },
+      async cancel() {}, async authenticate() { return {}; },
+    }));
+    const session = new AcpSessionImpl({ child: harness.child, id: "bounded", options: { agent: { command: "fake" }, perTurnTimeoutMs: mode === "timeout" ? 20 : 1000 } });
+    const abort = new AbortController(); const events: unknown[] = []; let settled = false;
+    try {
+      await session.init();
+      await expect(async () => { for await (const _ of session.prompt("old", { onDispatched: async () => { throw new Error("receipt offline"); } })) {} }).rejects.toThrow("receipt offline");
+      const next = (async () => { for await (const event of session.prompt("new", { abortSignal: abort.signal })) events.push(event); })().catch(() => {}).finally(() => { settled = true; });
+      if (mode === "abort") abort.abort();
+      if (mode === "dispose") await session.dispose();
+      await new Promise(r => setTimeout(r, 60));
+      expect(settled).toBe(true);
+      if (mode === "timeout") expect(events).toContainEqual(expect.objectContaining({ type: "promptError", error: expect.stringContaining("timed out") }));
+      release(); await next; expect(calls).toBe(1);
+    } finally { release(); await session.dispose(); }
+  });
+
   // Replacing the RPC rejection with only String(error) loses the machine-
   // readable reason that hosts need to distinguish authentication from failure.
   it.each([

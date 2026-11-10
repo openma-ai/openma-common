@@ -71,6 +71,7 @@ export declare class AcpSessionImpl implements AcpSession {
     rejectNes(params: nes.RejectNesNotification): Promise<void>;
     prompt(input: string | readonly schema.ContentBlock[], options?: {
         abortSignal?: AbortSignal;
+        onDispatched?(): Promise<void>;
     }): AsyncIterable<unknown>;
     steer(input: string | readonly schema.ContentBlock[]): Promise<SteeringOutcome>;
     cancelCurrentTurn(): Promise<void>;

@@ -14,7 +14,7 @@ interface AcpSessionFixtureOptions {
   steer?(input: string): ReturnType<AcpSession["steer"]>;
   prompt?(
     input: string,
-    options?: { abortSignal?: AbortSignal },
+    options?: { abortSignal?: AbortSignal; onDispatched?(): Promise<void> },
   ): AsyncIterable<unknown>;
   dispose?(): Promise<void>;
 }

@@ -79,6 +79,14 @@ export class ManagedAcpEventProjector {
 
   constructor(private readonly options: ManagedAcpEventProjectorOptions) {}
 
+  /** Explicit managed-adapter start boundary, before a native permission
+   * callback can publish a pause. Legacy consumers still start on first event. */
+  startTurn(turnId: string): ManagedRuntimeEventWire[] {
+    if (this.#completedTurns.has(turnId)) return [];
+    const { turn, opened } = this.#turn(turnId);
+    return opened ? this.#openTurn(turn) : [];
+  }
+
   project(event: SessionHostEvent): ManagedRuntimeEventWire[] {
     switch (event.type) {
       case "session.ready":

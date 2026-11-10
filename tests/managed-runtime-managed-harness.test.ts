@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createManagedAcpSupervisorHarness,
+  ManagedAcpEventProjector,
   type ManagedHarnessControlChannel,
   type ManagedHarnessControlMessage,
   type ManagedHarnessPublishedEvent,
@@ -58,7 +59,9 @@ function abruptlyClosedChannel(
 function fakeAcpRuntime(log: string[], hooks: {
   promptGate?: Promise<void>;
   promptError?: Error;
-  onPromptStarted?(): void;
+  onPromptStarted?(text: string): void;
+  promptGateFor?(text: string): Promise<void>;
+  onCancel?(): void;
   onSteer?(text: string): void;
 } = {}): AcpRuntime {
   return {
@@ -93,10 +96,13 @@ function fakeAcpRuntime(log: string[], hooks: {
         // Every ACP harness admitted by OpenMA supports steering. Tests that
         // do not care about a steer still model a conforming agent.
         supportsSteering: true,
-        async *prompt(text: string | readonly unknown[]) {
+        async *prompt(text: string | readonly unknown[], options?: { abortSignal?: AbortSignal; onDispatched?(): Promise<void> }) {
+          options?.abortSignal?.addEventListener("abort", () => hooks.onCancel?.(), { once: true });
           log.push(`acp:prompt:${String(text)}`);
-          hooks.onPromptStarted?.();
+          await options?.onDispatched?.();
+          hooks.onPromptStarted?.(String(text));
           await hooks.promptGate;
+          await hooks.promptGateFor?.(String(text));
           if (hooks.promptError !== undefined) throw hooks.promptError;
           yield { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "ok" } };
           yield {
@@ -774,6 +780,186 @@ describe("managed ACP harness in sandbox", () => {
       sessionState: inertState(),
       ...timing,
     })).toThrow(message);
+  });
+});
+
+describe("managed dispatch and completion extensions", () => {
+  const start: ManagedHarnessControlMessage = { type: "session.start", sessionId: scope.sessionId, agentId: "acp", runtime: "cloud" };
+  const prompt = (id: string): ManagedHarnessControlMessage => ({ type: "session.prompt", sessionId: scope.sessionId, turnId: id, text: id });
+  const setup = (channel: ManagedHarnessControlChannel, log: string[], extra: Partial<Parameters<typeof createManagedAcpSupervisorHarness>[0]> = {}) => createManagedAcpSupervisorHarness({
+    connect: async () => channel, acpRuntime: fakeAcpRuntime(log), sessionPreparation: { async prepare() { return { agent: { command: "acp" } }; } }, sessionState: inertState(), ...extra,
+  });
+
+  it("awaits consumption in prompt order and does not consume a waiting prompt", async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { channel } = commandChannel([start, prompt("first"), prompt("second")], log);
+    channel.beforeDispatch = async command => { log.push("consume:" + command.turnId); await gate; };
+    const run = await startHarness(setup(channel, log));
+    await vi.waitFor(() => expect(log).toContain("consume:first"));
+    expect(log).not.toContain("consume:second");
+    expect(log.filter(item => item.startsWith("acp:prompt:"))).toEqual([]);
+    release();
+    await run.completed;
+    expect(log.indexOf("acp:prompt:first")).toBeLessThan(log.indexOf("consume:second"));
+    expect(log.indexOf("consume:second")).toBeLessThan(log.indexOf("acp:prompt:second"));
+    await run.drain();
+  });
+
+  it("fails closed at the consumption hook and retries the same input identity", async () => {
+    const ids: string[] = [];
+    for (const fails of [true, false]) {
+      const log: string[] = [];
+      const { channel } = commandChannel([start, prompt("stable")], log);
+      channel.beforeDispatch = async command => { ids.push(command.turnId); if (fails) throw new Error("fenced"); };
+      const run = await startHarness(setup(channel, log));
+      if (fails) {
+        await expect(run.completed).rejects.toThrow("fenced");
+        expect(log).not.toContain("acp:prompt:stable");
+        await run.stop("failed");
+      } else { await run.completed; await run.drain(); }
+    }
+    expect(ids).toEqual(["stable", "stable"]);
+  });
+
+  it("reports hook failure even while the HTTP-like command stream stays open", async () => {
+    const log: string[] = [];
+    const { channel } = commandChannel([], log);
+    channel.commands = async function* (signal) {
+      yield start;
+      yield prompt("fenced");
+      await new Promise<void>(resolve => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    };
+    channel.beforeDispatch = async () => { throw new Error("lost work fence"); };
+    const run = await startHarness(setup(channel, log));
+    let result: unknown;
+    void run.completed.catch(error => { result = error; });
+    try {
+      await vi.waitFor(() => expect(result).toBeInstanceOf(Error));
+      expect((result as Error).message).toBe("lost work fence");
+      expect(log).not.toContain("acp:prompt:fenced");
+    } finally { await run.stop("failed"); }
+  });
+
+  it("keeps hooked native steer live and awaits its receipt before control completion", async () => {
+    const log: string[] = [];
+    let release!: () => void, received!: () => void;
+    const receipt = new Promise<void>(resolve => { received = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { channel } = commandChannel([start, prompt("active"), { type: "session.steer", sessionId: scope.sessionId, eventId: "steer", text: "steer" }], log);
+    channel.beforeDispatch = async command => { log.push("gate:" + command.turnId); };
+    channel.onConsumed = async (command, acceptance) => {
+      log.push("receipt:" + command.turnId + ":" + acceptance);
+      if (command.turnId === "steer") await receipt;
+    };
+    const run = await startHarness(setup(channel, log, { acpRuntime: fakeAcpRuntime(log, { promptGate: gate }) }));
+    let done = false; void run.completed.then(() => { done = true; });
+    try {
+      await vi.waitFor(() => expect(log).toContain("receipt:steer:injected"));
+      expect(log).toContain("acp:steer:steer");
+      expect(log).not.toContain("acp:prompt:steer");
+      release(); await new Promise(resolve => setTimeout(resolve, 0));
+      expect(done).toBe(false);
+      received(); await run.completed;
+    } finally { release(); received(); await run.stop("aborted"); }
+  });
+
+  it("does not dispatch a queued input cancelled before its consumption hook", async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { channel } = commandChannel([start, prompt("first"), prompt("second"), { type: "session.cancel", sessionId: scope.sessionId, turnId: "second" }], log);
+    channel.beforeDispatch = async command => { log.push("consume:" + command.turnId); };
+    const run = await startHarness(setup(channel, log, { acpRuntime: fakeAcpRuntime(log, { promptGate: gate }) }));
+    await vi.waitFor(() => expect(log).toContain("acp:prompt:first"));
+    release();
+    await run.completed;
+    expect(log).not.toContain("consume:second");
+    expect(log).not.toContain("acp:prompt:second");
+    await run.drain();
+  });
+
+  it("runs two revisions outside the event chain and publishes only the final canonical completion", async () => {
+    const log: string[] = [];
+    const canonical = { eventId: "outcome", event: { id: "outcome", type: "user.define_outcome", processed_at: null }, outcome: { id: "goal", description: "ship", rubric: { checks: ["tests"] }, maxIterations: 3 } };
+    const { channel, published } = commandChannel([start, { ...prompt("outcome"), input: canonical } as ManagedHarnessControlMessage], log);
+    const run = await startHarness(setup(channel, log, {
+      async onTurnComplete({ command, runRevision, flush }) {
+        expect(command.input).toEqual(canonical);
+        expect(command.turnId).toBe("outcome");
+        expect(published.filter(event => event.type === "session.complete")).toHaveLength(0);
+        await runRevision({ turnId: "revision-1", text: "revise 1" });
+        await flush();
+        expect(published.filter(event => event.type === "session.complete")).toHaveLength(0);
+        await runRevision({ turnId: "revision-2", text: "revise 2" });
+        log.push("evaluation:done");
+      },
+    }));
+    await run.completed;
+    expect(log.filter(entry => entry.startsWith("acp:prompt:"))).toEqual(["acp:prompt:outcome", "acp:prompt:revise 1", "acp:prompt:revise 2"]);
+    expect(published.filter(event => event.type === "session.complete")).toEqual([{ type: "session.complete", sessionId: scope.sessionId, turnId: "outcome" }]);
+    expect(log.indexOf("evaluation:done")).toBeLessThan(log.indexOf("publish:session.complete"));
+    let id = 0;
+    const projector = new ManagedAcpEventProjector({ nextEventId: () => `e${++id}`, now: () => new Date(0) });
+    const wire = published.flatMap(event => event.type === "session.warning" ? [] : projector.project(event));
+    expect(wire.filter(event => event.type === "session.status_idle")).toHaveLength(1);
+    await run.drain();
+  });
+
+  it("routes a canonical cancel to the active internal revision", async () => {
+    const log: string[] = [];
+    let began!: () => void;
+    const revisionStarted = new Promise<void>(resolve => { began = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const { channel } = commandChannel([], log);
+    channel.commands = async function* () {
+      yield start;
+      yield prompt("outcome");
+      await revisionStarted;
+      yield { type: "session.cancel", sessionId: scope.sessionId, turnId: "outcome" };
+      yield { type: "control.complete", workId: scope.workId };
+    };
+    const run = await startHarness(setup(channel, log, {
+      acpRuntime: fakeAcpRuntime(log, {
+        promptGateFor: async text => { if (text === "revision") { began(); await gate; } },
+        onCancel: () => { log.push("revision:cancelled"); release(); },
+      }),
+      async onTurnComplete({ runRevision, signal }) {
+        await runRevision({ turnId: "revision-1", text: "revision" });
+        expect(signal.aborted).toBe(true);
+      },
+    }));
+    try {
+      await vi.waitFor(() => expect(log).toContain("revision:cancelled"));
+      await run.completed;
+    } finally { release(); await run.stop("aborted"); }
+  });
+
+  it("cancels outcome evaluation before any further revision and flushes before completion", async () => {
+    const log: string[] = [];
+    const { channel, published } = commandChannel([start, prompt("outcome")], log);
+    const run = await startHarness(setup(channel, log, {
+      async onTurnComplete({ cancel, signal, runRevision, flush }) {
+        log.push("evaluation:cancel");
+        await cancel();
+        expect(signal.aborted).toBe(true);
+        await expect(runRevision({ turnId: "forbidden", text: "no" })).rejects.toThrow();
+        await flush();
+        expect(published.filter(event => event.type === "session.complete")).toHaveLength(0);
+      },
+    }));
+    await run.completed;
+    expect(log).toContain("evaluation:cancel");
+    expect(log).not.toContain("acp:prompt:no");
+    // Cancelling the outcome also cancels the owning turn. Flushing prior
+    // output must not revive its held successful completion.
+    expect(published.filter(event => event.type === "session.complete")).toHaveLength(0);
+    await run.drain();
   });
 });
 

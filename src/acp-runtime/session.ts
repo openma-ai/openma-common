@@ -40,6 +40,7 @@ export interface AcpSessionConstructOptions {
 }
 
 type ChildExit = Awaited<ChildHandle["exited"]>;
+class DispatchReceiptFailure { constructor(readonly error: unknown) {} }
 
 export class AcpSessionImpl implements AcpSession {
   readonly id: string;
@@ -55,6 +56,9 @@ export class AcpSessionImpl implements AcpSession {
   #disposed = false;
   #acceptOutOfBandUpdates = false;
   #activePromptCount = 0;
+  #discardFailedPromptEvents = false;
+  #failedPromptDrain: Promise<void> | undefined;
+  readonly #disposeSignal = new AbortController();
   #pendingEvents: unknown[] = [];
   #waiters: Array<(value: IteratorResult<unknown>) => void> = [];
   #authMethods: readonly schema.AuthMethod[] = [];
@@ -627,6 +631,7 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   #receiveInboundEvent(event: unknown, allowedBeforeSessionReady = false): void {
+    if (this.#discardFailedPromptEvents) return;
     this.#applySessionStateUpdate(event);
     if (this.#activePromptCount === 0) {
       if (!this.#acceptOutOfBandUpdates && !allowedBeforeSessionReady) return;
@@ -875,7 +880,7 @@ export class AcpSessionImpl implements AcpSession {
 
   prompt(
     input: string | readonly schema.ContentBlock[],
-    options?: { abortSignal?: AbortSignal },
+    options?: { abortSignal?: AbortSignal; onDispatched?(): Promise<void> },
   ): AsyncIterable<unknown> {
     if (this.#disposed) throw new Error(`AcpSession ${this.id} is disposed`);
     return this.#guardPrompt(this.#prompt(input, options));
@@ -885,6 +890,7 @@ export class AcpSessionImpl implements AcpSession {
     try {
       yield* stream;
     } catch (error) {
+      if (error instanceof DispatchReceiptFailure) throw error.error;
       const exit = this.#childExit ?? await settledChildExit(this.#child.exited);
       if (exit || isBrokenPipe(error)) {
         throw agentProcessExitError(this.options.agent.command, exit, error);
@@ -937,15 +943,62 @@ export class AcpSessionImpl implements AcpSession {
 
   async *#prompt(
     input: string | readonly schema.ContentBlock[],
-    options?: { abortSignal?: AbortSignal },
+    options?: { abortSignal?: AbortSignal; onDispatched?(): Promise<void> },
   ): AsyncIterable<unknown> {
+    // ACP updates carry no turn ID: do not admit another prompt until the
+    // receipt-failed RPC has settled and its old output has been discarded.
+    const startedAt = Date.now();
+    if (this.#failedPromptDrain) {
+      // Even without a configured normal turn limit, failed-stream admission
+      // must be finite. Never clear the isolation fence on wait timeout.
+      const drainTimeoutMs = this.options.perTurnTimeoutMs || 30_000;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort!: () => void;
+      let onDispose!: () => void;
+      try {
+        options?.abortSignal?.throwIfAborted();
+        this.#disposeSignal.signal.throwIfAborted();
+        const result = await Promise.race([
+          this.#failedPromptDrain.then(() => "drained" as const),
+          new Promise<"timeout">((resolve) => { timer = setTimeout(() => resolve("timeout"), drainTimeoutMs); }),
+          new Promise<never>((_, reject) => {
+            onAbort = () => reject(options?.abortSignal?.reason);
+            onDispose = () => reject(this.#disposeSignal.signal.reason);
+            options?.abortSignal?.addEventListener("abort", onAbort, { once: true });
+            this.#disposeSignal.signal.addEventListener("abort", onDispose, { once: true });
+          }),
+        ]);
+        if (result === "timeout") {
+          const message = `ACP prompt timed out after ${drainTimeoutMs}ms`;
+          yield { type: "promptError", error: `Error: ${message}`, errorDetails: { message } };
+          return;
+        }
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (onAbort) options?.abortSignal?.removeEventListener("abort", onAbort);
+        if (onDispose) this.#disposeSignal.signal.removeEventListener("abort", onDispose);
+      }
+    }
+    options?.abortSignal?.throwIfAborted();
+    this.#disposeSignal.signal.throwIfAborted();
+    if (this.#disposed) throw new Error("ACP session disposed before prompt dispatch");
     const turnAbort = new AbortController();
+    let rpcSettled = false;
+    let receiptPending = options?.onDispatched !== undefined;
     const onAbort = () => {
+      if (rpcSettled) return; // Local receipt cancellation is not remote cancellation.
       Promise.resolve(this.#agent.cancel({ sessionId: this.#sessionId }))
         .catch(() => {});
     };
-    const abortTurn = () => turnAbort.abort();
+    const abortTurn = () => turnAbort.abort(options?.abortSignal?.reason);
+    const onDispose = () => turnAbort.abort(this.#disposeSignal.signal.reason);
     const timeoutMs = this.options.perTurnTimeoutMs;
+    const remainingTimeoutMs = timeoutMs ? Math.max(0, timeoutMs - (Date.now() - startedAt)) : undefined;
+    if (remainingTimeoutMs === 0) {
+      const message = `ACP prompt timed out after ${timeoutMs}ms`;
+      yield { type: "promptError", error: `Error: ${message}`, errorDetails: { message } };
+      return;
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     let turnFinished = false;
     const finishTurn = () => {
@@ -954,9 +1007,11 @@ export class AcpSessionImpl implements AcpSession {
       this.#activePromptCount = Math.max(0, this.#activePromptCount - 1);
       if (timer) clearTimeout(timer);
       options?.abortSignal?.removeEventListener("abort", abortTurn);
+      this.#disposeSignal.signal.removeEventListener("abort", onDispose);
     };
     options?.abortSignal?.addEventListener("abort", abortTurn, { once: true });
     turnAbort.signal.addEventListener("abort", onAbort, { once: true });
+    if (receiptPending) this.#disposeSignal.signal.addEventListener("abort", onDispose, { once: true });
     if (options?.abortSignal?.aborted) turnAbort.abort();
 
     this.#activePromptCount += 1;
@@ -964,17 +1019,21 @@ export class AcpSessionImpl implements AcpSession {
     const done = Promise.resolve(
       this.#agent.prompt({ sessionId: this.#sessionId, prompt }),
     )
-      .finally(finishTurn);
+      .finally(() => {
+        rpcSettled = true;
+        // RPC completion does not end the dispatch receipt's lifecycle.
+        if (!receiptPending) finishTurn();
+      });
 
     let ended = false;
     let timedOut = false;
     if (timeoutMs) {
       timer = setTimeout(() => {
-        if (ended) return;
+        if (ended && !receiptPending) return;
         timedOut = true;
         ended = true;
-        turnAbort.abort();
         const message = `ACP prompt timed out after ${timeoutMs}ms`;
+        turnAbort.abort(new Error(message));
         this.#pushEvent({
           type: "promptError",
           error: `Error: ${message}`,
@@ -982,7 +1041,7 @@ export class AcpSessionImpl implements AcpSession {
         });
         this.#endStream();
         finishTurn();
-      }, timeoutMs);
+      }, remainingTimeoutMs);
     }
     void done.then(
       (response) => {
@@ -1014,6 +1073,38 @@ export class AcpSessionImpl implements AcpSession {
       },
     );
 
+    // The RPC has been submitted, but remote acceptance is not implied.
+    // Observe done above before awaiting receipt so RPC rejection cannot leak.
+    if (options?.onDispatched) {
+      let onReceiptAbort!: () => void;
+      try {
+        // Once submitted, cancellation only bounds local waiting. The receipt
+        // and RPC remain observed, and failure is surfaced as unknown upstream.
+        await Promise.race([options.onDispatched(), new Promise<never>((_, reject) => {
+          onReceiptAbort = () => reject(turnAbort.signal.reason);
+          if (turnAbort.signal.aborted) onReceiptAbort();
+          else turnAbort.signal.addEventListener("abort", onReceiptAbort, { once: true });
+        })]);
+        receiptPending = false;
+        if (rpcSettled) finishTurn();
+      }
+      catch (error) {
+        ended = true;
+        this.#discardFailedPromptEvents = true;
+        this.#pendingEvents.length = 0;
+        this.#failedPromptDrain = done.catch(() => undefined).then(() => {
+          this.#pendingEvents.length = 0;
+          this.#discardFailedPromptEvents = false;
+          this.#failedPromptDrain = undefined;
+        });
+        turnAbort.abort();
+        finishTurn();
+        throw new DispatchReceiptFailure(error);
+      } finally {
+        if (onReceiptAbort) turnAbort.signal.removeEventListener("abort", onReceiptAbort);
+      }
+    }
+
     while (true) {
       if (this.#pendingEvents.length > 0) {
         yield this.#pendingEvents.shift();
@@ -1033,6 +1124,7 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   dispose(): Promise<void> {
+    this.#disposeSignal.abort(new Error("ACP session disposed"));
     this.#disposePromise ??= this.#disposeOnce();
     return this.#disposePromise;
   }
@@ -1052,6 +1144,7 @@ export class AcpSessionImpl implements AcpSession {
   }
 
   #pushEvent(event: unknown): void {
+    if (this.#discardFailedPromptEvents) return;
     this.#pendingEvents.push(event);
     this.#waiters.shift()?.({ value: undefined, done: false });
   }

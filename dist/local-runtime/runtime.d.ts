@@ -7,7 +7,7 @@ export interface ManagedAgentsSessionSteerCommand {
     text: string;
 }
 export type ManagedAgentsSessionCommand = SessionCommand | ManagedAgentsSessionSteerCommand;
-import { type ManagedAgentsDrainOptions, type ManagedAgentsDrainReport, type ManagedAgentsRuntimeScheduler } from "./session-host.js";
+import { type ManagedAgentsInputDispatchHooks, type ManagedAgentsDispatchLifecycle, type ManagedAgentsDrainOptions, type ManagedAgentsDrainReport, type ManagedAgentsRuntimeScheduler } from "./session-host.js";
 import type { ManagedAgentsSessionCheckpointStore } from "./checkpoint.js";
 export interface ManagedAgentsSessionPreparationPort {
     prepare(command: SessionStartCommand): Promise<SessionOptions>;
@@ -25,7 +25,7 @@ export interface ManagedAgentsRuntimeDependencies {
 }
 export interface ManagedAgentsRuntime {
     attach(sink: ManagedAgentsRuntimeEventSink): void;
-    dispatch(command: ManagedAgentsSessionCommand): Promise<void>;
+    dispatch(command: ManagedAgentsSessionCommand, hooks?: ManagedAgentsInputDispatchHooks, lifecycle?: ManagedAgentsDispatchLifecycle): Promise<void>;
     drain(options: ManagedAgentsDrainOptions): Promise<ManagedAgentsDrainReport>;
     announceAll(): void;
     hasSession(sessionId: string): boolean;
